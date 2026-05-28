@@ -1,0 +1,883 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EmpresaEstado {
+  activa
+  inactiva
+  suspendida
+}
+
+enum UsuarioEstado {
+  activo
+  inactivo
+  bloqueado
+}
+
+enum EmpresaUsuarioEstado {
+  activo
+  inactivo
+  invitado
+}
+
+enum CategoriaProducto {
+  ropa
+  zapatillas
+  accesorios
+  ropa_interior_lenceria
+  medias_calcetines
+  ropa_deportiva
+  ropa_bano
+  uniformes_workwear
+}
+
+enum CanalConocimiento {
+  instagram
+  tiktok
+  facebook
+  youtube
+  google
+  whatsapp
+  recomendacion
+  otro
+}
+
+enum SucursalTipo {
+  tienda
+  almacen
+}
+
+enum SucursalEstado {
+  activo
+  inactivo
+}
+
+enum MetodoPagoEstado {
+  activo
+  inactivo
+}
+
+enum ClienteTipoDocumento {
+  dni
+  ruc
+  sin_documento
+}
+
+enum ClienteEstado {
+  activo
+  inactivo
+}
+
+enum VentaTipoComprobante {
+  nota_venta
+  factura
+  boleta
+}
+
+enum VentaEstado {
+  pendiente
+  completada
+  anulada
+}
+
+enum VentaDescuentoTipo {
+  porcentaje
+  monto
+}
+
+enum VentaPagoEstado {
+  activo
+  anulado
+}
+
+enum CajaSesionEstado {
+  abierta
+  cerrada
+}
+
+enum CajaMovimientoTipo {
+  apertura
+  venta
+  ingreso
+  retiro
+  anulacion_venta
+}
+
+enum CotizacionEstado {
+  borrador
+  enviada
+  aceptada
+  rechazada
+  vencida
+  convertida
+  anulada
+}
+
+enum SunatAmbiente {
+  BETA
+  PRODUCCION
+}
+
+enum SunatEndpointCodigo {
+  BILL_SERVICE
+  CONSULTA_TICKET
+  API_TOKEN
+  API_CPE
+}
+
+model Empresa {
+  id                         BigInt                     @id @default(autoincrement())
+  nombreComercial            String                     @map("nombre_comercial") @db.VarChar(150)
+  tipoNegocio                String?                    @map("tipo_negocio") @db.VarChar(80)
+  categoriasProducto         CategoriaProducto[]        @default([]) @map("categorias_producto")
+  razonSocial                String?                    @map("razon_social") @db.VarChar(200)
+  ruc                        String?                    @unique @db.VarChar(20)
+  telefono                   String?                    @db.VarChar(30)
+  email                      String?                    @db.VarChar(150)
+  direccion                  String?
+  comoConocio                CanalConocimiento?         @map("como_conocio")
+  comoConocioOtro            String?                    @map("como_conocio_otro") @db.VarChar(100)
+  estado                     EmpresaEstado              @default(activa)
+  logoUrl                    String?                    @map("logo_url") @db.VarChar(500)
+  logoPdfUrl                 String?                    @map("logo_pdf_url") @db.VarChar(500)
+  createdAt                  DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  usuarios                   EmpresaUsuario[]
+  refreshTokens              RefreshToken[]
+  colores                    Color[]
+  tallas                     Talla[]
+  marcas                     Marca[]
+  categorias                 Categoria[]
+  sucursales                 Sucursal[]
+  clientes                   Cliente[]
+  productos                  Producto[]
+  productoColores            ProductoColor[]
+  productoVariantes          ProductoVariante[]
+  inventariosSucursal        InventarioSucursal[]
+  productoColorImagenes      ProductoColorImagen[]
+  metodosPago                MetodoPago[]
+  ventas                     Venta[]
+  cajasSesion                CajaSesion[]
+  cajaMovimientos            CajaMovimiento[]
+  cotizaciones               Cotizacion[]
+  seriesComprobante          SerieComprobante[]
+  serieComprobanteSucursales SerieComprobanteSucursal[]
+  sunatConfig                SunatConfig?
+
+  @@map("empresa")
+}
+
+model SunatConfig {
+  id                           BigInt        @id @default(autoincrement())
+  empresaId                    BigInt        @unique @map("empresa_id")
+  ambiente                     SunatAmbiente @default(BETA)
+  usuarioSolEncrypted          String?       @map("usuario_sol_encrypted")
+  claveSolEncrypted            String?       @map("clave_sol_encrypted")
+  clientIdEncrypted            String?       @map("client_id_encrypted")
+  clientSecretEncrypted        String?       @map("client_secret_encrypted")
+  certificadoPasswordEncrypted String?       @map("certificado_password_encrypted")
+  certificadoR2Key             String?       @map("certificado_r2_key") @db.VarChar(600)
+  certificadoNombre            String?       @map("certificado_nombre") @db.VarChar(180)
+  certificadoMimeType          String?       @map("certificado_mime_type") @db.VarChar(80)
+  certificadoSizeBytes         Int?          @map("certificado_size_bytes")
+  certificadoUploadedAt        DateTime?     @map("certificado_uploaded_at") @db.Timestamptz(6)
+  igvPorcentaje                Decimal       @default(18.00) @map("igv_porcentaje") @db.Decimal(5, 2)
+  activo                       Boolean       @default(false)
+  createdAt                    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                      Empresa       @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@index([empresaId])
+  @@index([activo])
+  @@map("sunat_config")
+}
+
+model SunatEndpointConfig {
+  id        BigInt              @id @default(autoincrement())
+  ambiente  SunatAmbiente
+  codigo    SunatEndpointCodigo
+  url       String              @db.VarChar(255)
+  activo    Boolean             @default(true)
+  createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([ambiente, codigo])
+  @@index([ambiente])
+  @@index([activo])
+  @@map("sunat_endpoint_config")
+}
+
+model Cliente {
+  id              BigInt               @id @default(autoincrement())
+  empresaId       BigInt               @map("empresa_id")
+  tipoDocumento   ClienteTipoDocumento @map("tipo_documento")
+  numeroDocumento String?              @map("numero_documento") @db.VarChar(20)
+  nombre          String?              @db.VarChar(150)
+  razonSocial     String?              @map("razon_social") @db.VarChar(200)
+  telefono        String?              @db.VarChar(30)
+  email           String?              @db.VarChar(150)
+  direccion       String?              @db.VarChar(255)
+  ubigeo          String?              @db.VarChar(6)
+  distrito        String?              @db.VarChar(80)
+  estado          ClienteEstado        @default(activo)
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa         Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  ventas          Venta[]
+  cotizaciones    Cotizacion[]
+
+  @@index([empresaId])
+  @@index([tipoDocumento])
+  @@index([numeroDocumento])
+  @@index([estado])
+  @@map("cliente")
+}
+
+model Sucursal {
+  id                         BigInt                     @id @default(autoincrement())
+  empresaId                  BigInt                     @map("empresa_id")
+  nombre                     String                     @db.VarChar(120)
+  nombreKey                  String                     @map("nombre_key") @db.VarChar(140)
+  tipo                       SucursalTipo
+  ubigeo                     String                     @db.VarChar(6)
+  distrito                   String                     @db.VarChar(80)
+  direccion                  String                     @db.VarChar(255)
+  codigoEstablecimientoSunat String?                    @map("codigo_establecimiento_sunat") @db.VarChar(10)
+  estado                     SucursalEstado             @default(activo)
+  esPrincipal                Boolean                    @default(false) @map("es_principal")
+  modoCajaHabilitado         Boolean                    @default(false) @map("modo_caja_habilitado")
+  createdAt                  DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                    Empresa                    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  inventarios                InventarioSucursal[]
+  ventas                     Venta[]
+  cajasSesion                CajaSesion[]
+  cotizaciones               Cotizacion[]
+  serieComprobanteSucursales SerieComprobanteSucursal[]
+
+  @@unique([empresaId, nombreKey])
+  @@index([empresaId])
+  @@index([tipo])
+  @@index([ubigeo])
+  @@index([estado])
+  @@map("sucursal")
+}
+
+model Color {
+  id              BigInt          @id @default(autoincrement())
+  empresaId       BigInt          @map("empresa_id")
+  nombre          String          @db.VarChar(80)
+  nombreKey       String          @map("nombre_key") @db.VarChar(100)
+  hex             String          @db.VarChar(7)
+  activo          Boolean         @default(true)
+  deletedAt       DateTime?       @map("deleted_at") @db.Timestamptz(6)
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa         Empresa         @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  productoColores ProductoColor[]
+
+  @@unique([empresaId, nombreKey])
+  @@index([empresaId])
+  @@index([deletedAt])
+  @@map("color")
+}
+
+model Talla {
+  id                BigInt             @id @default(autoincrement())
+  empresaId         BigInt             @map("empresa_id")
+  nombre            String             @db.VarChar(80)
+  nombreKey         String             @map("nombre_key") @db.VarChar(100)
+  activo            Boolean            @default(true)
+  deletedAt         DateTime?          @map("deleted_at") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa           Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  productoVariantes ProductoVariante[]
+
+  @@unique([empresaId, nombreKey])
+  @@index([empresaId])
+  @@index([deletedAt])
+  @@map("talla")
+}
+
+model Marca {
+  id        BigInt     @id @default(autoincrement())
+  empresaId BigInt     @map("empresa_id")
+  nombre    String     @db.VarChar(120)
+  nombreKey String     @map("nombre_key") @db.VarChar(140)
+  activo    Boolean    @default(true)
+  deletedAt DateTime?  @map("deleted_at") @db.Timestamptz(6)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa   Empresa    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  productos Producto[]
+
+  @@unique([empresaId, nombreKey])
+  @@index([empresaId])
+  @@index([deletedAt])
+  @@map("marca")
+}
+
+model Categoria {
+  id          BigInt     @id @default(autoincrement())
+  empresaId   BigInt     @map("empresa_id")
+  nombre      String     @db.VarChar(120)
+  nombreKey   String     @map("nombre_key") @db.VarChar(140)
+  descripcion String?    @db.VarChar(500)
+  activo      Boolean    @default(true)
+  deletedAt   DateTime?  @map("deleted_at") @db.Timestamptz(6)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa     Empresa    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  productos   Producto[]
+
+  @@unique([empresaId, nombreKey])
+  @@index([empresaId])
+  @@index([deletedAt])
+  @@map("categoria")
+}
+
+model UnidadMedida {
+  id          BigInt     @id @default(autoincrement())
+  codigo      String     @unique @db.VarChar(10)
+  descripcion String     @db.VarChar(120)
+  activo      Boolean    @default(true)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  productos   Producto[]
+
+  @@map("unidad_medida")
+}
+
+model TipoAfectacionIgv {
+  id          BigInt     @id @default(autoincrement())
+  codigo      String     @unique @db.VarChar(4)
+  descripcion String     @db.VarChar(180)
+  activo      Boolean    @default(true)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  productos   Producto[]
+
+  @@map("tipo_afectacion_igv")
+}
+
+model Producto {
+  id                  BigInt             @id @default(autoincrement())
+  publicId            String             @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  empresaId           BigInt             @map("empresa_id")
+  marcaId             BigInt?            @map("marca_id")
+  categoriaId         BigInt?            @map("categoria_id")
+  unidadMedidaId      BigInt             @map("unidad_medida_id")
+  tipoAfectacionIgvId BigInt             @map("tipo_afectacion_igv_id")
+  nombre              String             @db.VarChar(180)
+  nombreKey           String             @map("nombre_key") @db.VarChar(220)
+  descripcion         String?            @db.VarChar(1000)
+  activo              Boolean            @default(true)
+  deletedAt           DateTime?          @map("deleted_at") @db.Timestamptz(6)
+  createdAt           DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa             Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  marca               Marca?             @relation(fields: [marcaId], references: [id], onDelete: SetNull)
+  categoria           Categoria?         @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
+  unidadMedida        UnidadMedida       @relation(fields: [unidadMedidaId], references: [id], onDelete: Restrict)
+  tipoAfectacionIgv   TipoAfectacionIgv  @relation(fields: [tipoAfectacionIgvId], references: [id], onDelete: Restrict)
+  colores             ProductoColor[]
+  variantes           ProductoVariante[]
+
+  @@unique([empresaId, nombreKey])
+  @@index([empresaId])
+  @@index([marcaId])
+  @@index([categoriaId])
+  @@index([deletedAt])
+  @@map("producto")
+}
+
+model ProductoColor {
+  id         BigInt                @id @default(autoincrement())
+  empresaId  BigInt                @map("empresa_id")
+  productoId BigInt                @map("producto_id")
+  colorId    BigInt                @map("color_id")
+  activo     Boolean               @default(true)
+  createdAt  DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa    Empresa               @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  producto   Producto              @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  color      Color                 @relation(fields: [colorId], references: [id], onDelete: Restrict)
+  imagenes   ProductoColorImagen[]
+  variantes  ProductoVariante[]
+
+  @@unique([productoId, colorId])
+  @@index([empresaId])
+  @@index([colorId])
+  @@map("producto_color")
+}
+
+model ProductoColorImagen {
+  id              BigInt        @id @default(autoincrement())
+  empresaId       BigInt        @map("empresa_id")
+  productoColorId BigInt        @map("producto_color_id")
+  urlOriginal     String        @map("url_original")
+  urlWebp         String        @map("url_webp")
+  urlThumbnail    String        @map("url_thumbnail")
+  r2KeyOriginal   String        @map("r2_key_original")
+  r2KeyWebp       String        @map("r2_key_webp")
+  r2KeyThumbnail  String        @map("r2_key_thumbnail")
+  mimeType        String        @map("mime_type") @db.VarChar(80)
+  sizeBytes       Int           @map("size_bytes")
+  width           Int?
+  height          Int?
+  orden           Int           @default(0)
+  esPrincipal     Boolean       @default(false) @map("es_principal")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  empresa         Empresa       @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  productoColor   ProductoColor @relation(fields: [productoColorId], references: [id], onDelete: Cascade)
+
+  @@index([empresaId])
+  @@index([productoColorId])
+  @@map("producto_color_imagen")
+}
+
+model ProductoVariante {
+  id                 BigInt               @id @default(autoincrement())
+  empresaId          BigInt               @map("empresa_id")
+  productoId         BigInt               @map("producto_id")
+  productoColorId    BigInt               @map("producto_color_id")
+  tallaId            BigInt               @map("talla_id")
+  sku                String?              @db.VarChar(80)
+  codigoBarras       String?              @map("codigo_barras") @db.VarChar(80)
+  precioCompra       Decimal?             @map("precio_compra") @db.Decimal(12, 2)
+  precioVenta        Decimal              @map("precio_venta") @db.Decimal(12, 2)
+  precioMayorista    Decimal?             @map("precio_mayorista") @db.Decimal(12, 2)
+  activo             Boolean              @default(true)
+  deletedAt          DateTime?            @map("deleted_at") @db.Timestamptz(6)
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa            Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  producto           Producto             @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  productoColor      ProductoColor        @relation(fields: [productoColorId], references: [id], onDelete: Cascade)
+  talla              Talla                @relation(fields: [tallaId], references: [id], onDelete: Restrict)
+  inventarios        InventarioSucursal[]
+  ventaDetalles      VentaDetalle[]
+  cotizacionDetalles CotizacionDetalle[]
+
+  @@unique([productoColorId, tallaId])
+  @@unique([empresaId, sku])
+  @@unique([empresaId, codigoBarras])
+  @@index([empresaId])
+  @@index([productoId])
+  @@index([tallaId])
+  @@index([deletedAt])
+  @@map("producto_variante")
+}
+
+model InventarioSucursal {
+  id                 BigInt           @id @default(autoincrement())
+  empresaId          BigInt           @map("empresa_id")
+  sucursalId         BigInt           @map("sucursal_id")
+  productoVarianteId BigInt           @map("producto_variante_id")
+  stockActual        Int              @default(0) @map("stock_actual")
+  stockMinimo        Int              @default(0) @map("stock_minimo")
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa            Empresa          @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  sucursal           Sucursal         @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  productoVariante   ProductoVariante @relation(fields: [productoVarianteId], references: [id], onDelete: Cascade)
+
+  @@unique([sucursalId, productoVarianteId])
+  @@index([empresaId])
+  @@index([productoVarianteId])
+  @@map("inventario_sucursal")
+}
+
+model Usuario {
+  id                  BigInt               @id @default(autoincrement())
+  nombre              String               @db.VarChar(100)
+  apellido            String?              @db.VarChar(100)
+  email               String               @unique @db.VarChar(180)
+  passwordHash        String               @map("password_hash")
+  telefono            String?              @db.VarChar(30)
+  estado              UsuarioEstado        @default(activo)
+  emailVerificado     Boolean              @default(false) @map("email_verificado")
+  refreshTokenVersion Int                  @default(0) @map("refresh_token_version")
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresas            EmpresaUsuario[]
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  ventasCreadas       Venta[]
+  cajasSesion         CajaSesion[]
+  cajaMovimientos     CajaMovimiento[]
+  cotizacionesCreadas Cotizacion[]
+
+  @@map("usuario")
+}
+
+model PasswordResetToken {
+  id        BigInt    @id @default(autoincrement())
+  usuarioId BigInt    @map("usuario_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  usuario   Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@index([expiresAt])
+  @@map("password_reset_token")
+}
+
+model RegistroPendiente {
+  id           BigInt    @id @default(autoincrement())
+  nombre       String    @db.VarChar(100)
+  apellido     String?   @db.VarChar(100)
+  email        String    @unique @db.VarChar(180)
+  passwordHash String    @map("password_hash")
+  codigoHash   String    @map("codigo_hash")
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  intentos     Int       @default(0)
+  verifiedAt   DateTime? @map("verified_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([expiresAt])
+  @@map("registro_pendiente")
+}
+
+model EmpresaUsuario {
+  id        BigInt               @id @default(autoincrement())
+  empresaId BigInt               @map("empresa_id")
+  usuarioId BigInt               @map("usuario_id")
+  estado    EmpresaUsuarioEstado @default(activo)
+  createdAt DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa   Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  usuario   Usuario              @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  roles     EmpresaUsuarioRol[]
+
+  @@unique([empresaId, usuarioId])
+  @@unique([usuarioId])
+  @@index([empresaId])
+  @@map("empresa_usuario")
+}
+
+model Rol {
+  id          BigInt              @id @default(autoincrement())
+  codigo      String              @unique @db.VarChar(50)
+  nombre      String              @db.VarChar(100)
+  descripcion String?
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  usuarios    EmpresaUsuarioRol[]
+
+  @@map("rol")
+}
+
+model EmpresaUsuarioRol {
+  id               BigInt         @id @default(autoincrement())
+  empresaUsuarioId BigInt         @map("empresa_usuario_id")
+  rolId            BigInt         @map("rol_id")
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  empresaUsuario   EmpresaUsuario @relation(fields: [empresaUsuarioId], references: [id], onDelete: Cascade)
+  rol              Rol            @relation(fields: [rolId], references: [id], onDelete: Restrict)
+
+  @@unique([empresaUsuarioId, rolId])
+  @@index([empresaUsuarioId])
+  @@map("empresa_usuario_rol")
+}
+
+model RefreshToken {
+  id                  BigInt    @id @default(autoincrement())
+  usuarioId           BigInt    @map("usuario_id")
+  empresaId           BigInt?   @map("empresa_id")
+  tokenHash           String    @map("token_hash")
+  refreshTokenVersion Int       @default(0) @map("refresh_token_version")
+  expiresAt           DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt           DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  usuario             Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  empresa             Empresa?  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@index([empresaId])
+  @@index([expiresAt])
+  @@map("refresh_token")
+}
+
+model MetodoPago {
+  id              BigInt           @id @default(autoincrement())
+  empresaId       BigInt           @map("empresa_id")
+  nombre          String           @db.VarChar(120)
+  nombreKey       String           @map("nombre_key") @db.VarChar(140)
+  codigo          String?          @db.VarChar(40)
+  descripcion     String?          @db.VarChar(500)
+  esSistema       Boolean          @default(false) @map("es_sistema")
+  permiteVuelto   Boolean          @default(false) @map("permite_vuelto")
+  orden           Int              @default(100)
+  estado          MetodoPagoEstado @default(activo)
+  deletedAt       DateTime?        @map("deleted_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa         Empresa          @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  ventasPago      VentaPago[]
+  cajaMovimientos CajaMovimiento[]
+
+  @@unique([empresaId, nombreKey])
+  @@index([empresaId])
+  @@index([codigo])
+  @@index([deletedAt])
+  @@index([estado])
+  @@map("metodo_pago")
+}
+
+model SerieComprobante {
+  id                    BigInt                     @id @default(autoincrement())
+  empresaId             BigInt                     @map("empresa_id")
+  tipoComprobante       VentaTipoComprobante       @map("tipo_comprobante")
+  serie                 String                     @db.VarChar(4)
+  numeroActual          Int                        @default(0) @map("numero_actual")
+  esPrincipal           Boolean                    @default(false) @map("es_principal")
+  aplicaTodasSucursales Boolean                    @default(true) @map("aplica_todas_sucursales")
+  activo                Boolean                    @default(true)
+  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa               Empresa                    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  sucursales            SerieComprobanteSucursal[]
+  ventas                Venta[]
+
+  @@unique([empresaId, tipoComprobante, serie])
+  @@index([empresaId])
+  @@index([empresaId, tipoComprobante])
+  @@index([esPrincipal])
+  @@map("serie_comprobante")
+}
+
+model SerieComprobanteSucursal {
+  serieComprobanteId BigInt           @map("serie_comprobante_id")
+  sucursalId         BigInt           @map("sucursal_id")
+  empresaId          BigInt           @map("empresa_id")
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  serieComprobante   SerieComprobante @relation(fields: [serieComprobanteId], references: [id], onDelete: Cascade)
+  sucursal           Sucursal         @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  empresa            Empresa          @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@id([serieComprobanteId, sucursalId])
+  @@index([empresaId])
+  @@index([sucursalId])
+  @@map("serie_comprobante_sucursal")
+}
+
+model Venta {
+  id                 BigInt               @id @default(autoincrement())
+  publicId           String               @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  empresaId          BigInt               @map("empresa_id")
+  sucursalId         BigInt?              @map("sucursal_id")
+  clienteId          BigInt?              @map("cliente_id")
+  serieComprobanteId BigInt               @map("serie_comprobante_id")
+  tipoComprobante    VentaTipoComprobante @map("tipo_comprobante")
+  serie              String               @db.VarChar(4)
+  numero             Int
+  correlativo        String               @db.VarChar(15) // "NV01-000001"
+  descuentoTipo      VentaDescuentoTipo?  @map("descuento_tipo")
+  descuentoValor     Decimal?             @map("descuento_valor") @db.Decimal(10, 2)
+  subtotal           Decimal              @db.Decimal(12, 2)
+  descuentoMonto     Decimal              @default(0) @map("descuento_monto") @db.Decimal(12, 2)
+  total              Decimal              @db.Decimal(12, 2)
+  estado             VentaEstado          @default(completada)
+  observaciones      String?              @db.VarChar(500)
+  anuladoAt          DateTime?            @map("anulado_at") @db.Timestamptz(6)
+  anuladoRazon       String?              @map("anulado_razon") @db.VarChar(500)
+  creadoPorId        BigInt?              @map("creado_por_id")
+  cajaSesionId       BigInt?              @map("caja_sesion_id")
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa            Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  sucursal           Sucursal?            @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  cliente            Cliente?             @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  serieComprobante   SerieComprobante     @relation(fields: [serieComprobanteId], references: [id], onDelete: Restrict)
+  creadoPor          Usuario?             @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
+  cajaSesion         CajaSesion?          @relation(fields: [cajaSesionId], references: [id], onDelete: SetNull)
+  detalles           VentaDetalle[]
+  pagos              VentaPago[]
+  cajaMovimientos    CajaMovimiento[]
+  cotizacionOrigen   Cotizacion?          @relation("CotizacionConvertidaVenta")
+
+  @@unique([serieComprobanteId, numero])
+  @@index([empresaId])
+  @@index([empresaId, tipoComprobante])
+  @@index([empresaId, estado])
+  @@index([sucursalId])
+  @@index([clienteId])
+  @@index([cajaSesionId])
+  @@index([serie, numero])
+  @@index([correlativo])
+  @@index([createdAt])
+  @@map("venta")
+}
+
+model VentaDetalle {
+  id                 BigInt              @id @default(autoincrement())
+  ventaId            BigInt              @map("venta_id")
+  productoVarianteId BigInt              @map("producto_variante_id")
+  cantidad           Int
+  precioUnitario     Decimal             @db.Decimal(12, 2)
+  descuentoTipo      VentaDescuentoTipo? @map("descuento_tipo")
+  descuentoValor     Decimal?            @map("descuento_valor") @db.Decimal(10, 2)
+  descuentoMonto     Decimal             @default(0) @map("descuento_monto") @db.Decimal(12, 2)
+  subtotal           Decimal             @db.Decimal(12, 2)
+  total              Decimal             @db.Decimal(12, 2)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  venta              Venta               @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  productoVariante   ProductoVariante    @relation(fields: [productoVarianteId], references: [id], onDelete: Restrict)
+
+  @@index([ventaId])
+  @@index([productoVarianteId])
+  @@map("venta_detalle")
+}
+
+model VentaPago {
+  id              BigInt           @id @default(autoincrement())
+  ventaId         BigInt           @map("venta_id")
+  metodoPagoId    BigInt           @map("metodo_pago_id")
+  monto           Decimal          @db.Decimal(12, 2)
+  montoRecibido   Decimal?         @map("monto_recibido") @db.Decimal(12, 2)
+  vuelto          Decimal          @default(0) @db.Decimal(12, 2)
+  referencia      String?          @db.VarChar(200)
+  estado          VentaPagoEstado  @default(activo)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  venta           Venta            @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  metodoPago      MetodoPago       @relation(fields: [metodoPagoId], references: [id], onDelete: Restrict)
+  cajaMovimientos CajaMovimiento[]
+
+  @@index([ventaId])
+  @@index([metodoPagoId])
+  @@map("venta_pago")
+}
+
+model CajaSesion {
+  id                    BigInt           @id @default(autoincrement())
+  publicId              String           @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  empresaId             BigInt           @map("empresa_id")
+  sucursalId            BigInt           @map("sucursal_id")
+  usuarioId             BigInt           @map("usuario_id")
+  estado                CajaSesionEstado @default(abierta)
+  openedAt              DateTime         @default(now()) @map("opened_at") @db.Timestamptz(6)
+  closedAt              DateTime?        @map("closed_at") @db.Timestamptz(6)
+  montoInicial          Decimal          @default(0) @map("monto_inicial") @db.Decimal(12, 2)
+  montoEsperado         Decimal?         @map("monto_esperado") @db.Decimal(12, 2)
+  montoDeclarado        Decimal?         @map("monto_declarado") @db.Decimal(12, 2)
+  diferencia            Decimal?         @db.Decimal(12, 2)
+  observacionesApertura String?          @map("observaciones_apertura") @db.VarChar(500)
+  observacionesCierre   String?          @map("observaciones_cierre") @db.VarChar(500)
+  createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa               Empresa          @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  sucursal              Sucursal         @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  usuario               Usuario          @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  ventas                Venta[]
+  movimientos           CajaMovimiento[]
+
+  @@index([empresaId])
+  @@index([sucursalId])
+  @@index([usuarioId])
+  @@index([estado])
+  @@index([openedAt])
+  @@map("caja_sesion")
+}
+
+model CajaMovimiento {
+  id           BigInt             @id @default(autoincrement())
+  publicId     String             @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  empresaId    BigInt             @map("empresa_id")
+  cajaSesionId BigInt             @map("caja_sesion_id")
+  ventaId      BigInt?            @map("venta_id")
+  ventaPagoId  BigInt?            @map("venta_pago_id")
+  metodoPagoId BigInt?            @map("metodo_pago_id")
+  tipo         CajaMovimientoTipo
+  monto        Decimal            @db.Decimal(12, 2)
+  motivo       String?            @db.VarChar(500)
+  referencia   String?            @db.VarChar(200)
+  creadoPorId  BigInt?            @map("creado_por_id")
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  empresa      Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  cajaSesion   CajaSesion         @relation(fields: [cajaSesionId], references: [id], onDelete: Cascade)
+  venta        Venta?             @relation(fields: [ventaId], references: [id], onDelete: SetNull)
+  ventaPago    VentaPago?         @relation(fields: [ventaPagoId], references: [id], onDelete: SetNull)
+  metodoPago   MetodoPago?        @relation(fields: [metodoPagoId], references: [id], onDelete: Restrict)
+  creadoPor    Usuario?           @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
+
+  @@index([empresaId])
+  @@index([cajaSesionId])
+  @@index([ventaId])
+  @@index([ventaPagoId])
+  @@index([metodoPagoId])
+  @@index([tipo])
+  @@index([createdAt])
+  @@map("caja_movimiento")
+}
+
+model Cotizacion {
+  id                BigInt              @id @default(autoincrement())
+  publicId          String              @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  empresaId         BigInt              @map("empresa_id")
+  sucursalId        BigInt?             @map("sucursal_id")
+  clienteId         BigInt?             @map("cliente_id")
+  serie             String              @db.VarChar(4)
+  numero            Int
+  correlativo       String              @db.VarChar(15)
+  estado            CotizacionEstado    @default(borrador)
+  descuentoTipo     VentaDescuentoTipo? @map("descuento_tipo")
+  descuentoValor    Decimal?            @map("descuento_valor") @db.Decimal(10, 2)
+  subtotal          Decimal             @db.Decimal(12, 2)
+  descuentoMonto    Decimal             @default(0) @map("descuento_monto") @db.Decimal(12, 2)
+  total             Decimal             @db.Decimal(12, 2)
+  observaciones     String?             @db.VarChar(500)
+  validaHasta       DateTime?           @map("valida_hasta") @db.Timestamptz(6)
+  convertidaVentaId BigInt?             @unique @map("convertida_venta_id")
+  creadoPorId       BigInt?             @map("creado_por_id")
+  anuladoAt         DateTime?           @map("anulado_at") @db.Timestamptz(6)
+  anuladoRazon      String?             @map("anulado_razon") @db.VarChar(500)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa           Empresa             @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  sucursal          Sucursal?           @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  cliente           Cliente?            @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  convertidaVenta   Venta?              @relation("CotizacionConvertidaVenta", fields: [convertidaVentaId], references: [id], onDelete: SetNull)
+  creadoPor         Usuario?            @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
+  detalles          CotizacionDetalle[]
+
+  @@unique([empresaId, serie, numero])
+  @@index([empresaId])
+  @@index([empresaId, estado])
+  @@index([sucursalId])
+  @@index([clienteId])
+  @@index([serie, numero])
+  @@index([correlativo])
+  @@index([createdAt])
+  @@index([validaHasta])
+  @@map("cotizacion")
+}
+
+model CotizacionDetalle {
+  id                 BigInt              @id @default(autoincrement())
+  cotizacionId       BigInt              @map("cotizacion_id")
+  productoVarianteId BigInt              @map("producto_variante_id")
+  cantidad           Int
+  precioUnitario     Decimal             @map("precio_unitario") @db.Decimal(12, 2)
+  descuentoTipo      VentaDescuentoTipo? @map("descuento_tipo")
+  descuentoValor     Decimal?            @map("descuento_valor") @db.Decimal(10, 2)
+  descuentoMonto     Decimal             @default(0) @map("descuento_monto") @db.Decimal(12, 2)
+  subtotal           Decimal             @db.Decimal(12, 2)
+  total              Decimal             @db.Decimal(12, 2)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  cotizacion         Cotizacion          @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
+  productoVariante   ProductoVariante    @relation(fields: [productoVarianteId], references: [id], onDelete: Restrict)
+
+  @@index([cotizacionId])
+  @@index([productoVarianteId])
+  @@map("cotizacion_detalle")
+}
