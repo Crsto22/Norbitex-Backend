@@ -2,9 +2,12 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   DeleteObjectCommand,
+  GetObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { SunatAmbiente } from '@prisma/client';
 import sharp from 'sharp';
 import { randomUUID } from 'node:crypto';
 
@@ -37,6 +40,53 @@ type UploadedSunatCertificate = {
   sizeBytes: number;
 };
 
+type StoredSunatDocument = {
+  r2Key: string;
+  nombre: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+export function buildCompanySunatR2Key(params: {
+  empresaId: bigint;
+  ambiente: SunatAmbiente;
+  tipo: string;
+  fecha: Date;
+  fileName: string;
+}) {
+  return [
+    'sunat',
+    `empresa-${params.empresaId.toString()}`,
+    params.ambiente,
+    'ventas',
+    params.tipo,
+    params.fecha.getFullYear().toString(),
+    String(params.fecha.getMonth() + 1).padStart(2, '0'),
+    sanitizeR2FileName(params.fileName),
+  ].join('/');
+}
+
+export function buildPlatformSunatR2Key(params: {
+  ambiente: SunatAmbiente;
+  tipo: string;
+  fecha: Date;
+  fileName: string;
+}) {
+  return [
+    'sunat',
+    'plataforma',
+    params.ambiente,
+    params.tipo,
+    params.fecha.getFullYear().toString(),
+    String(params.fecha.getMonth() + 1).padStart(2, '0'),
+    sanitizeR2FileName(params.fileName),
+  ].join('/');
+}
+
+function sanitizeR2FileName(value: string) {
+  return (value || 'archivo.bin').trim().replace(/[\\/:*?"<>|]/g, '-');
+}
+
 @Injectable()
 export class R2StorageService {
   private client?: S3Client;
@@ -51,7 +101,7 @@ export class R2StorageService {
       throw new BadRequestException('Solo se permiten imagenes');
     }
 
-    const config = this.getR2Config();
+    const config = this.getPublicR2Config();
     const imageId = randomUUID();
     const baseKey = [
       'logos',
@@ -89,7 +139,7 @@ export class R2StorageService {
     empresaId: bigint;
     file: Express.Multer.File;
   }): Promise<UploadedSunatCertificate> {
-    const config = this.getR2BucketConfig();
+    const config = this.getPrivateR2Config();
     const certificateId = randomUUID();
     const extension = this.getCertificateExtension(params.file.originalname);
     const r2Key = [
@@ -113,12 +163,108 @@ export class R2StorageService {
     };
   }
 
+  async uploadPlatformSunatCertificate(file: Express.Multer.File) {
+    const config = this.getPrivateR2Config();
+    const extension = this.getCertificateExtension(file.originalname);
+    const r2Key = `sunat-certificates/plataforma/${randomUUID()}.${extension}`;
+    await this.putObject(
+      config.bucket,
+      r2Key,
+      file.buffer,
+      file.mimetype || 'application/octet-stream',
+    );
+    return {
+      r2Key,
+      nombre: file.originalname,
+      mimeType: file.mimetype || 'application/octet-stream',
+      sizeBytes: file.size,
+    };
+  }
+
+  async uploadPlatformSunatDocument(params: {
+    ambiente: SunatAmbiente;
+    tipo:
+      | 'facturas'
+      | 'boletas'
+      | 'notas-credito'
+      | 'notas-venta'
+      | 'bajas-ra'
+      | 'bajas-rc';
+    fecha: Date;
+    fileName: string;
+    body: Buffer;
+    contentType: string;
+  }) {
+    const config = this.getPrivateR2Config();
+    const r2Key = buildPlatformSunatR2Key(params);
+    await this.putObject(config.bucket, r2Key, params.body, params.contentType);
+    return {
+      r2Key,
+      nombre: params.fileName,
+      mimeType: params.contentType,
+      sizeBytes: params.body.length,
+    };
+  }
+
   async deleteSunatCertificate(r2Key: string | null | undefined) {
     if (!r2Key) {
       return;
     }
 
-    await this.deleteObject(r2Key);
+    await this.deleteObject(this.getPrivateR2Config().bucket, r2Key);
+  }
+
+  downloadSunatCertificate(r2Key: string) {
+    return this.getObjectBuffer(this.getPrivateR2Config().bucket, r2Key);
+  }
+
+  async uploadSunatDocument(params: {
+    empresaId: bigint;
+    ambiente: SunatAmbiente;
+    tipo:
+      | 'facturas'
+      | 'boletas'
+      | 'notas-credito'
+      | 'guias-remision'
+      | 'bajas-ra'
+      | 'bajas-rc';
+    fecha: Date;
+    fileName: string;
+    body: Buffer;
+    contentType: string;
+  }): Promise<StoredSunatDocument> {
+    const config = this.getPrivateR2Config();
+    const r2Key = buildCompanySunatR2Key(params);
+
+    await this.putObject(config.bucket, r2Key, params.body, params.contentType);
+
+    return {
+      r2Key,
+      nombre: params.fileName,
+      mimeType: params.contentType,
+      sizeBytes: params.body.length,
+    };
+  }
+
+  getSignedSunatDocumentUrl(r2Key: string, fileName?: string) {
+    const requestedTtl = Number(
+      this.configService.get<string>('CLOUDFLARE_R2_SIGNED_URL_TTL_SECONDS') ??
+        '300',
+    );
+    const expiresIn = Number.isFinite(requestedTtl)
+      ? Math.min(900, Math.max(60, requestedTtl))
+      : 300;
+    return getSignedUrl(
+      this.getClient(),
+      new GetObjectCommand({
+        Bucket: this.getPrivateR2Config().bucket,
+        Key: r2Key,
+        ResponseContentDisposition: fileName
+          ? `attachment; filename="${this.sanitizeFileName(fileName)}"`
+          : undefined,
+      }),
+      { expiresIn },
+    );
   }
 
   async uploadProductColorImage(params: {
@@ -131,7 +277,7 @@ export class R2StorageService {
       throw new BadRequestException('Solo se permiten imagenes');
     }
 
-    const config = this.getR2Config();
+    const config = this.getPublicR2Config();
     const imageId = randomUUID();
     const baseKey = [
       config.prefix,
@@ -200,19 +346,17 @@ export class R2StorageService {
     r2KeyThumbnail: string;
   }) {
     await Promise.allSettled([
-      this.deleteObject(params.r2KeyOriginal),
-      this.deleteObject(params.r2KeyWebp),
-      this.deleteObject(params.r2KeyThumbnail),
+      this.deleteObject(this.getPublicR2Config().bucket, params.r2KeyOriginal),
+      this.deleteObject(this.getPublicR2Config().bucket, params.r2KeyWebp),
+      this.deleteObject(this.getPublicR2Config().bucket, params.r2KeyThumbnail),
     ]);
   }
 
-  private async deleteObject(key: string) {
-    const config = this.getR2BucketConfig();
-
+  private async deleteObject(bucket: string, key: string) {
     try {
       await this.getClient().send(
         new DeleteObjectCommand({
-          Bucket: config.bucket,
+          Bucket: bucket,
           Key: key,
         }),
       );
@@ -235,6 +379,22 @@ export class R2StorageService {
         ContentType: contentType,
       }),
     );
+  }
+
+  private async getObjectBuffer(bucket: string, key: string) {
+    const response = await this.getClient().send(
+      new GetObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      }),
+    );
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(Buffer.from(chunk));
+    }
+
+    return Buffer.concat(chunks);
   }
 
   private getClient() {
@@ -270,8 +430,8 @@ export class R2StorageService {
     return this.client;
   }
 
-  private getR2Config() {
-    const config = this.getR2BucketConfig();
+  private getPublicR2Config() {
+    const config = this.getR2BucketConfig('public');
     const publicUrl = this.configService.get<string>(
       'CLOUDFLARE_R2_PUBLIC_URL',
     );
@@ -291,11 +451,21 @@ export class R2StorageService {
     };
   }
 
-  private getR2BucketConfig() {
-    const bucket = this.configService.get<string>('CLOUDFLARE_R2_BUCKET');
+  private getPrivateR2Config() {
+    return this.getR2BucketConfig('private');
+  }
+
+  private getR2BucketConfig(visibility: 'public' | 'private') {
+    const key =
+      visibility === 'public'
+        ? 'CLOUDFLARE_R2_PUBLIC_BUCKET'
+        : 'CLOUDFLARE_R2_PRIVATE_BUCKET';
+    const bucket =
+      this.configService.get<string>(key) ??
+      this.configService.get<string>('CLOUDFLARE_R2_BUCKET');
 
     if (!bucket) {
-      throw new BadRequestException('Configura el bucket de Cloudflare R2');
+      throw new BadRequestException(`Configura ${key} de Cloudflare R2`);
     }
 
     return {
@@ -331,5 +501,9 @@ export class R2StorageService {
     }
 
     return 'pfx';
+  }
+
+  private sanitizeFileName(value: string) {
+    return sanitizeR2FileName(value);
   }
 }

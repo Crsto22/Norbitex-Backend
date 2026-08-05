@@ -1,0 +1,52 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nobitex-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-root}
+      POSTGRES_DB: ${DB_NAME:-Nobitex}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nobitex-network
+
+  app:
+    build: .
+    container_name: nobitex-backend
+    restart: always
+    ports:
+      - "3003:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-root}@postgres:5432/${DB_NAME:-Nobitex}?schema=public
+      LOCAL_STORAGE_DIR: /var/lib/norbitex/storage
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
+      TZ: America/Lima
+    volumes:
+      - storage_data:/var/lib/norbitex/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - nobitex-network
+
+volumes:
+  postgres_data:
+  storage_data:
+
+networks:
+  nobitex-network:
+    driver: bridge

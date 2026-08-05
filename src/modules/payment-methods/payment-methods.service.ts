@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { MetodoPagoEstado, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePaymentMethodDto } from './dto/create-payment-method.dto';
@@ -12,7 +13,10 @@ import { UpdatePaymentMethodDto } from './dto/update-payment-method.dto';
 
 @Injectable()
 export class PaymentMethodsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
   async findAll(empresaId: bigint, query: FindPaymentMethodsQueryDto) {
     const page = query.page ?? 1;
@@ -21,7 +25,14 @@ export class PaymentMethodsService {
     const where: Prisma.MetodoPagoWhereInput = {
       empresaId,
       deletedAt: null,
-      ...(query.status ? { estado: query.status === 'active' ? MetodoPagoEstado.activo : MetodoPagoEstado.inactivo } : {}),
+      ...(query.status
+        ? {
+            estado:
+              query.status === 'active'
+                ? MetodoPagoEstado.activo
+                : MetodoPagoEstado.inactivo,
+          }
+        : {}),
       ...(search
         ? {
             OR: [
@@ -33,29 +44,30 @@ export class PaymentMethodsService {
         : {}),
     };
 
-    const [methods, total, activeTotal, inactiveTotal] = await this.prisma.$transaction([
-      this.prisma.metodoPago.findMany({
-        where,
-        orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.metodoPago.count({ where }),
-      this.prisma.metodoPago.count({
-        where: {
-          empresaId,
-          deletedAt: null,
-          estado: MetodoPagoEstado.activo,
-        },
-      }),
-      this.prisma.metodoPago.count({
-        where: {
-          empresaId,
-          deletedAt: null,
-          estado: MetodoPagoEstado.inactivo,
-        },
-      }),
-    ]);
+    const [methods, total, activeTotal, inactiveTotal] =
+      await this.prisma.$transaction([
+        this.prisma.metodoPago.findMany({
+          where,
+          orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.prisma.metodoPago.count({ where }),
+        this.prisma.metodoPago.count({
+          where: {
+            empresaId,
+            deletedAt: null,
+            estado: MetodoPagoEstado.activo,
+          },
+        }),
+        this.prisma.metodoPago.count({
+          where: {
+            empresaId,
+            deletedAt: null,
+            estado: MetodoPagoEstado.inactivo,
+          },
+        }),
+      ]);
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
     return {
@@ -97,7 +109,10 @@ export class PaymentMethodsService {
           esSistema: false,
           permiteVuelto: false,
           orden: 100,
-          estado: dto.activo === false ? MetodoPagoEstado.inactivo : MetodoPagoEstado.activo,
+          estado:
+            dto.activo === false
+              ? MetodoPagoEstado.inactivo
+              : MetodoPagoEstado.activo,
           deletedAt: null,
         },
       });
@@ -115,7 +130,10 @@ export class PaymentMethodsService {
         esSistema: false,
         permiteVuelto: false,
         orden: 100,
-        estado: dto.activo === false ? MetodoPagoEstado.inactivo : MetodoPagoEstado.activo,
+        estado:
+          dto.activo === false
+            ? MetodoPagoEstado.inactivo
+            : MetodoPagoEstado.activo,
       },
     });
 
@@ -159,7 +177,9 @@ export class PaymentMethodsService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        throw new ConflictException('Ya existe un metodo de pago con ese nombre');
+        throw new ConflictException(
+          'Ya existe un metodo de pago con ese nombre',
+        );
       }
 
       throw error;
@@ -212,8 +232,12 @@ export class PaymentMethodsService {
   }
 
   private getDefaultPaginationLimit() {
-    const defaultLimit = Number(process.env.PAGINATION_DEFAULT_LIMIT ?? 12);
-    const maxLimit = Number(process.env.PAGINATION_MAX_LIMIT ?? 100);
+    const defaultLimit = Number(
+      this.configService.get<string>('PAGINATION_DEFAULT_LIMIT') ?? 12,
+    );
+    const maxLimit = Number(
+      this.configService.get<string>('PAGINATION_MAX_LIMIT') ?? 100,
+    );
 
     if (!Number.isInteger(defaultLimit) || defaultLimit <= 0) {
       return 12;

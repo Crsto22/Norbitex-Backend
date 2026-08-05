@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ClienteEstado, ClienteTipoDocumento, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateClientDto } from './dto/create-client.dto';
@@ -25,7 +26,10 @@ type NormalizedClientData = {
 
 @Injectable()
 export class ClientsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
   async findAll(empresaId: bigint, query: FindClientsQueryDto) {
     const page = query.page ?? 1;
@@ -114,21 +118,34 @@ export class ClientsService {
         dto.numeroDocumento !== undefined
           ? dto.numeroDocumento
           : (currentClient.numeroDocumento ?? undefined),
-      nombre: dto.nombre !== undefined ? dto.nombre : (currentClient.nombre ?? undefined),
+      nombre:
+        dto.nombre !== undefined
+          ? dto.nombre
+          : (currentClient.nombre ?? undefined),
       razonSocial:
         dto.razonSocial !== undefined
           ? dto.razonSocial
           : (currentClient.razonSocial ?? undefined),
       telefono:
-        dto.telefono !== undefined ? dto.telefono : (currentClient.telefono ?? undefined),
-      email: dto.email !== undefined ? dto.email : (currentClient.email ?? undefined),
+        dto.telefono !== undefined
+          ? dto.telefono
+          : (currentClient.telefono ?? undefined),
+      email:
+        dto.email !== undefined
+          ? dto.email
+          : (currentClient.email ?? undefined),
       direccion:
         dto.direccion !== undefined
           ? dto.direccion
           : (currentClient.direccion ?? undefined),
-      ubigeo: dto.ubigeo !== undefined ? dto.ubigeo : (currentClient.ubigeo ?? undefined),
+      ubigeo:
+        dto.ubigeo !== undefined
+          ? dto.ubigeo
+          : (currentClient.ubigeo ?? undefined),
       distrito:
-        dto.distrito !== undefined ? dto.distrito : (currentClient.distrito ?? undefined),
+        dto.distrito !== undefined
+          ? dto.distrito
+          : (currentClient.distrito ?? undefined),
       estado: dto.estado ?? currentClient.estado,
     };
     const data = this.normalizeData(mergedDto);
@@ -168,8 +185,11 @@ export class ClientsService {
     return client;
   }
 
-  private normalizeData(dto: CreateClientDto | UpdateClientDto): NormalizedClientData {
-    const tipoDocumento = dto.tipoDocumento as ClienteTipoDocumento;
+  private normalizeData(
+    dto: CreateClientDto | UpdateClientDto,
+  ): NormalizedClientData {
+    const tipoDocumento =
+      dto.tipoDocumento ?? ClienteTipoDocumento.sin_documento;
     const numeroDocumento =
       tipoDocumento === ClienteTipoDocumento.sin_documento
         ? null
@@ -181,7 +201,7 @@ export class ClientsService {
     const direccion = this.cleanOptionalText(dto.direccion);
     const ubigeo = this.cleanOptionalText(dto.ubigeo);
     const distrito = this.cleanOptionalText(dto.distrito);
-    const estado = (dto.estado ?? ClienteEstado.activo) as ClienteEstado;
+    const estado = dto.estado ?? ClienteEstado.activo;
 
     if (tipoDocumento === ClienteTipoDocumento.dni) {
       if (!numeroDocumento || !/^\d{8}$/.test(numeroDocumento)) {
@@ -199,11 +219,17 @@ export class ClientsService {
       }
 
       if (!razonSocial) {
-        throw new BadRequestException('La razon social es obligatoria para RUC');
+        throw new BadRequestException(
+          'La razon social es obligatoria para RUC',
+        );
       }
     }
 
-    if (tipoDocumento === ClienteTipoDocumento.sin_documento && !nombre && !razonSocial) {
+    if (
+      tipoDocumento === ClienteTipoDocumento.sin_documento &&
+      !nombre &&
+      !razonSocial
+    ) {
       throw new BadRequestException('Ingresa un nombre o razon social');
     }
 
@@ -235,8 +261,12 @@ export class ClientsService {
   }
 
   private getDefaultPaginationLimit() {
-    const defaultLimit = Number(process.env.PAGINATION_DEFAULT_LIMIT ?? 12);
-    const maxLimit = Number(process.env.PAGINATION_MAX_LIMIT ?? 100);
+    const defaultLimit = Number(
+      this.configService.get<string>('PAGINATION_DEFAULT_LIMIT') ?? 12,
+    );
+    const maxLimit = Number(
+      this.configService.get<string>('PAGINATION_MAX_LIMIT') ?? 100,
+    );
 
     if (!Number.isInteger(defaultLimit) || defaultLimit <= 0) {
       return 12;

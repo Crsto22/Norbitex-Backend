@@ -30,10 +30,6 @@ export class CreateSerieComprobanteDto {
 
 export class UpdateSerieComprobanteDto {
   @IsOptional()
-  @IsString()
-  serie?: string;
-
-  @IsOptional()
   @IsBoolean()
   esPrincipal?: boolean;
 

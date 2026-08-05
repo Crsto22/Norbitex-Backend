@@ -12,40 +12,58 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CreatePaymentMethodDto } from './dto/create-payment-method.dto';
 import { FindPaymentMethodsQueryDto } from './dto/find-payment-methods-query.dto';
 import { UpdatePaymentMethodDto } from './dto/update-payment-method.dto';
 import { PaymentMethodsService } from './payment-methods.service';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(ModuleAccessGuard)
 @Controller('payment-methods')
 export class PaymentMethodsController {
   constructor(private readonly paymentMethodsService: PaymentMethodsService) {}
 
   @Get()
-  findAll(@CurrentUser() user: JwtPayload, @Query() query: FindPaymentMethodsQueryDto) {
+  @RequireModule('metodos-pago', 'ventas-pos', 'caja', 'cotizaciones')
+  findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: FindPaymentMethodsQueryDto,
+  ) {
     return this.paymentMethodsService.findAll(this.getEmpresaId(user), query);
   }
 
   @Post()
+  @RequireModule('metodos-pago')
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreatePaymentMethodDto) {
     return this.paymentMethodsService.create(this.getEmpresaId(user), dto);
   }
 
   @Patch(':id')
+  @RequireModule('metodos-pago')
   update(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdatePaymentMethodDto,
   ) {
-    return this.paymentMethodsService.update(this.getEmpresaId(user), BigInt(id), dto);
+    return this.paymentMethodsService.update(
+      this.getEmpresaId(user),
+      BigInt(id),
+      dto,
+    );
   }
 
   @Delete(':id')
-  remove(@CurrentUser() user: JwtPayload, @Param('id', ParseIntPipe) id: number) {
-    return this.paymentMethodsService.remove(this.getEmpresaId(user), BigInt(id));
+  @RequireModule('metodos-pago')
+  remove(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.paymentMethodsService.remove(
+      this.getEmpresaId(user),
+      BigInt(id),
+    );
   }
 
   private getEmpresaId(user: JwtPayload) {

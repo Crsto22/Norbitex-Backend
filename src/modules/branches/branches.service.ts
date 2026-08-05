@@ -4,22 +4,34 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma, SucursalEstado, SucursalTipo } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PlansService } from '../plans/plans.service';
+import type { CommercialScope } from '../../common/commercial-access';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { FindBranchesQueryDto } from './dto/find-branches-query.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 
 @Injectable()
 export class BranchesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+    private readonly plansService: PlansService,
+  ) {}
 
-  async findAll(empresaId: bigint, query: FindBranchesQueryDto) {
+  async findAll(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindBranchesQueryDto,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? this.getDefaultPaginationLimit();
     const search = query.search?.trim();
     const where: Prisma.SucursalWhereInput = {
       empresaId,
+      ...(scope.branchId ? { id: scope.branchId } : {}),
       ...(query.tipo ? { tipo: query.tipo } : {}),
       ...(query.estado ? { estado: query.estado } : {}),
       ...(search
@@ -41,32 +53,54 @@ export class BranchesService {
         : {}),
     };
 
-    const [branches, total, activeTotal, inactiveTotal, storeTotal, warehouseTotal] =
-      await this.prisma.$transaction([
-        this.prisma.sucursal.findMany({
-          where,
-          orderBy: [
-            { esPrincipal: 'desc' },
-            { estado: 'asc' },
-            { nombre: 'asc' },
-          ],
-          skip: (page - 1) * limit,
-          take: limit,
-        }),
-        this.prisma.sucursal.count({ where }),
-        this.prisma.sucursal.count({
-          where: { empresaId, estado: SucursalEstado.activo },
-        }),
-        this.prisma.sucursal.count({
-          where: { empresaId, estado: SucursalEstado.inactivo },
-        }),
-        this.prisma.sucursal.count({
-          where: { empresaId, tipo: SucursalTipo.tienda },
-        }),
-        this.prisma.sucursal.count({
-          where: { empresaId, tipo: SucursalTipo.almacen },
-        }),
-      ]);
+    const [
+      branches,
+      total,
+      activeTotal,
+      inactiveTotal,
+      storeTotal,
+      warehouseTotal,
+    ] = await this.prisma.$transaction([
+      this.prisma.sucursal.findMany({
+        where,
+        orderBy: [
+          { esPrincipal: 'desc' },
+          { estado: 'asc' },
+          { nombre: 'asc' },
+        ],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.sucursal.count({ where }),
+      this.prisma.sucursal.count({
+        where: {
+          empresaId,
+          ...(scope.branchId ? { id: scope.branchId } : {}),
+          estado: SucursalEstado.activo,
+        },
+      }),
+      this.prisma.sucursal.count({
+        where: {
+          empresaId,
+          ...(scope.branchId ? { id: scope.branchId } : {}),
+          estado: SucursalEstado.inactivo,
+        },
+      }),
+      this.prisma.sucursal.count({
+        where: {
+          empresaId,
+          ...(scope.branchId ? { id: scope.branchId } : {}),
+          tipo: SucursalTipo.tienda,
+        },
+      }),
+      this.prisma.sucursal.count({
+        where: {
+          empresaId,
+          ...(scope.branchId ? { id: scope.branchId } : {}),
+          tipo: SucursalTipo.almacen,
+        },
+      }),
+    ]);
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
     return {
@@ -84,42 +118,64 @@ export class BranchesService {
     };
   }
 
-  async create(empresaId: bigint, dto: CreateBranchDto) {
+  async create(
+    empresaId: bigint,
+    scope: CommercialScope,
+    dto: CreateBranchDto,
+  ) {
+    if (scope.branchId) {
+      throw new BadRequestException(
+        'No puedes crear sucursales fuera de tu alcance',
+      );
+    }
     const nombre = this.cleanText(dto.nombre);
     const nombreKey = this.buildNameKey(nombre);
-    const hasBranches = await this.prisma.sucursal.count({ where: { empresaId } });
-    const esPrincipal = dto.esPrincipal ?? hasBranches === 0;
+    const hasStores = await this.prisma.sucursal.count({
+      where: { empresaId, tipo: SucursalTipo.tienda },
+    });
+    const esPrincipal =
+      dto.tipo === SucursalTipo.tienda
+        ? (dto.esPrincipal ?? hasStores === 0)
+        : false;
     const modoCajaHabilitado = dto.modoCajaHabilitado ?? false;
 
     this.ensureCashRegisterModeIsAllowed(dto.tipo, modoCajaHabilitado);
+    this.ensurePrimaryIsAllowed(dto.tipo, dto.esPrincipal ?? false);
 
     try {
-      const branch = await this.prisma.$transaction(async (tx) => {
-        if (esPrincipal) {
-          await tx.sucursal.updateMany({
-            where: { empresaId, esPrincipal: true },
-            data: { esPrincipal: false },
+      const branch = await this.prisma.$transaction(
+        async (tx) => {
+          await this.plansService.assertResourceLimits(tx, empresaId, {
+            [dto.tipo === SucursalTipo.tienda ? 'branches' : 'warehouses']: 1,
           });
-        }
 
-        return tx.sucursal.create({
-          data: {
-            empresaId,
-            nombre,
-            nombreKey,
-            tipo: dto.tipo,
-            ubigeo: this.cleanDigits(dto.ubigeo),
-            distrito: this.cleanText(dto.distrito),
-            direccion: this.cleanText(dto.direccion),
-            codigoEstablecimientoSunat: this.cleanOptionalText(
-              dto.codigoEstablecimientoSunat,
-            ),
-            estado: dto.estado ?? SucursalEstado.activo,
-            esPrincipal,
-            modoCajaHabilitado,
-          },
-        });
-      });
+          if (esPrincipal) {
+            await tx.sucursal.updateMany({
+              where: { empresaId, esPrincipal: true },
+              data: { esPrincipal: false },
+            });
+          }
+
+          return tx.sucursal.create({
+            data: {
+              empresaId,
+              nombre,
+              nombreKey,
+              tipo: dto.tipo,
+              ubigeo: this.cleanDigits(dto.ubigeo),
+              distrito: this.cleanText(dto.distrito),
+              direccion: this.cleanText(dto.direccion),
+              codigoEstablecimientoSunat: this.cleanOptionalText(
+                dto.codigoEstablecimientoSunat,
+              ),
+              estado: dto.estado ?? SucursalEstado.activo,
+              esPrincipal,
+              modoCajaHabilitado,
+            },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
 
       return this.toResponse(branch);
     } catch (error) {
@@ -127,15 +183,23 @@ export class BranchesService {
     }
   }
 
-  async update(empresaId: bigint, id: bigint, dto: UpdateBranchDto) {
+  async update(
+    empresaId: bigint,
+    scope: CommercialScope,
+    id: bigint,
+    dto: UpdateBranchDto,
+  ) {
+    this.assertBranchScope(scope, id);
     const current = await this.ensureBranchExists(empresaId, id);
 
     const data: Prisma.SucursalUpdateInput = {};
     const nextTipo = dto.tipo ?? current.tipo;
     const nextModoCajaHabilitado =
       dto.modoCajaHabilitado ?? current.modoCajaHabilitado;
+    const nextEsPrincipal = dto.esPrincipal ?? current.esPrincipal;
 
     this.ensureCashRegisterModeIsAllowed(nextTipo, nextModoCajaHabilitado);
+    this.ensurePrimaryIsAllowed(nextTipo, nextEsPrincipal);
 
     if (dto.nombre !== undefined) {
       const nombre = this.cleanText(dto.nombre);
@@ -178,23 +242,32 @@ export class BranchesService {
     }
 
     try {
-      const branch = await this.prisma.$transaction(async (tx) => {
-        if (dto.esPrincipal === true) {
-          await tx.sucursal.updateMany({
-            where: {
-              empresaId,
-              esPrincipal: true,
-              id: { not: id },
-            },
-            data: { esPrincipal: false },
-          });
-        }
+      const branch = await this.prisma.$transaction(
+        async (tx) => {
+          if (dto.tipo !== undefined && dto.tipo !== current.tipo) {
+            await this.plansService.assertResourceLimits(tx, empresaId, {
+              [dto.tipo === SucursalTipo.tienda ? 'branches' : 'warehouses']: 1,
+            });
+          }
 
-        return tx.sucursal.update({
-          where: { id },
-          data,
-        });
-      });
+          if (dto.esPrincipal === true) {
+            await tx.sucursal.updateMany({
+              where: {
+                empresaId,
+                esPrincipal: true,
+                id: { not: id },
+              },
+              data: { esPrincipal: false },
+            });
+          }
+
+          return tx.sucursal.update({
+            where: { id },
+            data,
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
 
       return this.toResponse(branch);
     } catch (error) {
@@ -202,7 +275,8 @@ export class BranchesService {
     }
   }
 
-  async remove(empresaId: bigint, id: bigint) {
+  async remove(empresaId: bigint, scope: CommercialScope, id: bigint) {
+    this.assertBranchScope(scope, id);
     await this.ensureBranchExists(empresaId, id);
 
     const branch = await this.prisma.sucursal.update({
@@ -216,10 +290,22 @@ export class BranchesService {
     return this.toResponse(branch);
   }
 
+  private assertBranchScope(scope: CommercialScope, id: bigint) {
+    if (scope.branchId && scope.branchId !== id) {
+      throw new NotFoundException('Sucursal no encontrada');
+    }
+  }
+
   private async ensureBranchExists(empresaId: bigint, id: bigint) {
     const branch = await this.prisma.sucursal.findFirst({
       where: { id, empresaId },
-      select: { id: true, tipo: true, modoCajaHabilitado: true },
+      select: {
+        id: true,
+        tipo: true,
+        estado: true,
+        modoCajaHabilitado: true,
+        esPrincipal: true,
+      },
     });
 
     if (!branch) {
@@ -236,6 +322,17 @@ export class BranchesService {
     if (tipo === SucursalTipo.almacen && modoCajaHabilitado) {
       throw new BadRequestException(
         'Solo las sucursales tipo tienda pueden habilitar caja',
+      );
+    }
+  }
+
+  private ensurePrimaryIsAllowed(
+    tipo: SucursalTipo | 'tienda' | 'almacen',
+    esPrincipal: boolean,
+  ) {
+    if (tipo === SucursalTipo.almacen && esPrincipal) {
+      throw new BadRequestException(
+        'Solo una sucursal tipo tienda puede ser principal',
       );
     }
   }
@@ -258,8 +355,12 @@ export class BranchesService {
   }
 
   private getDefaultPaginationLimit() {
-    const defaultLimit = Number(process.env.PAGINATION_DEFAULT_LIMIT ?? 12);
-    const maxLimit = Number(process.env.PAGINATION_MAX_LIMIT ?? 100);
+    const defaultLimit = Number(
+      this.configService.get<string>('PAGINATION_DEFAULT_LIMIT') ?? 12,
+    );
+    const maxLimit = Number(
+      this.configService.get<string>('PAGINATION_MAX_LIMIT') ?? 100,
+    );
 
     if (!Number.isInteger(defaultLimit) || defaultLimit <= 0) {
       return 12;

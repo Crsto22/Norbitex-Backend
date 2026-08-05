@@ -3,8 +3,18 @@ export type JwtPayload = {
   empresaId?: string;
   empresaUsuarioId?: string;
   roles: string[];
+  moduleKeys?: string[];
   nombre?: string;
   apellido?: string | null;
   email?: string;
+  telefono?: string | null;
   refreshTokenVersion?: number;
+  planCode?: string;
+  planStatus?: 'trial' | 'active' | 'expired';
+  planStartsAt?: string;
+  planEndsAt?: string | null;
+  sucursalId?: string | null;
+  sucursalTipo?: 'tienda' | 'almacen' | null;
+  visibilidadOperaciones?: 'propias' | 'todas';
+  setup?: 'company';
 };

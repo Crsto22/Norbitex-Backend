@@ -13,8 +13,10 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
+import { getCommercialScope } from '../../common/commercial-access';
 import { QuotationsPdfService } from './quotations-pdf.service';
 import { QuotationsService } from './quotations.service';
 import { CreateQuotationDto } from './dto/create-quotation.dto';
@@ -23,7 +25,8 @@ import { FindQuotationsQueryDto } from './dto/find-quotations-query.dto';
 import { AnnulQuotationDto } from './dto/annul-quotation.dto';
 import { ConvertQuotationToSaleDto } from './dto/convert-quotation-to-sale.dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(ModuleAccessGuard)
+@RequireModule('cotizaciones', 'historial-cotizaciones')
 @Controller('quotations')
 export class QuotationsController {
   constructor(
@@ -35,7 +38,7 @@ export class QuotationsController {
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateQuotationDto) {
     return this.quotationsService.create(
       this.getEmpresaId(user),
-      this.getUserId(user),
+      getCommercialScope(user),
       dto,
     );
   }
@@ -45,7 +48,11 @@ export class QuotationsController {
     @CurrentUser() user: JwtPayload,
     @Query() query: FindQuotationsQueryDto,
   ) {
-    return this.quotationsService.findAll(this.getEmpresaId(user), query);
+    return this.quotationsService.findAll(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
   }
 
   @Get(':publicId/pdf')
@@ -54,6 +61,11 @@ export class QuotationsController {
     @Param('publicId') publicId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
+    await this.quotationsService.findOne(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+    );
     const pdf = await this.quotationsPdfService.generateQuotationPdf(
       this.getEmpresaId(user),
       publicId,
@@ -72,7 +84,11 @@ export class QuotationsController {
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
   ) {
-    return this.quotationsService.findOne(this.getEmpresaId(user), publicId);
+    return this.quotationsService.findOne(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+    );
   }
 
   @Patch(':publicId')
@@ -83,6 +99,7 @@ export class QuotationsController {
   ) {
     return this.quotationsService.update(
       this.getEmpresaId(user),
+      getCommercialScope(user),
       publicId,
       dto,
     );
@@ -94,7 +111,12 @@ export class QuotationsController {
     @Param('publicId') publicId: string,
     @Body() dto: AnnulQuotationDto,
   ) {
-    return this.quotationsService.annul(this.getEmpresaId(user), publicId, dto);
+    return this.quotationsService.annul(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+      dto,
+    );
   }
 
   @Post(':publicId/convert-to-sale')
@@ -105,7 +127,7 @@ export class QuotationsController {
   ) {
     return this.quotationsService.convertToSale(
       this.getEmpresaId(user),
-      this.getUserId(user),
+      getCommercialScope(user),
       publicId,
       dto,
     );

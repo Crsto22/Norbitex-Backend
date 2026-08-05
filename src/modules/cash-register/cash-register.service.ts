@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   CajaMovimientoTipo,
   CajaSesionEstado,
@@ -12,6 +13,10 @@ import {
   SucursalTipo,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  scopedCreatorId,
+  type CommercialScope,
+} from '../../common/commercial-access';
 import { CloseCashRegisterDto } from './dto/close-cash-register.dto';
 import { CreateCashMovementDto } from './dto/create-cash-movement.dto';
 import {
@@ -41,13 +46,12 @@ type CashRegisterWithRelations = Prisma.CajaSesionGetPayload<{
 
 @Injectable()
 export class CashRegisterService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
-  async open(
-    empresaId: bigint,
-    usuarioId: bigint,
-    dto: OpenCashRegisterDto,
-  ) {
+  async open(empresaId: bigint, usuarioId: bigint, dto: OpenCashRegisterDto) {
     const sucursalId = this.parseId(dto.sucursalId, 'sucursalId');
     const saldosIniciales = dto.saldosIniciales ?? [];
     const montoInicial = this.sumAmounts(saldosIniciales);
@@ -68,7 +72,9 @@ export class CashRegisterService {
         });
 
         if (existing) {
-          throw new ConflictException('Ya tienes una caja abierta en esta sucursal');
+          throw new ConflictException(
+            'Ya tienes una caja abierta en esta sucursal',
+          );
         }
 
         return tx.cajaSesion.create({
@@ -96,7 +102,9 @@ export class CashRegisterService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        throw new ConflictException('Ya tienes una caja abierta en esta sucursal');
+        throw new ConflictException(
+          'Ya tienes una caja abierta en esta sucursal',
+        );
       }
 
       throw error;
@@ -130,8 +138,7 @@ export class CashRegisterService {
     const sucursalId = this.parseId(dto.sucursalId, 'sucursalId');
     const metodoPagoId = this.parseId(dto.metodoPagoId, 'metodoPagoId');
     const amount = this.parsePositiveDecimal(dto.monto, 'monto');
-    const monto =
-      dto.tipo === 'retiro' ? amount.mul(-1) : amount;
+    const monto = dto.tipo === 'retiro' ? amount.mul(-1) : amount;
     const motivo = this.cleanRequiredText(dto.motivo, 'motivo');
 
     await this.ensurePaymentMethod(empresaId, metodoPagoId);
@@ -168,11 +175,7 @@ export class CashRegisterService {
     return this.toMovementResponse(movement);
   }
 
-  async close(
-    empresaId: bigint,
-    usuarioId: bigint,
-    dto: CloseCashRegisterDto,
-  ) {
+  async close(empresaId: bigint, usuarioId: bigint, dto: CloseCashRegisterDto) {
     const sucursalId = this.parseId(dto.sucursalId, 'sucursalId');
     const montoDeclarado = this.sumAmounts(dto.saldosDeclarados);
 
@@ -248,9 +251,16 @@ export class CashRegisterService {
     };
   }
 
-  async findOne(empresaId: bigint, publicId: string) {
+  async findOne(empresaId: bigint, scope: CommercialScope, publicId: string) {
     const cashRegister = await this.prisma.cajaSesion.findFirst({
-      where: { empresaId, publicId },
+      where: {
+        empresaId,
+        publicId,
+        ...(scope.branchId ? { sucursalId: scope.branchId } : {}),
+        ...(scopedCreatorId(scope)
+          ? { usuarioId: scopedCreatorId(scope)! }
+          : {}),
+      },
       include: cashRegisterInclude,
     });
 
@@ -266,7 +276,7 @@ export class CashRegisterService {
     sucursalId: bigint,
   ) {
     const sucursal = await this.prisma.sucursal.findFirst({
-      where: { id: sucursalId, empresaId },
+      where: { id: sucursalId, empresaId, estado: 'activo' },
       select: { tipo: true, modoCajaHabilitado: true },
     });
 
@@ -279,7 +289,9 @@ export class CashRegisterService {
     }
 
     if (!sucursal.modoCajaHabilitado) {
-      throw new BadRequestException('La caja no esta habilitada en esta sucursal');
+      throw new BadRequestException(
+        'La caja no esta habilitada en esta sucursal',
+      );
     }
   }
 
@@ -288,7 +300,9 @@ export class CashRegisterService {
     amounts: CashRegisterAmountDto[],
   ) {
     const ids = Array.from(
-      new Set(amounts.map((item) => this.parseId(item.metodoPagoId, 'metodoPagoId'))),
+      new Set(
+        amounts.map((item) => this.parseId(item.metodoPagoId, 'metodoPagoId')),
+      ),
     );
 
     for (const amount of amounts) {
@@ -346,13 +360,18 @@ export class CashRegisterService {
     });
 
     if (!cashRegister) {
-      throw new BadRequestException('No tienes una caja abierta en esta sucursal');
+      throw new BadRequestException(
+        'No tienes una caja abierta en esta sucursal',
+      );
     }
 
     return cashRegister;
   }
 
-  private async getExpectedAmount(tx: Prisma.TransactionClient, cajaSesionId: bigint) {
+  private async getExpectedAmount(
+    tx: Prisma.TransactionClient,
+    cajaSesionId: bigint,
+  ) {
     const aggregate = await tx.cajaMovimiento.aggregate({
       where: { cajaSesionId },
       _sum: { monto: true },
@@ -465,8 +484,12 @@ export class CashRegisterService {
   }
 
   private getDefaultPaginationLimit() {
-    const defaultLimit = Number(process.env.PAGINATION_DEFAULT_LIMIT ?? 12);
-    const maxLimit = Number(process.env.PAGINATION_MAX_LIMIT ?? 100);
+    const defaultLimit = Number(
+      this.configService.get<string>('PAGINATION_DEFAULT_LIMIT') ?? 12,
+    );
+    const maxLimit = Number(
+      this.configService.get<string>('PAGINATION_MAX_LIMIT') ?? 100,
+    );
 
     if (!Number.isInteger(defaultLimit) || defaultLimit <= 0) {
       return 12;

@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { existsSync, readFileSync } from 'fs';
-import { resolve } from 'path';
-import puppeteer from 'puppeteer';
+import { Prisma, ProductoTipo } from '@prisma/client';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { launchPdfBrowser } from '../../common/puppeteer-browser';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocalPdfLogoStorageService } from '../storage/local-pdf-logo-storage.service';
 
@@ -39,7 +39,7 @@ const quotationPdfInclude = {
     include: {
       productoVariante: {
         include: {
-          producto: { select: { nombre: true } },
+          producto: { select: { nombre: true, tipo: true } },
           productoColor: {
             include: {
               color: { select: { nombre: true } },
@@ -74,10 +74,7 @@ export class QuotationsPdfService {
     }
 
     const html = await this.buildHtml(quotation);
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    const browser = await launchPdfBrowser();
 
     try {
       const page = await browser.newPage();
@@ -127,7 +124,7 @@ export class QuotationsPdfService {
 <head>
   <meta charset="utf-8" />
   <style>
-    ${this.buildFontFaces()}
+    ${await this.buildFontFaces()}
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -332,13 +329,16 @@ export class QuotationsPdfService {
 
   private buildDetailRow(item: QuotationForPdf['detalles'][number]) {
     const variant = item.productoVariante;
-    const description = [
-      variant.producto.nombre,
-      variant.productoColor.color.nombre,
-      variant.talla.nombre ? `Talla ${variant.talla.nombre}` : '',
-    ]
-      .filter(Boolean)
-      .join(' - ');
+    const description =
+      variant.producto.tipo === ProductoTipo.normal
+        ? variant.producto.nombre
+        : [
+            variant.producto.nombre,
+            variant.productoColor.color.nombre,
+            variant.talla.nombre ? `Talla ${variant.talla.nombre}` : '',
+          ]
+            .filter(Boolean)
+            .join(' - ');
 
     return `<tr>
       <td class="center">${item.cantidad}</td>
@@ -360,13 +360,12 @@ export class QuotationsPdfService {
     }
 
     if (quotation.empresa.logoUrl) {
-      const stored = await this.localPdfLogoStorageService.saveCompanyLogoFromUrl(
-        {
+      const stored =
+        await this.localPdfLogoStorageService.saveCompanyLogoFromUrl({
           empresaId: quotation.empresa.id,
           imageUrl: quotation.empresa.logoUrl,
           previousUrl: quotation.empresa.logoPdfUrl,
-        },
-      );
+        });
 
       if (stored) {
         await this.prisma.empresa.update({
@@ -413,7 +412,7 @@ export class QuotationsPdfService {
     return 'image/png';
   }
 
-  private buildFontFaces() {
+  private async buildFontFaces() {
     const fontDir = resolve(
       process.cwd(),
       '..',
@@ -422,11 +421,13 @@ export class QuotationsPdfService {
       'public',
       'font',
     );
-    const regular = this.fontDataUri(
+    const regular = await this.fontDataUri(
       resolve(fontDir, 'CircularXXSub-Regular.woff'),
     );
-    const bold = this.fontDataUri(resolve(fontDir, 'CircularXXSub-Bold.woff'));
-    const black = this.fontDataUri(
+    const bold = await this.fontDataUri(
+      resolve(fontDir, 'CircularXXSub-Bold.woff'),
+    );
+    const black = await this.fontDataUri(
       resolve(fontDir, 'CircularXXSub-Black.woff'),
     );
 
@@ -437,12 +438,13 @@ export class QuotationsPdfService {
     `;
   }
 
-  private fontDataUri(path: string) {
-    if (!existsSync(path)) {
+  private async fontDataUri(path: string) {
+    try {
+      const buffer = await readFile(path);
+      return `data:font/woff;base64,${buffer.toString('base64')}`;
+    } catch {
       return null;
     }
-
-    return `data:font/woff;base64,${readFileSync(path).toString('base64')}`;
   }
 
   private getClientDocumentLabel(tipoDocumento: string) {

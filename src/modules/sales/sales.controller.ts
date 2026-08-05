@@ -13,12 +13,20 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
+import { SaleScopeGuard } from './guards/sale-scope.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
+import { getCommercialScope } from '../../common/commercial-access';
 import { SalesPdfService } from './sales-pdf.service';
 import { SalesService } from './sales.service';
+import { SunatBajaService } from '../sunat-emission/sunat-baja.service';
+import { SunatEmissionService } from '../sunat-emission/sunat-emission.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
-import { FindSalesQueryDto } from './dto/find-sales-query.dto';
+import {
+  FindComprobantesQueryDto,
+  FindSalesQueryDto,
+} from './dto/find-sales-query.dto';
 import { FindSaleProductsQueryDto } from './dto/find-sale-products-query.dto';
 import { FindSeriesQueryDto } from './dto/find-series-query.dto';
 import { AnnulSaleDto } from './dto/annul-sale.dto';
@@ -27,68 +35,112 @@ import {
   UpdateSerieComprobanteDto,
 } from './dto/serie-comprobante.dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(ModuleAccessGuard, SaleScopeGuard)
 @Controller('sales')
 export class SalesController {
   constructor(
     private readonly salesService: SalesService,
     private readonly salesPdfService: SalesPdfService,
+    private readonly sunatEmissionService: SunatEmissionService,
+    private readonly sunatBajaService: SunatBajaService,
   ) {}
 
   // ── Products (static route BEFORE :publicId) ────────────────────────
 
   @Get('products')
+  @RequireModule('ventas-pos')
   findProducts(
     @CurrentUser() user: JwtPayload,
     @Query() query: FindSaleProductsQueryDto,
   ) {
-    return this.salesService.findProducts(this.getEmpresaId(user), query);
+    return this.salesService.findProducts(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
   }
 
   // ── Series (static routes BEFORE :publicId) ────────────────────────
 
   @Get('series')
+  @RequireModule('ventas-pos', 'series', 'nota-credito', 'gre-remitente')
   findSeries(
     @CurrentUser() user: JwtPayload,
     @Query() query: FindSeriesQueryDto,
   ) {
-    return this.salesService.findSeries(this.getEmpresaId(user), query);
+    return this.salesService.findSeries(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
   }
 
   @Post('series')
+  @RequireModule('series')
   createSerie(
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateSerieComprobanteDto,
   ) {
+    const scope = getCommercialScope(user);
+    if (scope.branchId) {
+      dto.aplicaTodasSucursales = false;
+      dto.sucursalIds = [scope.branchId.toString()];
+    }
     return this.salesService.createSerie(this.getEmpresaId(user), dto);
   }
 
   @Patch('series/:id')
+  @RequireModule('series')
   updateSerie(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Body() dto: UpdateSerieComprobanteDto,
   ) {
+    const scope = getCommercialScope(user);
+    if (scope.branchId) {
+      dto.aplicaTodasSucursales = false;
+      dto.sucursalIds = [scope.branchId.toString()];
+    }
     return this.salesService.updateSerie(this.getEmpresaId(user), id, dto);
   }
 
   // ── Sales ──────────────────────────────────────────────────────────
 
   @Post()
+  @RequireModule('ventas-pos')
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateSaleDto) {
     return this.salesService.create(
       this.getEmpresaId(user),
-      this.getUserId(user),
+      getCommercialScope(user),
       dto,
     );
   }
 
   @Get()
+  @RequireModule('historial-ventas')
   findAll(@CurrentUser() user: JwtPayload, @Query() query: FindSalesQueryDto) {
-    return this.salesService.findAll(this.getEmpresaId(user), query);
+    return this.salesService.findAll(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
+  }
+
+  @Get('comprobantes')
+  @RequireModule('comprobantes')
+  findComprobantes(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: FindComprobantesQueryDto,
+  ) {
+    return this.salesService.findComprobantes(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
   }
 
   @Get(':publicId/pdf')
+  @RequireModule('historial-ventas', 'comprobantes')
   async generatePdf(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -107,21 +159,148 @@ export class SalesController {
     return new StreamableFile(pdf);
   }
 
+  @Get(':publicId/ticket')
+  @RequireModule('historial-ventas', 'comprobantes')
+  async generateTicket(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const pdf = await this.salesPdfService.generateSaleTicketPdf(
+      this.getEmpresaId(user),
+      publicId,
+    );
+    response.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="ticket-${publicId}.pdf"`,
+      'Content-Length': pdf.length,
+    });
+
+    return new StreamableFile(pdf);
+  }
+
+  @Get(':publicId/sunat')
+  @RequireModule('historial-ventas', 'comprobantes')
+  getSunatStatus(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ) {
+    return this.sunatEmissionService.getSaleSunatStatus(
+      this.getEmpresaId(user),
+      publicId,
+    );
+  }
+
+  @Post(':publicId/sunat/retry')
+  @RequireModule('historial-ventas', 'comprobantes')
+  retrySunat(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ) {
+    return this.sunatEmissionService.retrySale(
+      this.getEmpresaId(user),
+      publicId,
+    );
+  }
+
+  @Get(':publicId/sunat/xml')
+  @RequireModule('historial-ventas', 'comprobantes')
+  async downloadSunatXml(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Res() response: Response,
+  ) {
+    const file = await this.sunatEmissionService.downloadSaleArtifact(
+      this.getEmpresaId(user),
+      publicId,
+      'xml',
+    );
+    return response.redirect(file.url);
+  }
+
+  @Get(':publicId/sunat/cdr')
+  @RequireModule('historial-ventas', 'comprobantes')
+  async downloadSunatCdr(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Res() response: Response,
+  ) {
+    const file = await this.sunatEmissionService.downloadSaleArtifact(
+      this.getEmpresaId(user),
+      publicId,
+      'cdr',
+    );
+    return response.redirect(file.url);
+  }
+
+  @Post(':publicId/sunat/baja/consultar-ticket')
+  @RequireModule('historial-ventas', 'comprobantes')
+  consultarTicketBajaSunat(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ) {
+    return this.sunatBajaService.consultarBajaVenta(
+      this.getEmpresaId(user),
+      publicId,
+    );
+  }
+
+  @Get(':publicId/sunat/baja/xml')
+  @RequireModule('historial-ventas', 'comprobantes')
+  async downloadSunatBajaXml(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Res() response: Response,
+  ) {
+    const file = await this.sunatBajaService.downloadBajaArtifact(
+      this.getEmpresaId(user),
+      publicId,
+      'xml',
+    );
+    return response.redirect(file.url);
+  }
+
+  @Get(':publicId/sunat/baja/cdr')
+  @RequireModule('historial-ventas', 'comprobantes')
+  async downloadSunatBajaCdr(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Res() response: Response,
+  ) {
+    const file = await this.sunatBajaService.downloadBajaArtifact(
+      this.getEmpresaId(user),
+      publicId,
+      'cdr',
+    );
+    return response.redirect(file.url);
+  }
+
   @Get(':publicId')
+  @RequireModule('historial-ventas', 'comprobantes')
   findOne(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
   ) {
-    return this.salesService.findOne(this.getEmpresaId(user), publicId);
+    return this.salesService.findOne(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+    );
   }
 
   @Patch(':publicId/annul')
+  @RequireModule('historial-ventas')
   annul(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
     @Body() dto: AnnulSaleDto,
   ) {
-    return this.salesService.annul(this.getEmpresaId(user), publicId, dto);
+    return this.salesService.annul(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+      dto,
+    );
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────

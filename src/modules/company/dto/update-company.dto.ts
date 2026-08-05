@@ -1,5 +1,12 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
-import { CanalConocimiento, CategoriaProducto } from '@prisma/client';
+import { CanalConocimiento } from '@prisma/client';
+import { Type } from 'class-transformer';
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 
 export class UpdateCompanyDto {
   @IsOptional()
@@ -9,20 +16,12 @@ export class UpdateCompanyDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(80)
-  tipoNegocio?: string;
-
-  @IsOptional()
-  categoriasProducto?: CategoriaProducto[];
-
-  @IsOptional()
-  @IsString()
   @MaxLength(200)
   razonSocial?: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(20)
+  @Matches(/^\d{11}$/, { message: 'El RUC debe tener 11 digitos.' })
   ruc?: string;
 
   @IsOptional()
@@ -40,6 +39,8 @@ export class UpdateCompanyDto {
   direccion?: string;
 
   @IsOptional()
+  @Type(() => String)
+  @IsEnum(CanalConocimiento)
   comoConocio?: CanalConocimiento;
 
   @IsOptional()

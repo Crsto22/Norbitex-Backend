@@ -3,11 +3,19 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CotizacionEstado, Prisma } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { CotizacionEstado, Prisma, SucursalTipo } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  resolveScopedBranchId,
+  scopedCreatorId,
+  type CommercialScope,
+} from '../../common/commercial-access';
+import { parseUnitPrice } from '../../common/unit-price';
 import { SalesService } from '../sales/sales.service';
 import { CreateQuotationDto } from './dto/create-quotation.dto';
 import { FindQuotationsQueryDto } from './dto/find-quotations-query.dto';
+import { resolveHistoryDateRange } from '../../common/history-date-range';
 import { UpdateQuotationDto } from './dto/update-quotation.dto';
 import { AnnulQuotationDto } from './dto/annul-quotation.dto';
 import { ConvertQuotationToSaleDto } from './dto/convert-quotation-to-sale.dto';
@@ -17,9 +25,19 @@ const quotationInclude = {
   cliente: {
     select: {
       id: true,
+      empresaId: true,
       nombre: true,
+      razonSocial: true,
       tipoDocumento: true,
       numeroDocumento: true,
+      telefono: true,
+      email: true,
+      direccion: true,
+      ubigeo: true,
+      distrito: true,
+      estado: true,
+      createdAt: true,
+      updatedAt: true,
     },
   },
   creadoPor: { select: { id: true, nombre: true, apellido: true } },
@@ -30,7 +48,9 @@ const quotationInclude = {
     include: {
       productoVariante: {
         include: {
-          producto: { select: { id: true, nombre: true, publicId: true } },
+          producto: {
+            select: { id: true, nombre: true, publicId: true, tipo: true },
+          },
           productoColor: {
             include: {
               color: { select: { id: true, nombre: true, hex: true } },
@@ -59,10 +79,18 @@ export class QuotationsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
     private readonly salesService: SalesService,
   ) {}
 
-  async create(empresaId: bigint, userId: string, dto: CreateQuotationDto) {
+  async create(
+    empresaId: bigint,
+    scope: CommercialScope,
+    dto: CreateQuotationDto,
+  ) {
+    const effectiveBranchId = resolveScopedBranchId(scope, dto.sucursalId);
+    dto.sucursalId = effectiveBranchId?.toString();
+    const userId = scope.userId.toString();
     const usuarioId = BigInt(userId);
     await this.validateHeaderReferences(
       empresaId,
@@ -113,18 +141,27 @@ export class QuotationsService {
     return this.toQuotationResponse(quotation);
   }
 
-  async findAll(empresaId: bigint, query: FindQuotationsQueryDto) {
+  async findAll(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindQuotationsQueryDto,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? this.getDefaultPaginationLimit();
     const search = query.search?.trim();
-    const dateRange = this.buildDateRange(query.desde, query.hasta);
+    const dateRange = resolveHistoryDateRange(query);
 
     const where: Prisma.CotizacionWhereInput = {
       empresaId,
       ...(query.estado ? { estado: query.estado } : {}),
-      ...(query.sucursalId ? { sucursalId: BigInt(query.sucursalId) } : {}),
+      ...(resolveScopedBranchId(scope, query.sucursalId)
+        ? { sucursalId: resolveScopedBranchId(scope, query.sucursalId)! }
+        : {}),
+      ...(scopedCreatorId(scope)
+        ? { creadoPorId: scopedCreatorId(scope)! }
+        : {}),
       ...(query.clienteId ? { clienteId: BigInt(query.clienteId) } : {}),
-      ...(dateRange ? { createdAt: dateRange } : {}),
+      createdAt: dateRange,
       ...(search
         ? {
             OR: [
@@ -163,9 +200,9 @@ export class QuotationsService {
     };
   }
 
-  async findOne(empresaId: bigint, publicId: string) {
+  async findOne(empresaId: bigint, scope: CommercialScope, publicId: string) {
     const quotation = await this.prisma.cotizacion.findFirst({
-      where: { publicId, empresaId },
+      where: this.quotationAccessWhere(empresaId, scope, publicId),
       include: quotationInclude,
     });
 
@@ -176,9 +213,14 @@ export class QuotationsService {
     return this.toQuotationResponse(quotation);
   }
 
-  async update(empresaId: bigint, publicId: string, dto: UpdateQuotationDto) {
+  async update(
+    empresaId: bigint,
+    scope: CommercialScope,
+    publicId: string,
+    dto: UpdateQuotationDto,
+  ) {
     const quotation = await this.prisma.cotizacion.findFirst({
-      where: { publicId, empresaId },
+      where: this.quotationAccessWhere(empresaId, scope, publicId),
       include: { detalles: true },
     });
 
@@ -192,6 +234,12 @@ export class QuotationsService {
       throw new BadRequestException('La cotizacion esta anulada');
     }
     this.ensureEditableState(dto.estado);
+    const effectiveBranchId =
+      dto.sucursalId === undefined
+        ? undefined
+        : resolveScopedBranchId(scope, dto.sucursalId);
+    if (dto.sucursalId !== undefined)
+      dto.sucursalId = effectiveBranchId?.toString();
     await this.validateHeaderReferences(
       empresaId,
       dto.sucursalId,
@@ -276,9 +324,14 @@ export class QuotationsService {
     return this.toQuotationResponse(updated);
   }
 
-  async annul(empresaId: bigint, publicId: string, dto: AnnulQuotationDto) {
+  async annul(
+    empresaId: bigint,
+    scope: CommercialScope,
+    publicId: string,
+    dto: AnnulQuotationDto,
+  ) {
     const quotation = await this.prisma.cotizacion.findFirst({
-      where: { publicId, empresaId },
+      where: this.quotationAccessWhere(empresaId, scope, publicId),
     });
 
     if (!quotation) {
@@ -306,12 +359,12 @@ export class QuotationsService {
 
   async convertToSale(
     empresaId: bigint,
-    userId: string,
+    scope: CommercialScope,
     publicId: string,
     dto: ConvertQuotationToSaleDto,
   ) {
     const quotation = await this.prisma.cotizacion.findFirst({
-      where: { publicId, empresaId },
+      where: this.quotationAccessWhere(empresaId, scope, publicId),
       include: { detalles: true },
     });
 
@@ -335,10 +388,23 @@ export class QuotationsService {
       throw new BadRequestException('La cotizacion esta vencida');
     }
 
-    const sale = await this.salesService.create(empresaId, userId, {
+    const targetClienteId =
+      dto.clienteId === undefined
+        ? quotation.clienteId?.toString()
+        : (dto.clienteId ?? undefined);
+
+    if (targetClienteId) {
+      await this.validateHeaderReferences(
+        empresaId,
+        undefined,
+        targetClienteId,
+      );
+    }
+
+    const sale = await this.salesService.create(empresaId, scope, {
       tipoComprobante: dto.tipoComprobante,
       sucursalId: quotation.sucursalId?.toString(),
-      clienteId: quotation.clienteId?.toString(),
+      clienteId: targetClienteId,
       descuentoTipo: quotation.descuentoTipo ?? undefined,
       descuentoValor: quotation.descuentoValor?.toString(),
       detalles: quotation.detalles.map((d) => ({
@@ -366,6 +432,7 @@ export class QuotationsService {
       data: {
         estado: CotizacionEstado.convertida,
         convertidaVentaId: venta.id,
+        clienteId: targetClienteId ? BigInt(targetClienteId) : null,
       },
       include: quotationInclude,
     });
@@ -376,6 +443,21 @@ export class QuotationsService {
     };
   }
 
+  private quotationAccessWhere(
+    empresaId: bigint,
+    scope: CommercialScope,
+    publicId: string,
+  ): Prisma.CotizacionWhereInput {
+    return {
+      empresaId,
+      publicId,
+      ...(scope.branchId ? { sucursalId: scope.branchId } : {}),
+      ...(scopedCreatorId(scope)
+        ? { creadoPorId: scopedCreatorId(scope)! }
+        : {}),
+    };
+  }
+
   private async validateHeaderReferences(
     empresaId: bigint,
     sucursalId?: string,
@@ -383,7 +465,12 @@ export class QuotationsService {
   ) {
     if (sucursalId) {
       const sucursal = await this.prisma.sucursal.findFirst({
-        where: { id: BigInt(sucursalId), empresaId },
+        where: {
+          id: BigInt(sucursalId),
+          empresaId,
+          estado: 'activo',
+          tipo: SucursalTipo.tienda,
+        },
       });
       if (!sucursal) {
         throw new NotFoundException('Sucursal no encontrada');
@@ -438,7 +525,7 @@ export class QuotationsService {
     for (const detalle of detalles) {
       const variante = varianteMap.get(detalle.productoVarianteId)!;
       const precioUnitario = detalle.precioUnitario
-        ? new Prisma.Decimal(detalle.precioUnitario)
+        ? parseUnitPrice(detalle.precioUnitario)
         : variante.precioVenta;
       const subtotalLinea = precioUnitario.mul(detalle.cantidad);
       let descuentoMonto = new Prisma.Decimal(0);
@@ -498,37 +585,17 @@ export class QuotationsService {
     }
   }
 
-  private buildDateRange(desde?: string, hasta?: string) {
-    if (!desde && !hasta) {
-      return null;
-    }
-
-    const range: Prisma.DateTimeFilter = {};
-    if (desde) {
-      const date = new Date(desde);
-      if (Number.isNaN(date.getTime())) {
-        throw new BadRequestException('desde debe ser una fecha valida');
-      }
-      range.gte = date;
-    }
-    if (hasta) {
-      const date = new Date(hasta);
-      if (Number.isNaN(date.getTime())) {
-        throw new BadRequestException('hasta debe ser una fecha valida');
-      }
-      range.lte = date;
-    }
-
-    return range;
-  }
-
   private buildCorrelativo(serie: string, numero: number) {
     return `${serie}-${numero.toString().padStart(6, '0')}`;
   }
 
   private getDefaultPaginationLimit() {
-    const defaultLimit = Number(process.env.PAGINATION_DEFAULT_LIMIT ?? 12);
-    const maxLimit = Number(process.env.PAGINATION_MAX_LIMIT ?? 100);
+    const defaultLimit = Number(
+      this.configService.get<string>('PAGINATION_DEFAULT_LIMIT') ?? 12,
+    );
+    const maxLimit = Number(
+      this.configService.get<string>('PAGINATION_MAX_LIMIT') ?? 100,
+    );
 
     if (!Number.isInteger(defaultLimit) || defaultLimit <= 0) {
       return 12;
@@ -573,9 +640,23 @@ export class QuotationsService {
       cliente: quotation.cliente
         ? {
             id: quotation.cliente.id.toString(),
+            empresaId: quotation.cliente.empresaId.toString(),
             nombre: quotation.cliente.nombre,
+            razonSocial: quotation.cliente.razonSocial,
+            displayName:
+              quotation.cliente.razonSocial ||
+              quotation.cliente.nombre ||
+              'Cliente sin nombre',
             tipoDocumento: quotation.cliente.tipoDocumento,
             numeroDocumento: quotation.cliente.numeroDocumento,
+            telefono: quotation.cliente.telefono,
+            email: quotation.cliente.email,
+            direccion: quotation.cliente.direccion,
+            ubigeo: quotation.cliente.ubigeo,
+            distrito: quotation.cliente.distrito,
+            estado: quotation.cliente.estado,
+            createdAt: quotation.cliente.createdAt.toISOString(),
+            updatedAt: quotation.cliente.updatedAt.toISOString(),
           }
         : null,
       creadoPor: quotation.creadoPor
@@ -605,6 +686,7 @@ export class QuotationsService {
               id: pv.producto.id.toString(),
               publicId: pv.producto.publicId,
               nombre: pv.producto.nombre,
+              tipo: pv.producto.tipo,
             },
             color: {
               id: pv.productoColor.color.id.toString(),

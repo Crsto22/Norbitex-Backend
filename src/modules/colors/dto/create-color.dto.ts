@@ -1,4 +1,10 @@
-import { IsBoolean, IsHexColor, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsHexColor,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateColorDto {
   @IsString()

@@ -1,8 +1,9 @@
 import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CotizacionEstado } from '@prisma/client';
+import { HistoryDateQueryDto } from '../../../common/dto/history-date-query.dto';
 
-export class FindQuotationsQueryDto {
+export class FindQuotationsQueryDto extends HistoryDateQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()

@@ -3,9 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
-import { Prisma } from '@prisma/client';
+import { Prisma, SucursalTipo } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocalPdfLogoStorageService } from '../storage/local-pdf-logo-storage.service';
 import { R2StorageService } from '../storage/r2-storage.service';
@@ -25,10 +23,9 @@ export class CompanyService {
       select: {
         id: true,
         nombreComercial: true,
-        tipoNegocio: true,
-        categoriasProducto: true,
         razonSocial: true,
         ruc: true,
+        dni: true,
         telefono: true,
         email: true,
         direccion: true,
@@ -49,10 +46,9 @@ export class CompanyService {
     return {
       id: empresa.id.toString(),
       nombreComercial: empresa.nombreComercial,
-      tipoNegocio: empresa.tipoNegocio,
-      categoriasProducto: empresa.categoriasProducto,
       razonSocial: empresa.razonSocial,
       ruc: empresa.ruc,
+      dni: empresa.dni,
       telefono: empresa.telefono,
       email: empresa.email,
       direccion: empresa.direccion,
@@ -66,100 +62,131 @@ export class CompanyService {
     };
   }
 
-  async update(empresaId: bigint, dto: UpdateCompanyDto) {
-    const updateData: Prisma.EmpresaUpdateInput = {};
-
-    if (dto.nombreComercial !== undefined) {
-      const trimmed = dto.nombreComercial.trim();
-      if (!trimmed) {
-        throw new BadRequestException('El nombre comercial es obligatorio');
-      }
-      updateData.nombreComercial = trimmed;
-    }
-
-    if (dto.tipoNegocio !== undefined) {
-      updateData.tipoNegocio = dto.tipoNegocio.trim() || null;
-    }
-
-    if (dto.categoriasProducto !== undefined) {
-      updateData.categoriasProducto = dto.categoriasProducto;
-    }
-
-    if (dto.razonSocial !== undefined) {
-      updateData.razonSocial = dto.razonSocial.trim() || null;
-    }
-
-    if (dto.ruc !== undefined) {
-      const trimmedRuc = dto.ruc.trim();
-      if (trimmedRuc) {
-        const existing = await this.prisma.empresa.findFirst({
-          where: {
-            ruc: trimmedRuc,
-            id: { not: empresaId },
-          },
-          select: { id: true },
-        });
-        if (existing) {
-          throw new BadRequestException('El RUC ya esta registrado');
-        }
-      }
-      updateData.ruc = trimmedRuc || null;
-    }
-
-    if (dto.telefono !== undefined) {
-      updateData.telefono = dto.telefono.trim() || null;
-    }
-
-    if (dto.email !== undefined) {
-      const trimmedEmail = dto.email.trim();
-      if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-        throw new BadRequestException('El email no es valido');
-      }
-      updateData.email = trimmedEmail || null;
-    }
-
-    if (dto.direccion !== undefined) {
-      updateData.direccion = dto.direccion.trim() || null;
-    }
-
-    if (dto.comoConocio !== undefined) {
-      updateData.comoConocio = dto.comoConocio;
-    }
-
-    if (dto.comoConocioOtro !== undefined) {
-      updateData.comoConocioOtro = dto.comoConocioOtro.trim() || null;
-    }
-
-    const updated = await this.prisma.empresa.update({
-      where: { id: empresaId },
-      data: updateData,
-      select: {
-        id: true,
-        nombreComercial: true,
-        tipoNegocio: true,
-        categoriasProducto: true,
-        razonSocial: true,
-        ruc: true,
-        telefono: true,
-        email: true,
-        direccion: true,
-        logoUrl: true,
-        logoPdfUrl: true,
-        comoConocio: true,
-        comoConocioOtro: true,
-        estado: true,
-        createdAt: true,
-        updatedAt: true,
+  async getSetupStatus(empresaId: bigint) {
+    const activeBranches = await this.prisma.sucursal.count({
+      where: {
+        empresaId,
+        estado: 'activo',
+        tipo: SucursalTipo.tienda,
       },
     });
 
     return {
+      hasActiveBranch: activeBranches > 0,
+      requiresBranch: activeBranches === 0,
+    };
+  }
+
+  async update(empresaId: bigint, dto: UpdateCompanyDto) {
+    const updated = await this.prisma
+      .$transaction(
+        async (tx) => {
+          const current = await tx.empresa.findUnique({
+            where: { id: empresaId },
+            select: { dni: true, ruc: true },
+          });
+          if (!current) {
+            throw new NotFoundException('Empresa no encontrada');
+          }
+
+          const updateData: Prisma.EmpresaUpdateInput = {};
+
+          if (dto.nombreComercial !== undefined) {
+            const trimmed = dto.nombreComercial.trim();
+            if (!trimmed) {
+              throw new BadRequestException(
+                'El nombre comercial es obligatorio',
+              );
+            }
+            updateData.nombreComercial = trimmed;
+          }
+
+          if (dto.razonSocial !== undefined) {
+            updateData.razonSocial = dto.razonSocial.trim() || null;
+          }
+
+          if (dto.ruc !== undefined) {
+            const trimmedRuc = dto.ruc.trim();
+            if (current.dni && !current.ruc) {
+              const razonSocial = dto.razonSocial?.trim();
+              if (!razonSocial) {
+                throw new BadRequestException(
+                  'La razon social es obligatoria para cambiar de DNI a RUC',
+                );
+              }
+              updateData.dni = null;
+              updateData.razonSocial = razonSocial;
+            }
+            updateData.ruc = trimmedRuc;
+          }
+
+          if (dto.telefono !== undefined) {
+            updateData.telefono = dto.telefono.trim() || null;
+          }
+
+          if (dto.email !== undefined) {
+            const trimmedEmail = dto.email.trim();
+            if (
+              trimmedEmail &&
+              !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)
+            ) {
+              throw new BadRequestException('El email no es valido');
+            }
+            updateData.email = trimmedEmail || null;
+          }
+
+          if (dto.direccion !== undefined) {
+            updateData.direccion = dto.direccion.trim() || null;
+          }
+
+          if (dto.comoConocio !== undefined) {
+            updateData.comoConocio = dto.comoConocio;
+          }
+
+          if (dto.comoConocioOtro !== undefined) {
+            updateData.comoConocioOtro = dto.comoConocioOtro.trim() || null;
+          }
+
+          return tx.empresa.update({
+            where: { id: empresaId },
+            data: updateData,
+            select: {
+              id: true,
+              nombreComercial: true,
+              razonSocial: true,
+              ruc: true,
+              dni: true,
+              telefono: true,
+              email: true,
+              direccion: true,
+              logoUrl: true,
+              logoPdfUrl: true,
+              comoConocio: true,
+              comoConocioOtro: true,
+              estado: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+      .catch((error: unknown) => {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          throw new BadRequestException('El RUC ya esta registrado');
+        }
+        throw error;
+      });
+
+    return {
       id: updated.id.toString(),
       nombreComercial: updated.nombreComercial,
-      tipoNegocio: updated.tipoNegocio,
-      categoriasProducto: updated.categoriasProducto,
       razonSocial: updated.razonSocial,
       ruc: updated.ruc,
+      dni: updated.dni,
       telefono: updated.telefono,
       email: updated.email,
       direccion: updated.direccion,
@@ -203,10 +230,9 @@ export class CompanyService {
       select: {
         id: true,
         nombreComercial: true,
-        tipoNegocio: true,
-        categoriasProducto: true,
         razonSocial: true,
         ruc: true,
+        dni: true,
         telefono: true,
         email: true,
         direccion: true,
@@ -223,10 +249,9 @@ export class CompanyService {
     return {
       id: updated.id.toString(),
       nombreComercial: updated.nombreComercial,
-      tipoNegocio: updated.tipoNegocio,
-      categoriasProducto: updated.categoriasProducto,
       razonSocial: updated.razonSocial,
       ruc: updated.ruc,
+      dni: updated.dni,
       telefono: updated.telefono,
       email: updated.email,
       direccion: updated.direccion,

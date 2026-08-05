@@ -1,10 +1,17 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
 import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import { Prisma, VentaEstado, VentaPagoEstado } from '@prisma/client';
+  Prisma,
+  ProductoTipo,
+  SucursalTipo,
+  VentaEstado,
+  VentaPagoEstado,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  resolveScopedBranchId,
+  scopedCreatorId,
+  type CommercialScope,
+} from '../../common/commercial-access';
 import {
   DashboardDateFilter,
   FindDashboardQueryDto,
@@ -22,12 +29,18 @@ type TrendBucket = {
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async find(empresaId: bigint, query: FindDashboardQueryDto) {
-    const sucursalId = await this.resolveSucursalId(
+  async find(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindDashboardQueryDto,
+  ) {
+    const sucursalId = resolveScopedBranchId(scope, query.sucursalId);
+    await this.validateSucursalId(empresaId, sucursalId);
+    const saleWhere = this.buildSaleWhere(
       empresaId,
-      query.sucursalId,
+      sucursalId,
+      scopedCreatorId(scope),
     );
-    const saleWhere = this.buildSaleWhere(empresaId, sucursalId);
     const completedWhere = {
       ...saleWhere,
       estado: VentaEstado.completada,
@@ -46,11 +59,13 @@ export class DashboardService {
       createdAt: { gte: selectedRange.start, lte: selectedRange.end },
     } satisfies Prisma.VentaWhereInput;
     const monthRange = this.getCurrentMonthRange();
+    const todayRange = this.getDateFilterRange('today');
     const trendRange = this.getTrendRange(query.dateFilter ?? 'today');
 
     const [
       completedAggregate,
       periodAggregate,
+      todayAggregate,
       annulledAggregate,
       emittedCount,
       voidedCount,
@@ -69,6 +84,13 @@ export class DashboardService {
         where: {
           ...completedWhere,
           createdAt: { gte: monthRange.start, lte: monthRange.end },
+        },
+        _sum: { total: true },
+      }),
+      this.prisma.venta.aggregate({
+        where: {
+          ...completedWhere,
+          createdAt: { gte: todayRange.start, lte: todayRange.end },
         },
         _sum: { total: true },
       }),
@@ -112,10 +134,30 @@ export class DashboardService {
       }),
     ]);
 
+    const [documentTypeGroups, branchGroups] = await Promise.all([
+      this.prisma.venta.groupBy({
+        by: ['tipoComprobante'],
+        where: selectedCompletedWhere,
+        _count: { _all: true },
+        _sum: { total: true },
+        orderBy: { tipoComprobante: 'asc' },
+      }),
+      this.prisma.venta.groupBy({
+        by: ['sucursalId'],
+        where: selectedCompletedWhere,
+        _sum: { total: true },
+        orderBy: { sucursalId: 'asc' },
+      }),
+    ]);
+
     const topVariants = await this.buildTopVariants(topVariantGroups);
     const paymentMethods = await this.buildPaymentMethods(
       empresaId,
       paymentGroups,
+    );
+    const salesByBranch = await this.buildSalesByBranch(
+      empresaId,
+      branchGroups,
     );
 
     return {
@@ -128,6 +170,7 @@ export class DashboardService {
         },
       },
       summary: {
+        todaySalesTotal: this.decimalToString(todayAggregate._sum.total),
         salesFilterTotal: this.decimalToString(completedAggregate._sum.total),
         periodSalesTotal: this.decimalToString(periodAggregate._sum.total),
         averageTicket: this.decimalToString(completedAggregate._avg.total),
@@ -141,41 +184,40 @@ export class DashboardService {
         granularity: trendRange.granularity,
         data: this.buildSalesTrend(monthlySales, trendRange.buckets),
       },
+      salesByDocumentType: documentTypeGroups
+        .map((group) => ({
+          type: group.tipoComprobante,
+          count: group._count._all,
+          amount: this.decimalToString(group._sum.total),
+        }))
+        .sort((a, b) => b.count - a.count),
+      salesByBranch,
       topVariants,
       paymentMethods,
     };
   }
 
-  private async resolveSucursalId(empresaId: bigint, sucursalId?: string) {
-    if (!sucursalId || sucursalId === 'all') {
-      return null;
-    }
-
-    let id: bigint;
-    try {
-      id = BigInt(sucursalId);
-    } catch {
-      throw new BadRequestException(
-        'sucursalId debe ser un identificador valido',
-      );
-    }
-
+  private async validateSucursalId(empresaId: bigint, id: bigint | null) {
+    if (!id) return;
     const sucursal = await this.prisma.sucursal.findFirst({
-      where: { id, empresaId },
+      where: { id, empresaId, tipo: SucursalTipo.tienda },
       select: { id: true },
     });
 
     if (!sucursal) {
       throw new NotFoundException('Sucursal no encontrada');
     }
-
-    return id;
   }
 
-  private buildSaleWhere(empresaId: bigint, sucursalId: bigint | null) {
+  private buildSaleWhere(
+    empresaId: bigint,
+    sucursalId: bigint | null,
+    userId: bigint | null,
+  ) {
     return {
       empresaId,
       ...(sucursalId ? { sucursalId } : {}),
+      ...(userId ? { creadoPorId: userId } : {}),
     } satisfies Prisma.VentaWhereInput;
   }
 
@@ -290,7 +332,7 @@ export class DashboardService {
     const variants = await this.prisma.productoVariante.findMany({
       where: { id: { in: variantIds } },
       include: {
-        producto: { select: { nombre: true } },
+        producto: { select: { nombre: true, tipo: true } },
         productoColor: {
           include: { color: { select: { nombre: true, hex: true } } },
         },
@@ -306,12 +348,23 @@ export class DashboardService {
       return {
         productoVarianteId: group.productoVarianteId.toString(),
         name: variant
-          ? `${variant.producto.nombre} - ${variant.talla.nombre}`
+          ? variant.producto.tipo === ProductoTipo.normal
+            ? variant.producto.nombre
+            : `${variant.producto.nombre} - ${variant.talla.nombre}`
           : `Variante ${group.productoVarianteId.toString()}`,
         productName: variant?.producto.nombre ?? null,
-        colorName: variant?.productoColor.color.nombre ?? null,
-        colorHex: variant?.productoColor.color.hex ?? null,
-        sizeName: variant?.talla.nombre ?? null,
+        colorName:
+          variant?.producto.tipo === ProductoTipo.normal
+            ? null
+            : (variant?.productoColor.color.nombre ?? null),
+        colorHex:
+          variant?.producto.tipo === ProductoTipo.normal
+            ? null
+            : (variant?.productoColor.color.hex ?? null),
+        sizeName:
+          variant?.producto.tipo === ProductoTipo.normal
+            ? null
+            : (variant?.talla.nombre ?? null),
         units: group._sum?.cantidad ?? 0,
         total: this.decimalToString(group._sum?.total),
       };
@@ -360,6 +413,35 @@ export class DashboardService {
           color: paymentColors[index % paymentColors.length],
         };
       });
+  }
+
+  private async buildSalesByBranch(
+    empresaId: bigint,
+    groups: Array<{
+      sucursalId: bigint | null;
+      _sum?: { total?: Prisma.Decimal | null };
+    }>,
+  ) {
+    const branchIds = groups.flatMap((group) =>
+      group.sucursalId ? [group.sucursalId] : [],
+    );
+    const branches = await this.prisma.sucursal.findMany({
+      where: { empresaId, id: { in: branchIds } },
+      select: { id: true, nombre: true },
+    });
+    const branchMap = new Map(
+      branches.map((branch) => [branch.id.toString(), branch.nombre]),
+    );
+
+    return groups
+      .map((group) => ({
+        sucursalId: group.sucursalId?.toString() ?? null,
+        name: group.sucursalId
+          ? (branchMap.get(group.sucursalId.toString()) ?? 'Sucursal')
+          : 'Sin sucursal',
+        amount: this.decimalToString(group._sum?.total),
+      }))
+      .sort((a, b) => Number(b.amount) - Number(a.amount));
   }
 
   private decimalToString(value?: Prisma.Decimal | null) {

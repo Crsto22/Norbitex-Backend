@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateColorDto } from './dto/create-color.dto';
@@ -7,7 +12,10 @@ import { UpdateColorDto } from './dto/update-color.dto';
 
 @Injectable()
 export class ColorsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
   async findAll(empresaId: bigint, query: FindColorsQueryDto) {
     const page = query.page ?? 1;
@@ -16,6 +24,7 @@ export class ColorsService {
     const where: Prisma.ColorWhereInput = {
       empresaId,
       deletedAt: null,
+      sistemaCodigo: null,
       ...(query.status ? { activo: query.status === 'active' } : {}),
       ...(search
         ? {
@@ -28,29 +37,32 @@ export class ColorsService {
         : {}),
     };
 
-    const [colors, total, activeTotal, inactiveTotal] = await this.prisma.$transaction([
-      this.prisma.color.findMany({
-        where,
-        orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.color.count({ where }),
-      this.prisma.color.count({
-        where: {
-          empresaId,
-          deletedAt: null,
-          activo: true,
-        },
-      }),
-      this.prisma.color.count({
-        where: {
-          empresaId,
-          deletedAt: null,
-          activo: false,
-        },
-      }),
-    ]);
+    const [colors, total, activeTotal, inactiveTotal] =
+      await this.prisma.$transaction([
+        this.prisma.color.findMany({
+          where,
+          orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.prisma.color.count({ where }),
+        this.prisma.color.count({
+          where: {
+            empresaId,
+            deletedAt: null,
+            sistemaCodigo: null,
+            activo: true,
+          },
+        }),
+        this.prisma.color.count({
+          where: {
+            empresaId,
+            deletedAt: null,
+            sistemaCodigo: null,
+            activo: false,
+          },
+        }),
+      ]);
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
     return {
@@ -168,6 +180,7 @@ export class ColorsService {
         id,
         empresaId,
         deletedAt: null,
+        sistemaCodigo: null,
       },
       select: { id: true },
     });
@@ -182,8 +195,12 @@ export class ColorsService {
   }
 
   private getDefaultPaginationLimit() {
-    const defaultLimit = Number(process.env.PAGINATION_DEFAULT_LIMIT ?? 12);
-    const maxLimit = Number(process.env.PAGINATION_MAX_LIMIT ?? 100);
+    const defaultLimit = Number(
+      this.configService.get<string>('PAGINATION_DEFAULT_LIMIT') ?? 12,
+    );
+    const maxLimit = Number(
+      this.configService.get<string>('PAGINATION_MAX_LIMIT') ?? 100,
+    );
 
     if (!Number.isInteger(defaultLimit) || defaultLimit <= 0) {
       return 12;

@@ -15,34 +15,57 @@ import {
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
+import { getCommercialScope } from '../../common/commercial-access';
 import { CreateProductDto } from './dto/create-product.dto';
 import { FindProductsQueryDto } from './dto/find-products-query.dto';
 import { ProductsService } from './products.service';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(ModuleAccessGuard)
 @Controller('products')
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Get()
+  @RequireModule(
+    'productos',
+    'gre-remitente',
+    'stock-movimientos',
+    'stock-traspasos',
+  )
   findAll(
     @CurrentUser() user: JwtPayload,
     @Query() query: FindProductsQueryDto,
   ) {
-    return this.productsService.findAll(this.getEmpresaId(user), query);
+    return this.productsService.findAll(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
   }
 
   @Get(':publicId')
+  @RequireModule(
+    'productos',
+    'gre-remitente',
+    'stock-movimientos',
+    'stock-traspasos',
+  )
   findOne(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
   ) {
-    return this.productsService.findOne(this.getEmpresaId(user), publicId);
+    return this.productsService.findOne(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+    );
   }
 
   @Post()
+  @RequireModule('productos')
   @UseInterceptors(
     FilesInterceptor('images', 40, {
       storage: memoryStorage(),
@@ -57,10 +80,16 @@ export class ProductsController {
     @Body() dto: CreateProductDto,
     @UploadedFiles() files: Express.Multer.File[] = [],
   ) {
-    return this.productsService.create(this.getEmpresaId(user), dto, files);
+    return this.productsService.create(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      dto,
+      files,
+    );
   }
 
   @Patch(':publicId')
+  @RequireModule('productos')
   @UseInterceptors(
     FilesInterceptor('images', 40, {
       storage: memoryStorage(),
@@ -76,14 +105,18 @@ export class ProductsController {
     @Body() dto: CreateProductDto,
     @UploadedFiles() files: Express.Multer.File[] = [],
   ) {
-    return this.productsService.update(this.getEmpresaId(user), publicId, dto, files);
+    return this.productsService.update(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+      dto,
+      files,
+    );
   }
 
   @Delete(':publicId')
-  remove(
-    @CurrentUser() user: JwtPayload,
-    @Param('publicId') publicId: string,
-  ) {
+  @RequireModule('productos')
+  remove(@CurrentUser() user: JwtPayload, @Param('publicId') publicId: string) {
     return this.productsService.remove(this.getEmpresaId(user), publicId);
   }
 

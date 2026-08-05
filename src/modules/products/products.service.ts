@@ -4,8 +4,21 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, SucursalEstado } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import {
+  Prisma,
+  ProductoTipo,
+  StockMovimientoTipo,
+  SucursalEstado,
+} from '@prisma/client';
+import { randomInt } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  resolveScopedBranchId,
+  type CommercialScope,
+} from '../../common/commercial-access';
+import { PlansService } from '../plans/plans.service';
+import { StockService } from '../stock/stock.service';
 import { R2StorageService } from '../storage/r2-storage.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { FindProductsQueryDto } from './dto/find-products-query.dto';
@@ -33,8 +46,10 @@ type ProductVariantInput = {
   stocks?: ProductVariantStockInput[];
 };
 
+type SimpleProductInput = Omit<ProductVariantInput, 'colorId' | 'tallaId'>;
+
 type ProductImageInput = {
-  colorId: string;
+  colorId?: string;
   orden?: number;
   esPrincipal?: boolean;
   serverId?: string;
@@ -83,10 +98,17 @@ type ProductWithRelations = Prisma.ProductoGetPayload<{
 export class ProductsService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
     private readonly r2StorageService: R2StorageService,
+    private readonly plansService: PlansService,
+    private readonly stockService: StockService,
   ) {}
 
-  async findAll(empresaId: bigint, query: FindProductsQueryDto) {
+  async findAll(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindProductsQueryDto,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? this.getDefaultPaginationLimit();
     const search = query.search?.trim();
@@ -94,7 +116,7 @@ export class ProductsService {
     const marcaId = this.parseOptionalId(query.marcaId, 'marcaId');
     const colorId = this.parseOptionalId(query.colorId, 'colorId');
     const tallaId = this.parseOptionalId(query.tallaId, 'tallaId');
-    const sucursalId = this.parseOptionalId(query.sucursalId, 'sucursalId');
+    const sucursalId = resolveScopedBranchId(scope, query.sucursalId);
     const variantWhere = this.buildProductVariantWhere({
       empresaId,
       colorId,
@@ -190,22 +212,18 @@ export class ProductsService {
 
   async create(
     empresaId: bigint,
+    scope: CommercialScope,
     dto: CreateProductDto,
     files: Express.Multer.File[] = [],
   ) {
     const nombre = this.cleanText(dto.nombre);
     const nombreKey = this.buildNameKey(nombre);
-    const colores = this.parseJsonArray<ProductColorInput>(
-      dto.colores,
-      'colores',
-    );
-    const variantes = this.parseJsonArray<ProductVariantInput>(
-      dto.variantes,
-      'variantes',
-    );
-    const imagenes = this.parseJsonArray<ProductImageInput>(
-      dto.imagenes ?? '[]',
-      'imagenes',
+    const tipo =
+      dto.tipo === 'normal' ? ProductoTipo.normal : ProductoTipo.variantes;
+    const { colores, variantes, imagenes } = await this.resolveProductInputs(
+      empresaId,
+      tipo,
+      dto,
     );
 
     if (colores.length === 0) {
@@ -235,6 +253,7 @@ export class ProductsService {
         (variant.stocks ?? []).map((stock) => stock.sucursalId),
       ),
     );
+    this.assertStockScope(scope, stockSucursalIds);
 
     this.validateVariantsBelongToColors(variantes, colorIds);
     this.validateUniqueVariants(variantes);
@@ -252,77 +271,110 @@ export class ProductsService {
     let productId: bigint | null = null;
 
     try {
-      const product = await this.prisma.$transaction(async (tx) => {
-        const unidadMedida = await this.upsertUnidadMedida(
-          tx,
-          dto.unidadMedidaCodigo ?? 'NIU',
-        );
-        const tipoAfectacionIgv = await this.upsertTipoAfectacionIgv(
-          tx,
-          dto.tipoAfectacionIgvCodigo ?? '10',
-        );
-        const createdProduct = await tx.producto.create({
-          data: {
+      const product = await this.prisma.$transaction(
+        async (tx) => {
+          await this.plansService.assertResourceLimits(tx, empresaId, {
+            products: 1,
+            variants: tipo === ProductoTipo.variantes ? variantes.length : 0,
+            storageBytes: files.reduce((total, file) => total + file.size, 0),
+          });
+          const unidadMedida = await this.upsertUnidadMedida(
+            tx,
+            dto.unidadMedidaCodigo ?? 'NIU',
+          );
+          const tipoAfectacionIgv = await this.upsertTipoAfectacionIgv(
+            tx,
+            dto.tipoAfectacionIgvCodigo ?? '10',
+          );
+          const createdProduct = await tx.producto.create({
+            data: {
+              empresaId,
+              marcaId,
+              categoriaId,
+              unidadMedidaId: unidadMedida.id,
+              tipoAfectacionIgvId: tipoAfectacionIgv.id,
+              nombre,
+              nombreKey,
+              tipo,
+              descripcion: this.cleanOptionalText(dto.descripcion),
+              activo: this.parseBoolean(dto.activo, true),
+            },
+          });
+          const productColors = await Promise.all(
+            colores.map((color) =>
+              tx.productoColor.create({
+                data: {
+                  empresaId,
+                  productoId: createdProduct.id,
+                  colorId: this.parseId(color.colorId, 'colorId'),
+                  activo: color.activo ?? true,
+                },
+              }),
+            ),
+          );
+          const productColorByColorId = new Map(
+            productColors.map((productColor) => [
+              productColor.colorId.toString(),
+              productColor,
+            ]),
+          );
+          const colorNameById = await this.getColorNameById(
+            tx,
             empresaId,
-            marcaId,
-            categoriaId,
-            unidadMedidaId: unidadMedida.id,
-            tipoAfectacionIgvId: tipoAfectacionIgv.id,
-            nombre,
-            nombreKey,
-            descripcion: this.cleanOptionalText(dto.descripcion),
-            activo: this.parseBoolean(dto.activo, true),
-          },
-        });
-        const productColors = await Promise.all(
-          colores.map((color) =>
-            tx.productoColor.create({
+            colorIds,
+          );
+          const sizeNameById = await this.getSizeNameById(
+            tx,
+            empresaId,
+            tallaIds,
+          );
+          const reservedSkus = new Set<string>();
+          const reservedBarcodes = new Set<string>();
+
+          for (const variant of variantes) {
+            const productColor = productColorByColorId.get(variant.colorId);
+
+            if (!productColor) {
+              throw new BadRequestException(
+                'Todas las variantes deben pertenecer a un color del producto',
+              );
+            }
+
+            const createdVariant = await tx.productoVariante.create({
               data: {
                 empresaId,
                 productoId: createdProduct.id,
-                colorId: this.parseId(color.colorId, 'colorId'),
-                activo: color.activo ?? true,
+                productoColorId: productColor.id,
+                tallaId: this.parseId(variant.tallaId, 'tallaId'),
+                sku: await this.resolveVariantSku({
+                  tx,
+                  empresaId,
+                  productName: nombre,
+                  colorName: colorNameById.get(variant.colorId) ?? 'GEN',
+                  sizeName: sizeNameById.get(variant.tallaId) ?? 'UNI',
+                  inputSku: variant.sku,
+                  reservedSkus,
+                }),
+                codigoBarras: await this.resolveVariantBarcode({
+                  tx,
+                  empresaId,
+                  inputBarcode: variant.codigoBarras,
+                  reservedBarcodes,
+                }),
+                precioCompra: this.toOptionalDecimal(variant.precioCompra),
+                precioVenta: this.toRequiredDecimal(
+                  variant.precioVenta,
+                  'precioVenta',
+                ),
+                precioMayorista: this.toOptionalDecimal(
+                  variant.precioMayorista,
+                ),
+                activo: variant.activo ?? true,
               },
-            }),
-          ),
-        );
-        const productColorByColorId = new Map(
-          productColors.map((productColor) => [
-            productColor.colorId.toString(),
-            productColor,
-          ]),
-        );
+            });
 
-        for (const variant of variantes) {
-          const productColor = productColorByColorId.get(variant.colorId);
-
-          if (!productColor) {
-            throw new BadRequestException(
-              'Todas las variantes deben pertenecer a un color del producto',
-            );
-          }
-
-          const createdVariant = await tx.productoVariante.create({
-            data: {
-              empresaId,
-              productoId: createdProduct.id,
-              productoColorId: productColor.id,
-              tallaId: this.parseId(variant.tallaId, 'tallaId'),
-              sku: this.cleanOptionalText(variant.sku),
-              codigoBarras: this.cleanOptionalText(variant.codigoBarras),
-              precioCompra: this.toOptionalDecimal(variant.precioCompra),
-              precioVenta: this.toRequiredDecimal(
-                variant.precioVenta,
-                'precioVenta',
-              ),
-              precioMayorista: this.toOptionalDecimal(variant.precioMayorista),
-              activo: variant.activo ?? true,
-            },
-          });
-
-          for (const stock of variant.stocks ?? []) {
-            await tx.inventarioSucursal.create({
-              data: {
+            for (const stock of variant.stocks ?? []) {
+              await this.stockService.setStock(tx, {
                 empresaId,
                 sucursalId: this.parseId(stock.sucursalId, 'sucursalId'),
                 productoVarianteId: createdVariant.id,
@@ -334,30 +386,39 @@ export class ProductsService {
                   stock.stockMinimo ?? 0,
                   'stockMinimo',
                 ),
-              },
+                tipo: StockMovimientoTipo.stock_inicial,
+                motivo: 'Stock inicial del producto',
+                creadoPorId: scope.userId,
+              });
+            }
+          }
+
+          if (files.length > 0) {
+            await this.createProductImages({
+              tx,
+              empresaId,
+              productoId: createdProduct.id,
+              productColors,
+              imagenes,
+              files,
             });
           }
-        }
 
-        return {
-          product: createdProduct,
-          productColors,
-        };
-      });
+          return {
+            product: createdProduct,
+            productColors,
+          };
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          maxWait: 10_000,
+          timeout: 120_000,
+        },
+      );
 
       productId = product.product.id;
 
-      if (files.length > 0) {
-        await this.createProductImages({
-          empresaId,
-          productoId: product.product.id,
-          productColors: product.productColors,
-          imagenes,
-          files,
-        });
-      }
-
-      return this.findOne(empresaId, product.product.publicId);
+      return this.findOne(empresaId, scope, product.product.publicId);
     } catch (error) {
       if (productId) {
         await this.prisma.producto
@@ -369,7 +430,7 @@ export class ProductsService {
     }
   }
 
-  async findOne(empresaId: bigint, publicId: string) {
+  async findOne(empresaId: bigint, scope: CommercialScope, publicId: string) {
     const product = await this.prisma.producto.findFirst({
       where: {
         publicId,
@@ -383,11 +444,12 @@ export class ProductsService {
       throw new NotFoundException('Producto no encontrado');
     }
 
-    return this.toResponse(product);
+    return this.toResponse(product, { sucursalId: scope.branchId });
   }
 
   async update(
     empresaId: bigint,
+    scope: CommercialScope,
     publicId: string,
     dto: CreateProductDto,
     files: Express.Multer.File[] = [],
@@ -403,11 +465,22 @@ export class ProductsService {
 
     const id = existing.id;
 
+    const tipo = dto.tipo
+      ? dto.tipo === 'normal'
+        ? ProductoTipo.normal
+        : ProductoTipo.variantes
+      : existing.tipo;
+    if (tipo !== existing.tipo) {
+      throw new BadRequestException('El tipo de producto no se puede cambiar');
+    }
+
     const nombre = this.cleanText(dto.nombre);
     const nombreKey = this.buildNameKey(nombre);
-    const colores = this.parseJsonArray<ProductColorInput>(dto.colores, 'colores');
-    const variantes = this.parseJsonArray<ProductVariantInput>(dto.variantes, 'variantes');
-    const imagenes = this.parseJsonArray<ProductImageInput>(dto.imagenes ?? '[]', 'imagenes');
+    const { colores, variantes, imagenes } = await this.resolveProductInputs(
+      empresaId,
+      tipo,
+      dto,
+    );
 
     if (colores.length === 0) {
       throw new BadRequestException('Agrega al menos un color al producto');
@@ -423,16 +496,36 @@ export class ProductsService {
         'La cantidad de imagenes no coincide con la metadata enviada',
       );
     }
+    const inputImageIds = new Set(
+      imagenes
+        .filter((image) => image.serverId)
+        .map((image) => image.serverId!),
+    );
+    const removedImageBytes = existing.colores
+      .flatMap((color) => color.imagenes)
+      .filter((image) => !inputImageIds.has(image.id.toString()))
+      .reduce((total, image) => total + image.sizeBytes, 0);
+    const storageIncrement =
+      files.reduce((total, file) => total + file.size, 0) - removedImageBytes;
+    const variantIncrement =
+      tipo === ProductoTipo.variantes
+        ? Math.max(0, variantes.length - existing.variantes.length)
+        : 0;
 
     const marcaId = this.parseOptionalId(dto.marcaId, 'marcaId');
     const categoriaId = this.parseOptionalId(dto.categoriaId, 'categoriaId');
-    const colorIds = this.uniqueBigIntIds(colores.map((color) => color.colorId));
-    const tallaIds = this.uniqueBigIntIds(variantes.map((variant) => variant.tallaId));
+    const colorIds = this.uniqueBigIntIds(
+      colores.map((color) => color.colorId),
+    );
+    const tallaIds = this.uniqueBigIntIds(
+      variantes.map((variant) => variant.tallaId),
+    );
     const stockSucursalIds = this.uniqueBigIntIds(
       variantes.flatMap((variant) =>
         (variant.stocks ?? []).map((stock) => stock.sucursalId),
       ),
     );
+    this.assertStockScope(scope, stockSucursalIds);
 
     this.validateVariantsBelongToColors(variantes, colorIds);
     this.validateUniqueVariants(variantes);
@@ -447,237 +540,306 @@ export class ProductsService {
       stockSucursalIds,
     });
 
-    await this.prisma.$transaction(async (tx) => {
-      const unidadMedida = await this.upsertUnidadMedida(
-        tx,
-        dto.unidadMedidaCodigo ?? 'NIU',
-      );
-      const tipoAfectacionIgv = await this.upsertTipoAfectacionIgv(
-        tx,
-        dto.tipoAfectacionIgvCodigo ?? '10',
-      );
-
-      await tx.producto.update({
-        where: { id },
-        data: {
-          nombre,
-          nombreKey,
-          descripcion: this.cleanOptionalText(dto.descripcion),
-          marcaId,
-          categoriaId,
-          unidadMedidaId: unidadMedida.id,
-          tipoAfectacionIgvId: tipoAfectacionIgv.id,
-          activo: this.parseBoolean(dto.activo, true),
-        },
-      });
-
-      const existingColors = await tx.productoColor.findMany({
-        where: { productoId: id },
-        select: { id: true, colorId: true },
-      });
-      const existingColorIdSet = new Set(
-        existingColors.map((c) => c.colorId.toString()),
-      );
-      const inputColorIdSet = new Set(colorIds.map((c) => c.toString()));
-      const inputColorMap = new Map(
-        colores.map((c) => [c.colorId, c.activo ?? true]),
-      );
-
-      for (const existingColor of existingColors) {
-        const isActive = inputColorMap.get(existingColor.colorId.toString());
-        if (isActive === undefined) {
-          await tx.productoColor.delete({ where: { id: existingColor.id } });
-        } else {
-          await tx.productoColor.update({
-            where: { id: existingColor.id },
-            data: { activo: isActive },
-          });
-        }
-      }
-
-      const colorsToAdd = colores.filter(
-        (c) => !existingColorIdSet.has(c.colorId),
-      );
-      if (colorsToAdd.length > 0) {
-        await Promise.all(
-          colorsToAdd.map((color) =>
-            tx.productoColor.create({
-              data: {
-                empresaId,
-                productoId: id,
-                colorId: this.parseId(color.colorId, 'colorId'),
-                activo: color.activo ?? true,
-              },
-            }),
-          ),
+    await this.prisma.$transaction(
+      async (tx) => {
+        await this.plansService.assertResourceLimits(tx, empresaId, {
+          variants: variantIncrement,
+          storageBytes: storageIncrement,
+        });
+        const unidadMedida = await this.upsertUnidadMedida(
+          tx,
+          dto.unidadMedidaCodigo ?? 'NIU',
         );
-      }
+        const tipoAfectacionIgv = await this.upsertTipoAfectacionIgv(
+          tx,
+          dto.tipoAfectacionIgvCodigo ?? '10',
+        );
 
-      const allProductColors = await tx.productoColor.findMany({
-        where: { productoId: id },
-      });
-      const productColorByColorId = new Map(
-        allProductColors.map((pc) => [pc.colorId.toString(), pc]),
-      );
+        await tx.producto.update({
+          where: { id },
+          data: {
+            nombre,
+            nombreKey,
+            descripcion: this.cleanOptionalText(dto.descripcion),
+            marcaId,
+            categoriaId,
+            unidadMedidaId: unidadMedida.id,
+            tipoAfectacionIgvId: tipoAfectacionIgv.id,
+            activo: this.parseBoolean(dto.activo, true),
+          },
+        });
 
-      const existingVariants = await tx.productoVariante.findMany({
-        where: { productoId: id, deletedAt: null },
-        include: { productoColor: true, inventarios: true },
-      });
-      const existingVariantKeyMap = new Map(
-        existingVariants.map((v) => [
-          `${v.productoColor.colorId.toString()}-${v.tallaId.toString()}`,
-          v,
-        ]),
-      );
+        const existingColors = await tx.productoColor.findMany({
+          where: { productoId: id },
+          select: { id: true, colorId: true },
+        });
+        const existingColorIdSet = new Set(
+          existingColors.map((c) => c.colorId.toString()),
+        );
+        const inputColorMap = new Map(
+          colores.map((c) => [c.colorId, c.activo ?? true]),
+        );
 
-      const inputVariantKeys = new Set(
-        variantes.map((v) => `${v.colorId}-${v.tallaId}`),
-      );
-
-      for (const existingVariant of existingVariants) {
-        const key = `${existingVariant.productoColor.colorId.toString()}-${existingVariant.tallaId.toString()}`;
-        if (!inputVariantKeys.has(key)) {
-          await tx.productoVariante.update({
-            where: { id: existingVariant.id },
-            data: { deletedAt: new Date() },
-          });
+        for (const existingColor of existingColors) {
+          const isActive = inputColorMap.get(existingColor.colorId.toString());
+          if (isActive === undefined) {
+            await tx.productoColor.delete({ where: { id: existingColor.id } });
+          } else {
+            await tx.productoColor.update({
+              where: { id: existingColor.id },
+              data: { activo: isActive },
+            });
+          }
         }
-      }
 
-      for (const variant of variantes) {
-        const key = `${variant.colorId}-${variant.tallaId}`;
-        const existingVariant = existingVariantKeyMap.get(key);
-        const productColor = productColorByColorId.get(variant.colorId);
-
-        if (!productColor) {
-          throw new BadRequestException(
-            'Todas las variantes deben pertenecer a un color del producto',
+        const colorsToAdd = colores.filter(
+          (c) => !existingColorIdSet.has(c.colorId),
+        );
+        if (colorsToAdd.length > 0) {
+          await Promise.all(
+            colorsToAdd.map((color) =>
+              tx.productoColor.create({
+                data: {
+                  empresaId,
+                  productoId: id,
+                  colorId: this.parseId(color.colorId, 'colorId'),
+                  activo: color.activo ?? true,
+                },
+              }),
+            ),
           );
         }
 
-        const variantData = {
+        const allProductColors = await tx.productoColor.findMany({
+          where: { productoId: id },
+        });
+        const productColorByColorId = new Map(
+          allProductColors.map((pc) => [pc.colorId.toString(), pc]),
+        );
+        const colorNameById = await this.getColorNameById(
+          tx,
           empresaId,
-          productoId: id,
-          productoColorId: productColor.id,
-          tallaId: this.parseId(variant.tallaId, 'tallaId'),
-          sku: this.cleanOptionalText(variant.sku),
-          codigoBarras: this.cleanOptionalText(variant.codigoBarras),
-          precioCompra: this.toOptionalDecimal(variant.precioCompra),
-          precioVenta: this.toRequiredDecimal(variant.precioVenta, 'precioVenta'),
-          precioMayorista: this.toOptionalDecimal(variant.precioMayorista),
-          activo: variant.activo ?? true,
-        };
-
-        if (existingVariant) {
-          await tx.productoVariante.update({
-            where: { id: existingVariant.id },
-            data: variantData,
-          });
-        } else {
-          await tx.productoVariante.create({ data: variantData });
-        }
-      }
-
-      const allVariants = await tx.productoVariante.findMany({
-        where: { productoId: id, deletedAt: null },
-        include: { productoColor: true },
-      });
-
-      for (const variant of allVariants) {
-        const inputVariant = variantes.find(
-          (v) =>
-            v.colorId === variant.productoColor.colorId.toString() &&
-            v.tallaId === variant.tallaId.toString(),
+          colorIds,
+        );
+        const sizeNameById = await this.getSizeNameById(
+          tx,
+          empresaId,
+          tallaIds,
         );
 
-        if (!inputVariant) {
-          continue;
+        const existingVariants = await tx.productoVariante.findMany({
+          where: { productoId: id, deletedAt: null },
+          include: { productoColor: true, inventarios: true },
+        });
+        const reservedSkus = new Set(
+          existingVariants
+            .map((item) => item.sku)
+            .filter((value): value is string => Boolean(value)),
+        );
+        const reservedBarcodes = new Set(
+          existingVariants
+            .map((item) => item.codigoBarras)
+            .filter((value): value is string => Boolean(value)),
+        );
+        const existingVariantKeyMap = new Map(
+          existingVariants.map((v) => [
+            `${v.productoColor.colorId.toString()}-${v.tallaId.toString()}`,
+            v,
+          ]),
+        );
+
+        const inputVariantKeys = new Set(
+          variantes.map((v) => `${v.colorId}-${v.tallaId}`),
+        );
+
+        for (const existingVariant of existingVariants) {
+          const key = `${existingVariant.productoColor.colorId.toString()}-${existingVariant.tallaId.toString()}`;
+          if (!inputVariantKeys.has(key)) {
+            await tx.productoVariante.update({
+              where: { id: existingVariant.id },
+              data: { deletedAt: new Date() },
+            });
+          }
         }
 
-        for (const stock of inputVariant.stocks ?? []) {
-          await tx.inventarioSucursal.upsert({
-            where: {
-              sucursalId_productoVarianteId: {
-                sucursalId: this.parseId(stock.sucursalId, 'sucursalId'),
-                productoVarianteId: variant.id,
-              },
-            },
-            create: {
+        for (const variant of variantes) {
+          const key = `${variant.colorId}-${variant.tallaId}`;
+          const existingVariant = existingVariantKeyMap.get(key);
+          const productColor = productColorByColorId.get(variant.colorId);
+          if (existingVariant?.sku) reservedSkus.delete(existingVariant.sku);
+          if (existingVariant?.codigoBarras) {
+            reservedBarcodes.delete(existingVariant.codigoBarras);
+          }
+
+          if (!productColor) {
+            throw new BadRequestException(
+              'Todas las variantes deben pertenecer a un color del producto',
+            );
+          }
+
+          const variantData = {
+            empresaId,
+            productoId: id,
+            productoColorId: productColor.id,
+            tallaId: this.parseId(variant.tallaId, 'tallaId'),
+            sku: await this.resolveVariantSku({
+              tx,
+              empresaId,
+              productName: nombre,
+              colorName: colorNameById.get(variant.colorId) ?? 'GEN',
+              sizeName: sizeNameById.get(variant.tallaId) ?? 'UNI',
+              inputSku: variant.sku,
+              existingSku: existingVariant?.sku,
+              excludeVariantId: existingVariant?.id,
+              reservedSkus,
+            }),
+            codigoBarras: await this.resolveVariantBarcode({
+              tx,
+              empresaId,
+              inputBarcode: variant.codigoBarras,
+              existingBarcode: existingVariant?.codigoBarras,
+              excludeVariantId: existingVariant?.id,
+              reservedBarcodes,
+            }),
+            precioCompra: this.toOptionalDecimal(variant.precioCompra),
+            precioVenta: this.toRequiredDecimal(
+              variant.precioVenta,
+              'precioVenta',
+            ),
+            precioMayorista: this.toOptionalDecimal(variant.precioMayorista),
+            activo: variant.activo ?? true,
+          };
+
+          if (existingVariant) {
+            await tx.productoVariante.update({
+              where: { id: existingVariant.id },
+              data: variantData,
+            });
+          } else {
+            await tx.productoVariante.create({ data: variantData });
+          }
+
+          if (variantData.sku) reservedSkus.add(variantData.sku);
+          if (variantData.codigoBarras) {
+            reservedBarcodes.add(variantData.codigoBarras);
+          }
+        }
+
+        const allVariants = await tx.productoVariante.findMany({
+          where: { productoId: id, deletedAt: null },
+          include: { productoColor: true },
+        });
+
+        for (const variant of allVariants) {
+          const inputVariant = variantes.find(
+            (v) =>
+              v.colorId === variant.productoColor.colorId.toString() &&
+              v.tallaId === variant.tallaId.toString(),
+          );
+
+          if (!inputVariant) {
+            continue;
+          }
+
+          for (const stock of inputVariant.stocks ?? []) {
+            await this.stockService.setStock(tx, {
               empresaId,
               sucursalId: this.parseId(stock.sucursalId, 'sucursalId'),
               productoVarianteId: variant.id,
-              stockActual: this.toPositiveInt(stock.stockActual ?? 0, 'stockActual'),
-              stockMinimo: this.toPositiveInt(stock.stockMinimo ?? 0, 'stockMinimo'),
-            },
-            update: {
-              stockActual: this.toPositiveInt(stock.stockActual ?? 0, 'stockActual'),
-              stockMinimo: this.toPositiveInt(stock.stockMinimo ?? 0, 'stockMinimo'),
-            },
+              stockActual: this.toPositiveInt(
+                stock.stockActual ?? 0,
+                'stockActual',
+              ),
+              stockMinimo: this.toPositiveInt(
+                stock.stockMinimo ?? 0,
+                'stockMinimo',
+              ),
+              tipo: StockMovimientoTipo.ajuste_producto,
+              motivo: 'Stock actualizado desde el producto',
+              creadoPorId: scope.userId,
+            });
+          }
+        }
+
+        const existingImages = await tx.productoColorImagen.findMany({
+          where: { productoColor: { productoId: id } },
+        });
+        const inputImageIds = new Set(
+          imagenes.filter((img) => img.serverId).map((img) => img.serverId!),
+        );
+
+        const imagesToDelete = existingImages.filter(
+          (img) => !inputImageIds.has(img.id.toString()),
+        );
+
+        for (const img of imagesToDelete) {
+          await this.r2StorageService.deleteProductImage({
+            r2KeyOriginal: img.r2KeyOriginal,
+            r2KeyWebp: img.r2KeyWebp,
+            r2KeyThumbnail: img.r2KeyThumbnail,
           });
         }
-      }
 
-      const existingImages = await tx.productoColorImagen.findMany({
-        where: { productoColor: { productoId: id } },
-      });
-      const inputImageIds = new Set(
-        imagenes
-          .filter((img) => img.serverId)
-          .map((img) => img.serverId!),
-      );
-
-      const imagesToDelete = existingImages.filter(
-        (img) => !inputImageIds.has(img.id.toString()),
-      );
-
-      for (const img of imagesToDelete) {
-        await this.r2StorageService.deleteProductImage({
-          r2KeyOriginal: img.r2KeyOriginal,
-          r2KeyWebp: img.r2KeyWebp,
-          r2KeyThumbnail: img.r2KeyThumbnail,
-        });
-      }
-
-      if (imagesToDelete.length > 0) {
-        await tx.productoColorImagen.deleteMany({
-          where: { id: { in: imagesToDelete.map((img) => img.id) } },
-        });
-      }
-
-      const imageUpdateMap = new Map<string, { orden: number; esPrincipal: boolean }>();
-      for (const img of imagenes) {
-        if (img.serverId) {
-          imageUpdateMap.set(img.serverId, {
-            orden: img.orden ?? 0,
-            esPrincipal: img.esPrincipal ?? false,
+        if (imagesToDelete.length > 0) {
+          await tx.productoColorImagen.deleteMany({
+            where: { id: { in: imagesToDelete.map((img) => img.id) } },
           });
         }
-      }
 
-      for (const [serverId, updateData] of imageUpdateMap) {
-        await tx.productoColorImagen.update({
-          where: { id: BigInt(serverId) },
-          data: updateData,
-        });
-      }
-    });
+        const imageUpdateMap = new Map<
+          string,
+          { orden: number; esPrincipal: boolean }
+        >();
+        for (const img of imagenes) {
+          if (img.serverId) {
+            imageUpdateMap.set(img.serverId, {
+              orden: img.orden ?? 0,
+              esPrincipal: img.esPrincipal ?? false,
+            });
+          }
+        }
 
-    if (files.length > 0) {
-      const allProductColors = await this.prisma.productoColor.findMany({
-        where: { productoId: id },
-      });
+        for (const [serverId, updateData] of imageUpdateMap) {
+          await tx.productoColorImagen.update({
+            where: { id: BigInt(serverId) },
+            data: updateData,
+          });
+        }
 
-      await this.createProductImages({
-        empresaId,
-        productoId: id,
-        productColors: allProductColors,
-        imagenes: imagenes.filter((img) => !img.serverId),
-        files,
-      });
+        if (files.length > 0) {
+          const allProductColors = await tx.productoColor.findMany({
+            where: { productoId: id },
+          });
+
+          await this.createProductImages({
+            tx,
+            empresaId,
+            productoId: id,
+            productColors: allProductColors,
+            imagenes: imagenes.filter((img) => !img.serverId),
+            files,
+          });
+        }
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 10_000,
+        timeout: 120_000,
+      },
+    );
+
+    return this.findOne(empresaId, scope, existing.publicId);
+  }
+
+  private assertStockScope(scope: CommercialScope, branchIds: bigint[]) {
+    if (
+      scope.branchId &&
+      branchIds.some((branchId) => branchId !== scope.branchId)
+    ) {
+      throw new BadRequestException(
+        'No puedes modificar stock de otra sucursal',
+      );
     }
-
-    return this.findOne(empresaId, existing.publicId);
   }
 
   async remove(empresaId: bigint, publicId: string) {
@@ -769,7 +931,186 @@ export class ProductsService {
     };
   }
 
+  private async getColorNameById(
+    tx: Prisma.TransactionClient,
+    empresaId: bigint,
+    colorIds: bigint[],
+  ) {
+    const colors = await tx.color.findMany({
+      where: {
+        id: { in: colorIds },
+        empresaId,
+      },
+      select: {
+        id: true,
+        nombre: true,
+      },
+    });
+
+    return new Map(colors.map((color) => [color.id.toString(), color.nombre]));
+  }
+
+  private async getSizeNameById(
+    tx: Prisma.TransactionClient,
+    empresaId: bigint,
+    tallaIds: bigint[],
+  ) {
+    const sizes = await tx.talla.findMany({
+      where: {
+        id: { in: tallaIds },
+        empresaId,
+      },
+      select: {
+        id: true,
+        nombre: true,
+      },
+    });
+
+    return new Map(sizes.map((size) => [size.id.toString(), size.nombre]));
+  }
+
+  private async resolveVariantSku(params: {
+    tx: Prisma.TransactionClient;
+    empresaId: bigint;
+    productName: string;
+    colorName: string;
+    sizeName: string;
+    inputSku?: string | null;
+    existingSku?: string | null;
+    excludeVariantId?: bigint;
+    reservedSkus: Set<string>;
+  }) {
+    const inputSku = this.cleanOptionalText(params.inputSku)?.toUpperCase();
+
+    if (inputSku) {
+      params.reservedSkus.add(inputSku);
+      return inputSku;
+    }
+
+    if (params.existingSku) {
+      params.reservedSkus.add(params.existingSku);
+      return params.existingSku;
+    }
+
+    const baseSku = [
+      this.buildSkuSegment(params.productName, 3),
+      this.buildSkuSegment(params.colorName, 3),
+      this.buildSkuSegment(params.sizeName, 6),
+    ].join('-');
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const sku = `${baseSku}-${randomInt(0, 1000)
+        .toString()
+        .padStart(3, '0')}`;
+
+      if (
+        !params.reservedSkus.has(sku) &&
+        !(await this.variantSkuExists(params.tx, params.empresaId, sku))
+      ) {
+        params.reservedSkus.add(sku);
+        return sku;
+      }
+    }
+
+    throw new ConflictException('No se pudo generar un SKU unico');
+  }
+
+  private async resolveVariantBarcode(params: {
+    tx: Prisma.TransactionClient;
+    empresaId: bigint;
+    inputBarcode?: string | null;
+    existingBarcode?: string | null;
+    excludeVariantId?: bigint;
+    reservedBarcodes: Set<string>;
+  }) {
+    const inputBarcode = this.cleanOptionalText(params.inputBarcode);
+
+    if (inputBarcode) {
+      params.reservedBarcodes.add(inputBarcode);
+      return inputBarcode;
+    }
+
+    if (params.existingBarcode) {
+      params.reservedBarcodes.add(params.existingBarcode);
+      return params.existingBarcode;
+    }
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const barcode = this.generateEan13Barcode();
+
+      if (
+        !params.reservedBarcodes.has(barcode) &&
+        !(await this.variantBarcodeExists(params.tx, params.empresaId, barcode))
+      ) {
+        params.reservedBarcodes.add(barcode);
+        return barcode;
+      }
+    }
+
+    throw new ConflictException('No se pudo generar un codigo de barras unico');
+  }
+
+  private async variantSkuExists(
+    tx: Prisma.TransactionClient,
+    empresaId: bigint,
+    sku: string,
+  ) {
+    const variant = await tx.productoVariante.findFirst({
+      where: {
+        empresaId,
+        sku,
+      },
+      select: { id: true },
+    });
+
+    return Boolean(variant);
+  }
+
+  private async variantBarcodeExists(
+    tx: Prisma.TransactionClient,
+    empresaId: bigint,
+    codigoBarras: string,
+  ) {
+    const variant = await tx.productoVariante.findFirst({
+      where: {
+        empresaId,
+        codigoBarras,
+      },
+      select: { id: true },
+    });
+
+    return Boolean(variant);
+  }
+
+  private generateEan13Barcode() {
+    const body = `775${randomInt(0, 1_000_000_000)
+      .toString()
+      .padStart(9, '0')}`;
+
+    return `${body}${this.calculateEan13CheckDigit(body)}`;
+  }
+
+  private calculateEan13CheckDigit(firstTwelveDigits: string) {
+    const sum = firstTwelveDigits.split('').reduce((total, digit, index) => {
+      const value = Number(digit);
+      return total + value * (index % 2 === 0 ? 1 : 3);
+    }, 0);
+
+    return (10 - (sum % 10)) % 10;
+  }
+
+  private buildSkuSegment(value: string, maxLength: number) {
+    const normalized = value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+
+    return (normalized || 'GEN').slice(0, maxLength);
+  }
+
   private async createProductImages(params: {
+    tx: Prisma.TransactionClient;
     empresaId: bigint;
     productoId: bigint;
     productColors: { id: bigint; colorId: bigint }[];
@@ -787,6 +1128,9 @@ export class ProductsService {
 
     for (const [index, file] of params.files.entries()) {
       const imageMeta = params.imagenes[index];
+      if (!imageMeta.colorId) {
+        throw new BadRequestException('La imagen no tiene una presentación');
+      }
       const productColor = productColorByColorId.get(imageMeta.colorId);
 
       if (!productColor) {
@@ -827,7 +1171,7 @@ export class ProductsService {
       });
     }
 
-    await this.prisma.productoColorImagen.createMany({ data: imageRows });
+    await params.tx.productoColorImagen.createMany({ data: imageRows });
   }
 
   private async ensureCatalogReferences(params: {
@@ -918,7 +1262,7 @@ export class ProductsService {
     }
   }
 
-  private async upsertUnidadMedida(
+  private upsertUnidadMedida(
     tx: Prisma.TransactionClient,
     codigoInput: string,
   ) {
@@ -935,7 +1279,7 @@ export class ProductsService {
     });
   }
 
-  private async upsertTipoAfectacionIgv(
+  private upsertTipoAfectacionIgv(
     tx: Prisma.TransactionClient,
     codigoInput: string,
   ) {
@@ -951,6 +1295,118 @@ export class ProductsService {
         activo: true,
       },
     });
+  }
+
+  private async resolveProductInputs(
+    empresaId: bigint,
+    tipo: ProductoTipo,
+    dto: CreateProductDto,
+  ) {
+    const imagenes = this.parseJsonArray<ProductImageInput>(
+      dto.imagenes ?? '[]',
+      'imagenes',
+    );
+
+    if (tipo === ProductoTipo.variantes) {
+      return {
+        colores: this.parseJsonArray<ProductColorInput>(
+          dto.colores ?? '[]',
+          'colores',
+        ),
+        variantes: this.parseJsonArray<ProductVariantInput>(
+          dto.variantes ?? '[]',
+          'variantes',
+        ),
+        imagenes: imagenes.map((image) => {
+          if (!image.colorId) {
+            throw new BadRequestException(
+              'Todas las imágenes deben pertenecer a un color',
+            );
+          }
+          return { ...image, colorId: image.colorId };
+        }),
+      };
+    }
+
+    if (!dto.simple) {
+      throw new BadRequestException('Completa los datos del producto normal');
+    }
+    const simple = this.parseJsonObject<SimpleProductInput>(
+      dto.simple,
+      'simple',
+    );
+    const refs = await this.prisma.$transaction((tx) =>
+      this.ensureSimpleCatalogs(tx, empresaId),
+    );
+
+    return {
+      colores: [{ colorId: refs.colorId.toString(), activo: true }],
+      variantes: [
+        {
+          ...simple,
+          colorId: refs.colorId.toString(),
+          tallaId: refs.sizeId.toString(),
+        },
+      ],
+      imagenes: imagenes.map((image) => ({
+        ...image,
+        colorId: refs.colorId.toString(),
+      })),
+    };
+  }
+
+  private async ensureSimpleCatalogs(
+    tx: Prisma.TransactionClient,
+    empresaId: bigint,
+  ) {
+    const [color, size] = await Promise.all([
+      tx.color.upsert({
+        where: {
+          empresaId_sistemaCodigo: {
+            empresaId,
+            sistemaCodigo: 'PRODUCTO_NORMAL',
+          },
+        },
+        update: { activo: true, deletedAt: null },
+        create: {
+          empresaId,
+          nombre: 'Presentación única',
+          nombreKey: '__norbitex_producto_normal_color__',
+          sistemaCodigo: 'PRODUCTO_NORMAL',
+          hex: '#94A3B8',
+          activo: true,
+        },
+      }),
+      tx.talla.upsert({
+        where: {
+          empresaId_sistemaCodigo: {
+            empresaId,
+            sistemaCodigo: 'PRODUCTO_NORMAL',
+          },
+        },
+        update: { activo: true, deletedAt: null },
+        create: {
+          empresaId,
+          nombre: 'Única',
+          nombreKey: '__norbitex_producto_normal_talla__',
+          sistemaCodigo: 'PRODUCTO_NORMAL',
+          activo: true,
+        },
+      }),
+    ]);
+    return { colorId: color.id, sizeId: size.id };
+  }
+
+  private parseJsonObject<T>(value: string, fieldName: string): T {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('No es un objeto');
+      }
+      return parsed as T;
+    } catch {
+      throw new BadRequestException(`${fieldName} debe ser un JSON valido`);
+    }
   }
 
   private parseJsonArray<T>(value: string, fieldName: string): T[] {
@@ -1085,8 +1541,12 @@ export class ProductsService {
   }
 
   private getDefaultPaginationLimit() {
-    const defaultLimit = Number(process.env.PAGINATION_DEFAULT_LIMIT ?? 12);
-    const maxLimit = Number(process.env.PAGINATION_MAX_LIMIT ?? 100);
+    const defaultLimit = Number(
+      this.configService.get<string>('PAGINATION_DEFAULT_LIMIT') ?? 12,
+    );
+    const maxLimit = Number(
+      this.configService.get<string>('PAGINATION_MAX_LIMIT') ?? 100,
+    );
 
     if (!Number.isInteger(defaultLimit) || defaultLimit <= 0) {
       return 12;
@@ -1192,6 +1652,7 @@ export class ProductsService {
       publicId: product.publicId,
       empresaId: product.empresaId.toString(),
       nombre: product.nombre,
+      tipo: product.tipo,
       descripcion: product.descripcion,
       activo: product.activo,
       stockTotal,

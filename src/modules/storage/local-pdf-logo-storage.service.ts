@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import sharp from 'sharp';
@@ -84,18 +83,22 @@ export class LocalPdfLogoStorageService {
 
     const localPath = this.resolvePublicUrl(url);
 
-    if (!localPath || !existsSync(localPath)) {
+    if (!localPath) {
       return null;
     }
 
-    const buffer = await readFile(localPath);
-    return `data:image/webp;base64,${buffer.toString('base64')}`;
+    try {
+      const buffer = await readFile(localPath);
+      return `data:image/webp;base64,${buffer.toString('base64')}`;
+    } catch {
+      return null;
+    }
   }
 
   async deleteCompanyLogo(url: string | null | undefined) {
     const localPath = this.resolvePublicUrl(url);
 
-    if (!localPath || !existsSync(localPath)) {
+    if (!localPath) {
       return;
     }
 

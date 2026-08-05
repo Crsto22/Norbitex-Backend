@@ -12,40 +12,83 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
+import { getCommercialScope } from '../../common/commercial-access';
 import { BranchesService } from './branches.service';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { FindBranchesQueryDto } from './dto/find-branches-query.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(ModuleAccessGuard)
 @Controller('branches')
 export class BranchesController {
   constructor(private readonly branchesService: BranchesService) {}
 
   @Get()
-  findAll(@CurrentUser() user: JwtPayload, @Query() query: FindBranchesQueryDto) {
-    return this.branchesService.findAll(this.getEmpresaId(user), query);
+  @RequireModule(
+    'dashboard',
+    'ventas-pos',
+    'caja',
+    'cotizaciones',
+    'productos',
+    'sucursales',
+    'gre-remitente',
+    'reportes-ventas',
+    'reportes-productos',
+    'reportes-clientes',
+    'reportes-usuarios',
+    'stock-movimientos',
+    'stock-traspasos',
+  )
+  findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: FindBranchesQueryDto,
+  ) {
+    return this.branchesService.findAll(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
   }
 
   @Post()
+  @RequireModule('sucursales')
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateBranchDto) {
-    return this.branchesService.create(this.getEmpresaId(user), dto);
+    return this.branchesService.create(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      dto,
+    );
   }
 
   @Patch(':id')
+  @RequireModule('sucursales')
   update(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateBranchDto,
   ) {
-    return this.branchesService.update(this.getEmpresaId(user), BigInt(id), dto);
+    return this.branchesService.update(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      BigInt(id),
+      dto,
+    );
   }
 
   @Delete(':id')
-  remove(@CurrentUser() user: JwtPayload, @Param('id', ParseIntPipe) id: number) {
-    return this.branchesService.remove(this.getEmpresaId(user), BigInt(id));
+  @RequireModule('sucursales')
+  remove(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.branchesService.remove(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      BigInt(id),
+    );
   }
 
   private getEmpresaId(user: JwtPayload) {

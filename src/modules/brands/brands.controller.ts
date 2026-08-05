@@ -12,14 +12,16 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { BrandsService } from './brands.service';
 import { CreateBrandDto } from './dto/create-brand.dto';
 import { FindBrandsQueryDto } from './dto/find-brands-query.dto';
 import { UpdateBrandDto } from './dto/update-brand.dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(ModuleAccessGuard)
+@RequireModule('marcas', 'productos')
 @Controller('brands')
 export class BrandsController {
   constructor(private readonly brandsService: BrandsService) {}
@@ -44,7 +46,10 @@ export class BrandsController {
   }
 
   @Delete(':id')
-  remove(@CurrentUser() user: JwtPayload, @Param('id', ParseIntPipe) id: number) {
+  remove(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
     return this.brandsService.remove(this.getEmpresaId(user), BigInt(id));
   }
 

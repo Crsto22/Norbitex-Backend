@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import { IsIn, IsOptional, IsString } from 'class-validator';
 
 export const dashboardDateFilters = [
@@ -14,6 +15,7 @@ export class FindDashboardQueryDto {
   sucursalId?: string;
 
   @IsOptional()
+  @Type(() => String)
   @IsIn(dashboardDateFilters)
   dateFilter?: DashboardDateFilter = 'today';
 }

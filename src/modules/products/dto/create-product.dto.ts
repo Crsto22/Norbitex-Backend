@@ -3,9 +3,14 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  IsIn,
 } from 'class-validator';
 
 export class CreateProductDto {
+  @IsOptional()
+  @IsIn(['normal', 'variantes'])
+  tipo?: 'normal' | 'variantes';
+
   @IsString()
   @MaxLength(180)
   nombre: string;
@@ -37,11 +42,17 @@ export class CreateProductDto {
   @IsBooleanString()
   activo?: string;
 
+  @IsOptional()
   @IsString()
-  colores: string;
+  colores?: string;
 
+  @IsOptional()
   @IsString()
-  variantes: string;
+  variantes?: string;
+
+  @IsOptional()
+  @IsString()
+  simple?: string;
 
   @IsOptional()
   @IsString()

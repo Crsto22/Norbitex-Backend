@@ -1,28 +1,27 @@
-import { CanalConocimiento, CategoriaProducto } from '@prisma/client';
+import { CanalConocimiento } from '@prisma/client';
+import { Type } from 'class-transformer';
 import {
-  ArrayMinSize,
-  IsArray,
   IsEmail,
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import {
+  companyCatalogProfiles,
+  type CompanyCatalogProfile,
+} from '../default-company-catalogs';
 
 export class CreateCompanyDto {
+  @IsIn(companyCatalogProfiles)
+  catalogProfile: CompanyCatalogProfile;
+
   @IsString()
   @MaxLength(150)
   nombreComercial: string;
-
-  @IsString()
-  @MaxLength(80)
-  tipoNegocio: string;
-
-  @IsArray()
-  @ArrayMinSize(1)
-  @IsEnum(CategoriaProducto, { each: true })
-  categoriasProducto: CategoriaProducto[];
 
   @IsOptional()
   @IsString()
@@ -31,8 +30,13 @@ export class CreateCompanyDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(20)
+  @Matches(/^\d{11}$/, { message: 'El RUC debe tener 11 digitos.' })
   ruc?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{8}$/, { message: 'El DNI debe tener 8 digitos.' })
+  dni?: string;
 
   @IsOptional()
   @IsString()
@@ -49,10 +53,13 @@ export class CreateCompanyDto {
   @MaxLength(500)
   direccion?: string;
 
+  @Type(() => String)
   @IsEnum(CanalConocimiento)
   comoConocio: CanalConocimiento;
 
-  @ValidateIf((dto: CreateCompanyDto) => dto.comoConocio === CanalConocimiento.otro)
+  @ValidateIf(
+    (dto: CreateCompanyDto) => dto.comoConocio === CanalConocimiento.otro,
+  )
   @IsString()
   @MaxLength(100)
   comoConocioOtro?: string;

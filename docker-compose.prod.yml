@@ -1,0 +1,73 @@
+version: "3.8"
+
+services:
+  postgres:
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:?DB_USER requerido}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD requerido}
+      POSTGRES_DB: ${DB_NAME:?DB_NAME requerido}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    restart: always
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
+      FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL requerido}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS requerido}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET requerido}
+      JWT_EXPIRES_IN_SECONDS: ${JWT_EXPIRES_IN_SECONDS:-900}
+      REFRESH_TOKEN_MAX_AGE_MS: ${REFRESH_TOKEN_MAX_AGE_MS:-604800000}
+      PAGINATION_DEFAULT_LIMIT: ${PAGINATION_DEFAULT_LIMIT:-12}
+      PAGINATION_MAX_LIMIT: ${PAGINATION_MAX_LIMIT:-100}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:?TURNSTILE_SECRET_KEY requerido}
+      BREVO_ENABLED: ${BREVO_ENABLED:-true}
+      BREVO_API_KEY: ${BREVO_API_KEY:?BREVO_API_KEY requerido}
+      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:?BREVO_SENDER_EMAIL requerido}
+      BREVO_SENDER_NAME: ${BREVO_SENDER_NAME:-Norbitex}
+      BREVO_REPLY_TO_EMAIL: ${BREVO_REPLY_TO_EMAIL:-}
+      CLOUDFLARE_R2_ACCOUNT_ID: ${CLOUDFLARE_R2_ACCOUNT_ID:?R2_ACCOUNT_ID requerido}
+      CLOUDFLARE_R2_ACCESS_KEY_ID: ${CLOUDFLARE_R2_ACCESS_KEY_ID:?R2_ACCESS_KEY requerido}
+      CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${CLOUDFLARE_R2_SECRET_ACCESS_KEY:?R2_SECRET requerido}
+      CLOUDFLARE_R2_PUBLIC_BUCKET: ${CLOUDFLARE_R2_PUBLIC_BUCKET:-norbitex-public}
+      CLOUDFLARE_R2_PRIVATE_BUCKET: ${CLOUDFLARE_R2_PRIVATE_BUCKET:-norbitex-private}
+      CLOUDFLARE_R2_LEGACY_BUCKET: ${CLOUDFLARE_R2_LEGACY_BUCKET:-norbitex}
+      CLOUDFLARE_R2_PUBLIC_URL: ${CLOUDFLARE_R2_PUBLIC_URL:?R2_PUBLIC_URL requerido}
+      CLOUDFLARE_R2_PREFIX: ${CLOUDFLARE_R2_PREFIX:-products}
+      CLOUDFLARE_R2_SIGNED_URL_TTL_SECONDS: ${CLOUDFLARE_R2_SIGNED_URL_TTL_SECONDS:-300}
+      LOCAL_STORAGE_DIR: /var/lib/norbitex/storage
+      SUNAT_SECRETS_ENCRYPTION_KEY: ${SUNAT_SECRETS_ENCRYPTION_KEY:?SUNAT_ENCRYPTION_KEY requerido}
+      SUNAT_GUIA_REMISION_MODE: ${SUNAT_GUIA_REMISION_MODE:-REAL}
+      SUNAT_JOB_MAX_RETRIES: ${SUNAT_JOB_MAX_RETRIES:-10}
+      SUNAT_JOB_BATCH_SIZE: ${SUNAT_JOB_BATCH_SIZE:-10}
+      SUNAT_JOB_LOCK_MINUTES: ${SUNAT_JOB_LOCK_MINUTES:-10}
+      SUNAT_CONSULTA_BASE_URL: ${SUNAT_CONSULTA_BASE_URL:-https://api.apis.net.pe/v2}
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
+      TZ: America/Lima
+    expose:
+      - "3000"
+    volumes:
+      - storage_data_prod:/var/lib/norbitex/storage
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+        reservations:
+          cpus: "2"
+          memory: 2G
+
+volumes:
+  postgres_data_prod:
+    driver: local
+  storage_data_prod:
+    driver: local

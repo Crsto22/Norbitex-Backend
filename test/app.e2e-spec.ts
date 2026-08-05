@@ -20,7 +20,20 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer())
       .get('/')
       .expect(200)
-      .expect('Hello World!');
+      .expect('Norbitex API');
+  });
+
+  it('/health (GET) is public and checks the database', () => {
+    return request(app.getHttpServer())
+      .get('/health')
+      .expect(200)
+      .expect(({ body }: { body: { status: string } }) => {
+        expect(body.status).toBe('ok');
+      });
+  });
+
+  it('/notifications (GET) requires authentication', () => {
+    return request(app.getHttpServer()).get('/notifications').expect(401);
   });
 
   afterEach(async () => {

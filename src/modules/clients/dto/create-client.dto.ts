@@ -9,8 +9,9 @@ import {
 } from 'class-validator';
 
 export class CreateClientDto {
+  @IsOptional()
   @IsIn(['dni', 'ruc', 'sin_documento'])
-  tipoDocumento: 'dni' | 'ruc' | 'sin_documento';
+  tipoDocumento?: 'dni' | 'ruc' | 'sin_documento';
 
   @IsOptional()
   @IsString()

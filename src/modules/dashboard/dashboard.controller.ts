@@ -6,19 +6,26 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
+import { getCommercialScope } from '../../common/commercial-access';
 import { DashboardService } from './dashboard.service';
 import { FindDashboardQueryDto } from './dto/find-dashboard-query.dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(ModuleAccessGuard)
+@RequireModule('dashboard')
 @Controller('dashboard')
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   @Get()
   find(@CurrentUser() user: JwtPayload, @Query() query: FindDashboardQueryDto) {
-    return this.dashboardService.find(this.getEmpresaId(user), query);
+    return this.dashboardService.find(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
   }
 
   private getEmpresaId(user: JwtPayload) {

@@ -12,20 +12,25 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { FindClientsQueryDto } from './dto/find-clients-query.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(ModuleAccessGuard)
+@RequireModule('clientes', 'ventas-pos', 'cotizaciones')
 @Controller('clients')
 export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
 
   @Get()
-  findAll(@CurrentUser() user: JwtPayload, @Query() query: FindClientsQueryDto) {
+  findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: FindClientsQueryDto,
+  ) {
     return this.clientsService.findAll(this.getEmpresaId(user), query);
   }
 
@@ -44,7 +49,10 @@ export class ClientsController {
   }
 
   @Delete(':id')
-  remove(@CurrentUser() user: JwtPayload, @Param('id', ParseIntPipe) id: number) {
+  remove(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
     return this.clientsService.remove(this.getEmpresaId(user), BigInt(id));
   }
 

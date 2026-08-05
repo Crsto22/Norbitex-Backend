@@ -12,14 +12,16 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CreateSizeDto } from './dto/create-size.dto';
 import { FindSizesQueryDto } from './dto/find-sizes-query.dto';
 import { UpdateSizeDto } from './dto/update-size.dto';
 import { SizesService } from './sizes.service';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(ModuleAccessGuard)
+@RequireModule('tallas', 'productos', 'ventas-pos', 'cotizaciones')
 @Controller('sizes')
 export class SizesController {
   constructor(private readonly sizesService: SizesService) {}
@@ -44,7 +46,10 @@ export class SizesController {
   }
 
   @Delete(':id')
-  remove(@CurrentUser() user: JwtPayload, @Param('id', ParseIntPipe) id: number) {
+  remove(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
     return this.sizesService.remove(this.getEmpresaId(user), BigInt(id));
   }
 

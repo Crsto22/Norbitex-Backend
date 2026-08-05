@@ -14,13 +14,15 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { UpdateSunatConfigDto } from './dto/update-sunat-config.dto';
 import { UploadSunatCertificateDto } from './dto/upload-sunat-certificate.dto';
 import { SunatConfigService } from './sunat-config.service';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(ModuleAccessGuard)
+@RequireModule('empresa')
 @Controller('company/sunat-config')
 export class SunatConfigController {
   constructor(private readonly sunatConfigService: SunatConfigService) {}

@@ -3,12 +3,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, SunatConfig } from '@prisma/client';
+import { Prisma, SunatAmbiente, SunatConfig } from '@prisma/client';
 import { SecretsCryptoService } from '../../common/crypto/secrets-crypto.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { R2StorageService } from '../storage/r2-storage.service';
 import { UpdateSunatConfigDto } from './dto/update-sunat-config.dto';
 import { UploadSunatCertificateDto } from './dto/upload-sunat-certificate.dto';
+import { assertSunatEnvironmentAllowed } from '../plans/sunat-plan-access';
 
 const MAX_CERTIFICATE_SIZE_BYTES = 2 * 1024 * 1024;
 
@@ -29,7 +30,11 @@ export class SunatConfigService {
   }
 
   async update(empresaId: bigint, dto: UpdateSunatConfigDto) {
-    await this.ensureCompanyExists(empresaId);
+    const company = await this.ensureCompanyExists(empresaId);
+
+    if (dto.ambiente === SunatAmbiente.PRODUCCION) {
+      assertSunatEnvironmentAllowed(company.planCodigo, dto.ambiente);
+    }
 
     const data: Prisma.SunatConfigUncheckedUpdateInput = {};
 
@@ -163,12 +168,14 @@ export class SunatConfigService {
   private async ensureCompanyExists(empresaId: bigint) {
     const company = await this.prisma.empresa.findUnique({
       where: { id: empresaId },
-      select: { id: true },
+      select: { id: true, planCodigo: true },
     });
 
     if (!company) {
       throw new NotFoundException('Empresa no encontrada');
     }
+
+    return company;
   }
 
   private encryptOptional(value: string) {

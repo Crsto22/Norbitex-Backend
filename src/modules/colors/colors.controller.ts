@@ -12,14 +12,16 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequireModule } from '../../common/decorators/require-module.decorator';
+import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { ColorsService } from './colors.service';
 import { CreateColorDto } from './dto/create-color.dto';
 import { FindColorsQueryDto } from './dto/find-colors-query.dto';
 import { UpdateColorDto } from './dto/update-color.dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(ModuleAccessGuard)
+@RequireModule('colores', 'productos', 'ventas-pos', 'cotizaciones')
 @Controller('colors')
 export class ColorsController {
   constructor(private readonly colorsService: ColorsService) {}
@@ -44,7 +46,10 @@ export class ColorsController {
   }
 
   @Delete(':id')
-  remove(@CurrentUser() user: JwtPayload, @Param('id', ParseIntPipe) id: number) {
+  remove(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
     return this.colorsService.remove(this.getEmpresaId(user), BigInt(id));
   }
 

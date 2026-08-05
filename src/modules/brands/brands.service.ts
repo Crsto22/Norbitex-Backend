@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBrandDto } from './dto/create-brand.dto';
@@ -7,7 +12,10 @@ import { UpdateBrandDto } from './dto/update-brand.dto';
 
 @Injectable()
 export class BrandsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
   async findAll(empresaId: bigint, query: FindBrandsQueryDto) {
     const page = query.page ?? 1;
@@ -27,29 +35,30 @@ export class BrandsService {
         : {}),
     };
 
-    const [brands, total, activeTotal, inactiveTotal] = await this.prisma.$transaction([
-      this.prisma.marca.findMany({
-        where,
-        orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.marca.count({ where }),
-      this.prisma.marca.count({
-        where: {
-          empresaId,
-          deletedAt: null,
-          activo: true,
-        },
-      }),
-      this.prisma.marca.count({
-        where: {
-          empresaId,
-          deletedAt: null,
-          activo: false,
-        },
-      }),
-    ]);
+    const [brands, total, activeTotal, inactiveTotal] =
+      await this.prisma.$transaction([
+        this.prisma.marca.findMany({
+          where,
+          orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.prisma.marca.count({ where }),
+        this.prisma.marca.count({
+          where: {
+            empresaId,
+            deletedAt: null,
+            activo: true,
+          },
+        }),
+        this.prisma.marca.count({
+          where: {
+            empresaId,
+            deletedAt: null,
+            activo: false,
+          },
+        }),
+      ]);
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
     return {
@@ -178,8 +187,12 @@ export class BrandsService {
   }
 
   private getDefaultPaginationLimit() {
-    const defaultLimit = Number(process.env.PAGINATION_DEFAULT_LIMIT ?? 12);
-    const maxLimit = Number(process.env.PAGINATION_MAX_LIMIT ?? 100);
+    const defaultLimit = Number(
+      this.configService.get<string>('PAGINATION_DEFAULT_LIMIT') ?? 12,
+    );
+    const maxLimit = Number(
+      this.configService.get<string>('PAGINATION_MAX_LIMIT') ?? 100,
+    );
 
     if (!Number.isInteger(defaultLimit) || defaultLimit <= 0) {
       return 12;
