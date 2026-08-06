@@ -1598,6 +1598,25 @@ INSERT INTO "rol" (codigo, nombre, descripcion) VALUES
   ('ALMACENERO', 'Almacenero', 'Gestiona stock, productos y almacenes')
 ON CONFLICT DO NOTHING;
 
+INSERT INTO "tarifa_plan" ("plan_codigo", "precio_mensual", "descuento_mensual_porcentaje", "descuento_anual_porcentaje") VALUES
+  ('prueba', 0.00, 0.00, 0.00),
+  ('basico', 39.00, 0.00, 10.00),
+  ('emprendedor', 79.00, 0.00, 10.00),
+  ('crecimiento', 149.00, 0.00, 10.00),
+  ('empresarial', 299.00, 0.00, 10.00)
+ON CONFLICT ("plan_codigo") DO NOTHING;
+
+INSERT INTO "limite_plan" ("plan_codigo", "usuarios", "sucursales", "almacenes", "productos", "variantes", "comprobantes", "consultas_documento", "almacenamiento_bytes") VALUES
+  ('prueba',   1,  1, 5,    50,   500,   100,  20,   524288000),
+  ('basico',   1,  1, 5,   100,  1000,   250,  50,  3221225472),
+  ('emprendedor', 3, 2, 5, 450,  5000,  1000, 250, 10737418240),
+  ('crecimiento', 10, 3, NULL, 4500, 45000, 5000, 1500, 53687091200),
+  ('empresarial', 30, 20, NULL, 20000, 200000, 20000, 5000, 214748364800)
+ON CONFLICT ("plan_codigo") DO NOTHING;
+
+INSERT INTO "tarifa_comprobante_excedente" ("id", "precio_unitario") VALUES (1, 0.20)
+ON CONFLICT DO NOTHING;
+
 -- ============================================================================
 -- PRISMA MIGRATIONS TRACKING
 -- ============================================================================
