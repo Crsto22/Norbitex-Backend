@@ -148,12 +148,12 @@ export class AuthController {
   }
 
   private setRefreshCookie(response: Response, refreshToken: string) {
-    const isProduction = this.isProduction();
+    const useSecureCookie = this.useSecureRefreshCookie();
 
     response.cookie(refreshCookieName, refreshToken, {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
+      secure: useSecureCookie,
+      sameSite: useSecureCookie ? 'none' : 'lax',
       path: '/auth',
       maxAge: Number(
         this.configService.get<string>('REFRESH_TOKEN_MAX_AGE_MS') ?? 604800000,
@@ -162,17 +162,21 @@ export class AuthController {
   }
 
   private clearRefreshCookie(response: Response) {
-    const isProduction = this.isProduction();
+    const useSecureCookie = this.useSecureRefreshCookie();
 
     response.clearCookie(refreshCookieName, {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
+      secure: useSecureCookie,
+      sameSite: useSecureCookie ? 'none' : 'lax',
       path: '/auth',
     });
   }
 
-  private isProduction() {
-    return this.configService.get<string>('NODE_ENV') === 'production';
+  private useSecureRefreshCookie() {
+    return (
+      this.configService.get<string>('NODE_ENV') === 'production' ||
+      this.configService.get<string>('FRONTEND_URL')?.startsWith('https://') ||
+      this.configService.get<string>('CORS_ORIGINS')?.includes('https://')
+    );
   }
 }
