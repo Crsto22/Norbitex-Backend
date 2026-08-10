@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { AfiliadoEstado, Prisma } from '@prisma/client';
 import {
   calculateAffiliatePricing,
   getLimaPeriod,
@@ -66,5 +66,73 @@ describe('affiliate pricing', () => {
 
     expect(result.fileName).toBe('guia-pago-KIMENTS-2026-07.pdf');
     expect(result.buffer.subarray(0, 5).toString()).toBe('%PDF-');
+  });
+
+  it('validates a public active affiliate code without exposing private fields', async () => {
+    const prisma = {
+      afiliado: {
+        findUnique: jest.fn().mockResolvedValue({
+          codigo: 'NOBI10',
+          descuentoPorcentaje: new Prisma.Decimal('10'),
+          estado: AfiliadoEstado.activo,
+          comisionPorcentaje: new Prisma.Decimal('20'),
+          email: 'afiliado@example.com',
+        }),
+      },
+    };
+    const service = new PlatformAffiliatesService(prisma as never);
+
+    const result = await service.validatePublicCode(' nobi10 ');
+
+    expect(prisma.afiliado.findUnique).toHaveBeenCalledWith({
+      where: { codigoKey: 'NOBI10' },
+      select: {
+        codigo: true,
+        descuentoPorcentaje: true,
+        estado: true,
+      },
+    });
+    expect(result).toEqual({
+      valid: true,
+      code: 'NOBI10',
+      discountPercent: '10.00',
+      currency: 'PEN',
+    });
+    expect(result).not.toHaveProperty('commissionPercent');
+    expect(result).not.toHaveProperty('email');
+  });
+
+  it('returns invalid for a missing public affiliate code', async () => {
+    const prisma = {
+      afiliado: { findUnique: jest.fn().mockResolvedValue(null) },
+    };
+    const service = new PlatformAffiliatesService(prisma as never);
+
+    await expect(service.validatePublicCode('NOPE')).resolves.toEqual({
+      valid: false,
+      code: 'NOPE',
+      discountPercent: '0.00',
+      reason: 'invalid',
+    });
+  });
+
+  it('returns inactive for an inactive public affiliate code', async () => {
+    const prisma = {
+      afiliado: {
+        findUnique: jest.fn().mockResolvedValue({
+          codigo: 'NOBI10',
+          descuentoPorcentaje: new Prisma.Decimal('10'),
+          estado: AfiliadoEstado.inactivo,
+        }),
+      },
+    };
+    const service = new PlatformAffiliatesService(prisma as never);
+
+    await expect(service.validatePublicCode('NOBI10')).resolves.toEqual({
+      valid: false,
+      code: 'NOBI10',
+      discountPercent: '0.00',
+      reason: 'inactive',
+    });
   });
 });

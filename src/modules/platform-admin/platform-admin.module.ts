@@ -8,7 +8,6 @@ import { PlatformSubscriptionsService } from './platform-subscriptions.service';
 import { PlatformOveragesService } from './platform-overages.service';
 import { PlatformBillingModule } from '../platform-billing/platform-billing.module';
 import { NotificationsModule } from '../notifications/notifications.module';
-import { PlatformAffiliatesService } from './platform-affiliates.service';
 
 @Module({
   imports: [
@@ -23,7 +22,6 @@ import { PlatformAffiliatesService } from './platform-affiliates.service';
     PlatformSubscriptionsService,
     PlatformAdminGuard,
     PlatformOveragesService,
-    PlatformAffiliatesService,
   ],
 })
 export class PlatformAdminModule {}

@@ -236,6 +236,49 @@ export class PlatformAffiliatesService {
     };
   }
 
+  async validatePublicCode(code: string | undefined) {
+    const normalized = typeof code === 'string' ? code.trim().toUpperCase() : '';
+    const empty = {
+      valid: false as const,
+      code: normalized,
+      discountPercent: '0.00',
+      reason: 'invalid' as const,
+    };
+
+    if (!/^[A-Z0-9-]{4,30}$/.test(normalized)) {
+      return empty;
+    }
+
+    const affiliate = await this.prisma.afiliado.findUnique({
+      where: { codigoKey: normalized },
+      select: {
+        codigo: true,
+        descuentoPorcentaje: true,
+        estado: true,
+      },
+    });
+
+    if (!affiliate) {
+      return empty;
+    }
+
+    if (affiliate.estado !== AfiliadoEstado.activo) {
+      return {
+        valid: false as const,
+        code: affiliate.codigo,
+        discountPercent: '0.00',
+        reason: 'inactive' as const,
+      };
+    }
+
+    return {
+      valid: true as const,
+      code: affiliate.codigo,
+      discountPercent: affiliate.descuentoPorcentaje.toFixed(2),
+      currency: 'PEN' as const,
+    };
+  }
+
   async resolveSaleContext(
     tx: Prisma.TransactionClient | PrismaService,
     company: { id: bigint; planFinAt: Date | null },
