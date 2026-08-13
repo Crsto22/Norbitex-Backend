@@ -3,6 +3,7 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   ValidateNested,
 } from 'class-validator';
@@ -11,6 +12,10 @@ import { VentaTipoComprobante } from '@prisma/client';
 import { CreateSalePagoDto } from '../../sales/dto/create-sale.dto';
 
 export class ConvertQuotationToSaleDto {
+  @IsOptional()
+  @IsUUID('4')
+  requestId?: string;
+
   @IsEnum(VentaTipoComprobante)
   tipoComprobante: VentaTipoComprobante;
 

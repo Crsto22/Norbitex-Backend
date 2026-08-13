@@ -558,8 +558,8 @@ model Sucursal {
   empresa                    Empresa                    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
   inventarios                InventarioSucursal[]
   stockMovimientos           StockMovimiento[]
-  stockTraspasosOrigen       StockTraspaso[]             @relation("StockTraspasoOrigen")
-  stockTraspasosDestino      StockTraspaso[]             @relation("StockTraspasoDestino")
+  stockTraspasosOrigen       StockTraspaso[]            @relation("StockTraspasoOrigen")
+  stockTraspasosDestino      StockTraspaso[]            @relation("StockTraspasoDestino")
   ventas                     Venta[]
   notasCredito               NotaCredito[]
   guiasRemision              GuiaRemision[]             @relation("GuiaRemisionSucursal")
@@ -758,31 +758,31 @@ model ProductoColorImagen {
 }
 
 model ProductoVariante {
-  id                   BigInt                @id @default(autoincrement())
-  empresaId            BigInt                @map("empresa_id")
-  productoId           BigInt                @map("producto_id")
-  productoColorId      BigInt                @map("producto_color_id")
-  tallaId              BigInt                @map("talla_id")
-  sku                  String?               @db.VarChar(80)
-  codigoBarras         String?               @map("codigo_barras") @db.VarChar(80)
-  precioCompra         Decimal?              @map("precio_compra") @db.Decimal(12, 2)
-  precioVenta          Decimal               @map("precio_venta") @db.Decimal(12, 2)
-  precioMayorista      Decimal?              @map("precio_mayorista") @db.Decimal(12, 2)
-  activo               Boolean               @default(true)
-  deletedAt            DateTime?             @map("deleted_at") @db.Timestamptz(6)
-  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
-  empresa              Empresa               @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  producto             Producto              @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  productoColor        ProductoColor         @relation(fields: [productoColorId], references: [id], onDelete: Cascade)
-  talla                Talla                 @relation(fields: [tallaId], references: [id], onDelete: Restrict)
-  inventarios          InventarioSucursal[]
-  stockMovimientos     StockMovimiento[]
+  id                    BigInt                 @id @default(autoincrement())
+  empresaId             BigInt                 @map("empresa_id")
+  productoId            BigInt                 @map("producto_id")
+  productoColorId       BigInt                 @map("producto_color_id")
+  tallaId               BigInt                 @map("talla_id")
+  sku                   String?                @db.VarChar(80)
+  codigoBarras          String?                @map("codigo_barras") @db.VarChar(80)
+  precioCompra          Decimal?               @map("precio_compra") @db.Decimal(12, 2)
+  precioVenta           Decimal                @map("precio_venta") @db.Decimal(12, 2)
+  precioMayorista       Decimal?               @map("precio_mayorista") @db.Decimal(12, 2)
+  activo                Boolean                @default(true)
+  deletedAt             DateTime?              @map("deleted_at") @db.Timestamptz(6)
+  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa               Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  producto              Producto               @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  productoColor         ProductoColor          @relation(fields: [productoColorId], references: [id], onDelete: Cascade)
+  talla                 Talla                  @relation(fields: [tallaId], references: [id], onDelete: Restrict)
+  inventarios           InventarioSucursal[]
+  stockMovimientos      StockMovimiento[]
   stockTraspasoDetalles StockTraspasoDetalle[]
-  ventaDetalles        VentaDetalle[]
-  notasCreditoDetalle  NotaCreditoDetalle[]
-  cotizacionDetalles   CotizacionDetalle[]
-  guiaRemisionDetalles GuiaRemisionDetalle[]
+  ventaDetalles         VentaDetalle[]
+  notasCreditoDetalle   NotaCreditoDetalle[]
+  cotizacionDetalles    CotizacionDetalle[]
+  guiaRemisionDetalles  GuiaRemisionDetalle[]
 
   @@unique([productoColorId, tallaId])
   @@unique([empresaId, sku])
@@ -814,26 +814,26 @@ model InventarioSucursal {
 }
 
 model StockMovimiento {
-  id                 BigInt                     @id @default(autoincrement())
-  empresaId          BigInt                     @map("empresa_id")
-  sucursalId         BigInt                     @map("sucursal_id")
-  productoVarianteId BigInt                     @map("producto_variante_id")
+  id                 BigInt                   @id @default(autoincrement())
+  empresaId          BigInt                   @map("empresa_id")
+  sucursalId         BigInt                   @map("sucursal_id")
+  productoVarianteId BigInt                   @map("producto_variante_id")
   direccion          StockMovimientoDireccion
   tipo               StockMovimientoTipo
   cantidad           Int
-  stockAnterior      Int                        @map("stock_anterior")
-  stockPosterior     Int                        @map("stock_posterior")
-  motivo             String?                    @db.VarChar(500)
-  referenciaTipo     String?                    @map("referencia_tipo") @db.VarChar(40)
-  referenciaId       BigInt?                    @map("referencia_id")
-  traspasoId         BigInt?                    @map("traspaso_id")
-  creadoPorId        BigInt?                    @map("creado_por_id")
-  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
-  empresa            Empresa                    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  sucursal           Sucursal                   @relation(fields: [sucursalId], references: [id], onDelete: Restrict)
-  productoVariante   ProductoVariante           @relation(fields: [productoVarianteId], references: [id], onDelete: Restrict)
-  traspaso           StockTraspaso?             @relation(fields: [traspasoId], references: [id], onDelete: Restrict)
-  creadoPor          Usuario?                   @relation("StockMovimientoCreadoPor", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  stockAnterior      Int                      @map("stock_anterior")
+  stockPosterior     Int                      @map("stock_posterior")
+  motivo             String?                  @db.VarChar(500)
+  referenciaTipo     String?                  @map("referencia_tipo") @db.VarChar(40)
+  referenciaId       BigInt?                  @map("referencia_id")
+  traspasoId         BigInt?                  @map("traspaso_id")
+  creadoPorId        BigInt?                  @map("creado_por_id")
+  createdAt          DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  empresa            Empresa                  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  sucursal           Sucursal                 @relation(fields: [sucursalId], references: [id], onDelete: Restrict)
+  productoVariante   ProductoVariante         @relation(fields: [productoVarianteId], references: [id], onDelete: Restrict)
+  traspaso           StockTraspaso?           @relation(fields: [traspasoId], references: [id], onDelete: Restrict)
+  creadoPor          Usuario?                 @relation("StockMovimientoCreadoPor", fields: [creadoPorId], references: [id], onDelete: SetNull)
 
   @@index([empresaId, createdAt])
   @@index([empresaId, sucursalId, createdAt])
@@ -843,18 +843,18 @@ model StockMovimiento {
 }
 
 model StockTraspaso {
-  id                BigInt                  @id @default(autoincrement())
-  publicId          String                  @unique @default(cuid()) @map("public_id") @db.VarChar(30)
-  empresaId         BigInt                  @map("empresa_id")
-  origenSucursalId  BigInt                  @map("origen_sucursal_id")
-  destinoSucursalId BigInt                  @map("destino_sucursal_id")
-  motivo            String                  @db.VarChar(500)
-  creadoPorId       BigInt?                 @map("creado_por_id")
-  createdAt         DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
-  empresa           Empresa                 @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  origenSucursal    Sucursal                @relation("StockTraspasoOrigen", fields: [origenSucursalId], references: [id], onDelete: Restrict)
-  destinoSucursal   Sucursal                @relation("StockTraspasoDestino", fields: [destinoSucursalId], references: [id], onDelete: Restrict)
-  creadoPor         Usuario?                @relation("StockTraspasoCreadoPor", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  id                BigInt                 @id @default(autoincrement())
+  publicId          String                 @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  empresaId         BigInt                 @map("empresa_id")
+  origenSucursalId  BigInt                 @map("origen_sucursal_id")
+  destinoSucursalId BigInt                 @map("destino_sucursal_id")
+  motivo            String                 @db.VarChar(500)
+  creadoPorId       BigInt?                @map("creado_por_id")
+  createdAt         DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  empresa           Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  origenSucursal    Sucursal               @relation("StockTraspasoOrigen", fields: [origenSucursalId], references: [id], onDelete: Restrict)
+  destinoSucursal   Sucursal               @relation("StockTraspasoDestino", fields: [destinoSucursalId], references: [id], onDelete: Restrict)
+  creadoPor         Usuario?               @relation("StockTraspasoCreadoPor", fields: [creadoPorId], references: [id], onDelete: SetNull)
   detalles          StockTraspasoDetalle[]
   movimientos       StockMovimiento[]
 
@@ -1815,6 +1815,7 @@ model Venta {
   sunatBajaSolicitadaAt DateTime?            @map("sunat_baja_solicitada_at") @db.Timestamptz(6)
   sunatBajaRespondidaAt DateTime?            @map("sunat_baja_respondida_at") @db.Timestamptz(6)
   observaciones         String?              @db.VarChar(500)
+  requestId             String?              @map("request_id") @db.Uuid
   anuladoAt             DateTime?            @map("anulado_at") @db.Timestamptz(6)
   anuladoRazon          String?              @map("anulado_razon") @db.VarChar(500)
   creadoPorId           BigInt?              @map("creado_por_id")
@@ -1838,6 +1839,7 @@ model Venta {
   sunatBajaItems        SunatBajaItem[]
 
   @@unique([serieComprobanteId, numero])
+  @@unique([empresaId, requestId])
   @@index([empresaId])
   @@index([empresaId, tipoComprobante])
   @@index([empresaId, estado])
@@ -2076,6 +2078,7 @@ model Cotizacion {
   descuentoMonto    Decimal             @default(0) @map("descuento_monto") @db.Decimal(12, 2)
   total             Decimal             @db.Decimal(12, 2)
   observaciones     String?             @db.VarChar(500)
+  requestId         String?             @map("request_id") @db.Uuid
   validaHasta       DateTime?           @map("valida_hasta") @db.Timestamptz(6)
   convertidaVentaId BigInt?             @unique @map("convertida_venta_id")
   creadoPorId       BigInt?             @map("creado_por_id")
@@ -2091,6 +2094,7 @@ model Cotizacion {
   detalles          CotizacionDetalle[]
 
   @@unique([empresaId, serie, numero])
+  @@unique([empresaId, requestId])
   @@index([empresaId])
   @@index([empresaId, estado])
   @@index([sucursalId])

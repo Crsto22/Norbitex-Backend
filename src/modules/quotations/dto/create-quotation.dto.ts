@@ -5,6 +5,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -33,6 +34,10 @@ export class CreateQuotationDetalleDto {
 }
 
 export class CreateQuotationDto {
+  @IsOptional()
+  @IsUUID('4')
+  requestId?: string;
+
   @IsOptional()
   @IsString()
   sucursalId?: string;

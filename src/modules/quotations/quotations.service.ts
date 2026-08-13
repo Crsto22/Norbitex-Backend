@@ -88,6 +88,14 @@ export class QuotationsService {
     scope: CommercialScope,
     dto: CreateQuotationDto,
   ) {
+    const existingQuotation = await this.findByRequestId(
+      empresaId,
+      dto.requestId,
+    );
+    if (existingQuotation) {
+      return this.toQuotationResponse(existingQuotation);
+    }
+
     const effectiveBranchId = resolveScopedBranchId(scope, dto.sucursalId);
     dto.sucursalId = effectiveBranchId?.toString();
     const userId = scope.userId.toString();
@@ -104,39 +112,51 @@ export class QuotationsService {
       descuentoValor: dto.descuentoValor,
     });
 
-    const quotation = await this.prisma.$transaction(async (tx) => {
-      const lastQuotation = await tx.cotizacion.findFirst({
-        where: { empresaId, serie: this.defaultSerie },
-        orderBy: { numero: 'desc' },
-        select: { numero: true },
-      });
-      const numero = (lastQuotation?.numero ?? 0) + 1;
-      const correlativo = this.buildCorrelativo(this.defaultSerie, numero);
+    const quotation = await this.prisma
+      .$transaction(async (tx) => {
+        const lastQuotation = await tx.cotizacion.findFirst({
+          where: { empresaId, serie: this.defaultSerie },
+          orderBy: { numero: 'desc' },
+          select: { numero: true },
+        });
+        const numero = (lastQuotation?.numero ?? 0) + 1;
+        const correlativo = this.buildCorrelativo(this.defaultSerie, numero);
 
-      return tx.cotizacion.create({
-        data: {
+        return tx.cotizacion.create({
+          data: {
+            empresaId,
+            requestId: dto.requestId ?? null,
+            sucursalId: dto.sucursalId ? BigInt(dto.sucursalId) : null,
+            clienteId: dto.clienteId ? BigInt(dto.clienteId) : null,
+            serie: this.defaultSerie,
+            numero,
+            correlativo,
+            estado: dto.estado ?? CotizacionEstado.borrador,
+            descuentoTipo: dto.descuentoTipo ?? null,
+            descuentoValor: dto.descuentoValor
+              ? new Prisma.Decimal(dto.descuentoValor)
+              : null,
+            subtotal: totals.subtotal,
+            descuentoMonto: totals.descuentoGlobalMonto,
+            total: totals.total,
+            observaciones: dto.observaciones ?? null,
+            validaHasta: dto.validaHasta ? new Date(dto.validaHasta) : null,
+            creadoPorId: usuarioId,
+            detalles: { create: totals.detallesData },
+          },
+          include: quotationInclude,
+        });
+      })
+      .catch(async (error: unknown) => {
+        const existingAfterRace = await this.findByRequestId(
           empresaId,
-          sucursalId: dto.sucursalId ? BigInt(dto.sucursalId) : null,
-          clienteId: dto.clienteId ? BigInt(dto.clienteId) : null,
-          serie: this.defaultSerie,
-          numero,
-          correlativo,
-          estado: dto.estado ?? CotizacionEstado.borrador,
-          descuentoTipo: dto.descuentoTipo ?? null,
-          descuentoValor: dto.descuentoValor
-            ? new Prisma.Decimal(dto.descuentoValor)
-            : null,
-          subtotal: totals.subtotal,
-          descuentoMonto: totals.descuentoGlobalMonto,
-          total: totals.total,
-          observaciones: dto.observaciones ?? null,
-          validaHasta: dto.validaHasta ? new Date(dto.validaHasta) : null,
-          creadoPorId: usuarioId,
-          detalles: { create: totals.detallesData },
-        },
-        include: quotationInclude,
+          dto.requestId,
+        );
+        if (existingAfterRace && this.isUniqueConstraintError(error)) {
+          return existingAfterRace;
+        }
+        throw error;
       });
-    });
 
     return this.toQuotationResponse(quotation);
   }
@@ -221,7 +241,7 @@ export class QuotationsService {
   ) {
     const quotation = await this.prisma.cotizacion.findFirst({
       where: this.quotationAccessWhere(empresaId, scope, publicId),
-      include: { detalles: true },
+      include: quotationInclude,
     });
 
     if (!quotation) {
@@ -363,15 +383,27 @@ export class QuotationsService {
     publicId: string,
     dto: ConvertQuotationToSaleDto,
   ) {
+    const requestId =
+      typeof dto.requestId === 'string' ? dto.requestId : undefined;
     const quotation = await this.prisma.cotizacion.findFirst({
       where: this.quotationAccessWhere(empresaId, scope, publicId),
-      include: { detalles: true },
+      include: quotationInclude,
     });
 
     if (!quotation) {
       throw new NotFoundException('Cotizacion no encontrada');
     }
     if (quotation.estado === CotizacionEstado.convertida) {
+      const sale = await this.salesService.findByRequestIdResponse(
+        empresaId,
+        requestId,
+      );
+      if (sale) {
+        return {
+          quotation: this.toQuotationResponse(quotation),
+          sale,
+        };
+      }
       throw new BadRequestException('La cotizacion ya fue convertida');
     }
     if (quotation.estado === CotizacionEstado.anulada) {
@@ -416,6 +448,7 @@ export class QuotationsService {
       })),
       pagos: dto.pagos,
       observaciones: dto.observaciones ?? quotation.observaciones ?? undefined,
+      requestId,
     });
 
     const venta = await this.prisma.venta.findUnique({
@@ -605,6 +638,21 @@ export class QuotationsService {
     }
 
     return Math.min(defaultLimit, maxLimit);
+  }
+
+  private findByRequestId(empresaId: bigint, requestId?: string) {
+    if (!requestId) return null;
+    return this.prisma.cotizacion.findFirst({
+      where: { empresaId, requestId },
+      include: quotationInclude,
+    });
+  }
+
+  private isUniqueConstraintError(error: unknown) {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    );
   }
 
   private toQuotationResponse(quotation: QuotationWithRelations) {

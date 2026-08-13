@@ -4,6 +4,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -48,6 +49,10 @@ export class CreateSalePagoDto {
 }
 
 export class CreateSaleDto {
+  @IsOptional()
+  @IsUUID('4')
+  requestId?: string;
+
   @IsEnum(VentaTipoComprobante)
   tipoComprobante: VentaTipoComprobante;
 

@@ -376,6 +376,11 @@ export class SalesService {
   // ── Create Sale ────────────────────────────────────────────────────
 
   async create(empresaId: bigint, scope: CommercialScope, dto: CreateSaleDto) {
+    const existingSale = await this.findByRequestId(empresaId, dto.requestId);
+    if (existingSale) {
+      return this.toVentaResponse(existingSale);
+    }
+
     const effectiveBranchId = resolveScopedBranchId(scope, dto.sucursalId);
     if (scope.branchId && !effectiveBranchId) {
       throw new BadRequestException('Debes usar tu sucursal asignada');
@@ -593,168 +598,200 @@ export class SalesService {
       };
     });
 
-    const venta = await this.prisma.$transaction(
-      async (tx) => {
-        const documentAllowance =
-          await this.plansService.assessDocumentAllowance(tx, empresaId);
-        const cajaSesion = sucursal?.modoCajaHabilitado
-          ? await tx.cajaSesion.findFirst({
-              where: {
-                empresaId,
-                sucursalId: sucursal.id,
-                usuarioId,
-                estado: CajaSesionEstado.abierta,
+    const venta = await this.prisma
+      .$transaction(
+        async (tx) => {
+          const documentAllowance =
+            await this.plansService.assessDocumentAllowance(tx, empresaId);
+          const cajaSesion = sucursal?.modoCajaHabilitado
+            ? await tx.cajaSesion.findFirst({
+                where: {
+                  empresaId,
+                  sucursalId: sucursal.id,
+                  usuarioId,
+                  estado: CajaSesionEstado.abierta,
+                },
+                select: { id: true },
+              })
+            : null;
+
+          if (sucursal?.modoCajaHabilitado && !cajaSesion) {
+            throw new BadRequestException(
+              'Debes abrir caja en esta sucursal antes de vender',
+            );
+          }
+
+          const updatedSerie = await tx.serieComprobante.update({
+            where: { id: serie.id },
+            data: { numeroActual: { increment: 1 } },
+          });
+
+          const numero = updatedSerie.numeroActual;
+          const correlativo = `${serie.serie}-${numero.toString().padStart(6, '0')}`;
+
+          const ventaData = await tx.venta.create({
+            data: {
+              empresaId,
+              requestId: dto.requestId ?? null,
+              sucursalId: dto.sucursalId ? BigInt(dto.sucursalId) : null,
+              clienteId: dto.clienteId ? BigInt(dto.clienteId) : null,
+              tipoComprobante: dto.tipoComprobante,
+              serieComprobanteId: serie.id,
+              serie: serie.serie,
+              numero,
+              correlativo,
+              moneda: 'PEN',
+              formaPago: 'CONTADO',
+              descuentoTipo: dto.descuentoTipo ?? null,
+              descuentoValor: dto.descuentoValor
+                ? new Prisma.Decimal(dto.descuentoValor)
+                : null,
+              subtotal,
+              descuentoMonto: descuentoGlobalMonto,
+              igvPorcentaje: calculated.igvPorcentaje,
+              opGravadas: calculated.opGravadas,
+              opExoneradas: calculated.opExoneradas,
+              opInafectas: calculated.opInafectas,
+              igvMonto: calculated.igvMonto,
+              total,
+              estado: VentaEstado.completada,
+              sunatEstado: electronicSale
+                ? SunatEstado.pendiente_envio
+                : SunatEstado.no_aplica,
+              observaciones: dto.observaciones ?? null,
+              creadoPorId: usuarioId,
+              cajaSesionId: cajaSesion?.id ?? null,
+              esExcedentePlan: documentAllowance.isOverage,
+              precioExcedentePlan: documentAllowance.unitPrice,
+              detalles: {
+                create: detallesData.map((d) => ({
+                  productoVarianteId: d.productoVarianteId,
+                  descripcion: d.descripcion,
+                  cantidad: d.cantidad,
+                  unidadMedidaCodigo: d.unidadMedidaCodigo,
+                  tipoAfectacionIgvCodigo: d.tipoAfectacionIgvCodigo,
+                  precioUnitario: d.precioUnitario,
+                  valorUnitario: d.valorUnitario,
+                  descuentoTipo: d.descuentoTipo,
+                  descuentoValor: d.descuentoValor,
+                  descuentoMonto: d.descuentoMonto,
+                  valorVenta: d.valorVenta,
+                  igvMonto: d.igvMonto,
+                  subtotal: d.subtotal,
+                  total: d.total,
+                })),
               },
-              select: { id: true },
-            })
-          : null;
-
-        if (sucursal?.modoCajaHabilitado && !cajaSesion) {
-          throw new BadRequestException(
-            'Debes abrir caja en esta sucursal antes de vender',
-          );
-        }
-
-        const updatedSerie = await tx.serieComprobante.update({
-          where: { id: serie.id },
-          data: { numeroActual: { increment: 1 } },
-        });
-
-        const numero = updatedSerie.numeroActual;
-        const correlativo = `${serie.serie}-${numero.toString().padStart(6, '0')}`;
-
-        const ventaData = await tx.venta.create({
-          data: {
-            empresaId,
-            sucursalId: dto.sucursalId ? BigInt(dto.sucursalId) : null,
-            clienteId: dto.clienteId ? BigInt(dto.clienteId) : null,
-            tipoComprobante: dto.tipoComprobante,
-            serieComprobanteId: serie.id,
-            serie: serie.serie,
-            numero,
-            correlativo,
-            moneda: 'PEN',
-            formaPago: 'CONTADO',
-            descuentoTipo: dto.descuentoTipo ?? null,
-            descuentoValor: dto.descuentoValor
-              ? new Prisma.Decimal(dto.descuentoValor)
-              : null,
-            subtotal,
-            descuentoMonto: descuentoGlobalMonto,
-            igvPorcentaje: calculated.igvPorcentaje,
-            opGravadas: calculated.opGravadas,
-            opExoneradas: calculated.opExoneradas,
-            opInafectas: calculated.opInafectas,
-            igvMonto: calculated.igvMonto,
-            total,
-            estado: VentaEstado.completada,
-            sunatEstado: electronicSale
-              ? SunatEstado.pendiente_envio
-              : SunatEstado.no_aplica,
-            observaciones: dto.observaciones ?? null,
-            creadoPorId: usuarioId,
-            cajaSesionId: cajaSesion?.id ?? null,
-            esExcedentePlan: documentAllowance.isOverage,
-            precioExcedentePlan: documentAllowance.unitPrice,
-            detalles: {
-              create: detallesData.map((d) => ({
-                productoVarianteId: d.productoVarianteId,
-                descripcion: d.descripcion,
-                cantidad: d.cantidad,
-                unidadMedidaCodigo: d.unidadMedidaCodigo,
-                tipoAfectacionIgvCodigo: d.tipoAfectacionIgvCodigo,
-                precioUnitario: d.precioUnitario,
-                valorUnitario: d.valorUnitario,
-                descuentoTipo: d.descuentoTipo,
-                descuentoValor: d.descuentoValor,
-                descuentoMonto: d.descuentoMonto,
-                valorVenta: d.valorVenta,
-                igvMonto: d.igvMonto,
-                subtotal: d.subtotal,
-                total: d.total,
-              })),
+              pagos: {
+                create: pagosData.map((p) => ({
+                  metodoPagoId: p.metodoPagoId,
+                  monto: p.monto,
+                  montoRecibido: p.montoRecibido,
+                  vuelto: p.vuelto,
+                  referencia: p.referencia,
+                })),
+              },
             },
-            pagos: {
-              create: pagosData.map((p) => ({
-                metodoPagoId: p.metodoPagoId,
-                monto: p.monto,
-                montoRecibido: p.montoRecibido,
-                vuelto: p.vuelto,
-                referencia: p.referencia,
-              })),
-            },
-          },
-          include: ventaInclude,
-        });
+            include: ventaInclude,
+          });
 
-        if (electronicSale) {
-          await tx.sunatJob.upsert({
-            where: {
-              tipoDocumento_documentoId: {
+          if (electronicSale) {
+            await tx.sunatJob.upsert({
+              where: {
+                tipoDocumento_documentoId: {
+                  tipoDocumento: 'venta',
+                  documentoId: ventaData.id,
+                },
+              },
+              create: {
+                empresaId,
                 tipoDocumento: 'venta',
                 documentoId: ventaData.id,
+                estado: 'pendiente_envio',
+                nextRetryAt: new Date(),
               },
-            },
-            create: {
-              empresaId,
-              tipoDocumento: 'venta',
-              documentoId: ventaData.id,
-              estado: 'pendiente_envio',
-              nextRetryAt: new Date(),
-            },
-            update: {
-              estado: 'pendiente_envio',
-              intentos: 0,
-              ultimoCodigo: null,
-              ultimoError: null,
-              lockedAt: null,
-              lastAttemptAt: null,
-              processedAt: null,
-              nextRetryAt: new Date(),
-            },
-          });
-        }
-
-        if (cajaSesion) {
-          await tx.cajaMovimiento.createMany({
-            data: ventaData.pagos.map((p) => ({
-              empresaId,
-              cajaSesionId: cajaSesion.id,
-              ventaId: ventaData.id,
-              ventaPagoId: p.id,
-              metodoPagoId: p.metodoPagoId,
-              tipo: CajaMovimientoTipo.venta,
-              monto: p.monto,
-              motivo: `Venta ${ventaData.correlativo}`,
-              referencia: p.referencia,
-              creadoPorId: usuarioId,
-            })),
-          });
-        }
-
-        if (dto.sucursalId) {
-          const sucursalIdBigint = BigInt(dto.sucursalId);
-          for (const detalle of detallesData) {
-            await this.stockService.changeStock(tx, {
-              empresaId,
-              sucursalId: sucursalIdBigint,
-              productoVarianteId: BigInt(detalle.productoVarianteId),
-              delta: -detalle.cantidad,
-              tipo: StockMovimientoTipo.venta,
-              motivo: `Venta ${ventaData.correlativo}`,
-              creadoPorId: usuarioId,
-              referenciaTipo: 'venta',
-              referenciaId: ventaData.id,
+              update: {
+                estado: 'pendiente_envio',
+                intentos: 0,
+                ultimoCodigo: null,
+                ultimoError: null,
+                lockedAt: null,
+                lastAttemptAt: null,
+                processedAt: null,
+                nextRetryAt: new Date(),
+              },
             });
           }
-        }
 
-        return ventaData;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+          if (cajaSesion) {
+            await tx.cajaMovimiento.createMany({
+              data: ventaData.pagos.map((p) => ({
+                empresaId,
+                cajaSesionId: cajaSesion.id,
+                ventaId: ventaData.id,
+                ventaPagoId: p.id,
+                metodoPagoId: p.metodoPagoId,
+                tipo: CajaMovimientoTipo.venta,
+                monto: p.monto,
+                motivo: `Venta ${ventaData.correlativo}`,
+                referencia: p.referencia,
+                creadoPorId: usuarioId,
+              })),
+            });
+          }
+
+          if (dto.sucursalId) {
+            const sucursalIdBigint = BigInt(dto.sucursalId);
+            for (const detalle of detallesData) {
+              await this.stockService.changeStock(tx, {
+                empresaId,
+                sucursalId: sucursalIdBigint,
+                productoVarianteId: BigInt(detalle.productoVarianteId),
+                delta: -detalle.cantidad,
+                tipo: StockMovimientoTipo.venta,
+                motivo: `Venta ${ventaData.correlativo}`,
+                creadoPorId: usuarioId,
+                referenciaTipo: 'venta',
+                referenciaId: ventaData.id,
+              });
+            }
+          }
+
+          return ventaData;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+      .catch(async (error: unknown) => {
+        const existingAfterRace = await this.findByRequestId(
+          empresaId,
+          dto.requestId,
+        );
+        if (existingAfterRace && this.isUniqueConstraintError(error)) {
+          return existingAfterRace;
+        }
+        throw error;
+      });
 
     return this.toVentaResponse(venta);
+  }
+
+  async findByRequestIdResponse(empresaId: bigint, requestId?: string) {
+    const sale = await this.findByRequestId(empresaId, requestId);
+    return sale ? this.toVentaResponse(sale) : null;
+  }
+
+  private findByRequestId(empresaId: bigint, requestId?: string) {
+    if (!requestId) return null;
+    return this.prisma.venta.findFirst({
+      where: { empresaId, requestId },
+      include: ventaInclude,
+    });
+  }
+
+  private isUniqueConstraintError(error: unknown) {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    );
   }
 
   // ── Find All Sales ─────────────────────────────────────────────────
