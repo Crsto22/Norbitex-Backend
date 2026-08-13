@@ -215,7 +215,7 @@ export class SalesController {
       publicId,
       'xml',
     );
-    return response.redirect(file.url);
+    return this.sendSignedArtifact(response, file, 'application/xml');
   }
 
   @Get(':publicId/sunat/cdr')
@@ -230,7 +230,7 @@ export class SalesController {
       publicId,
       'cdr',
     );
-    return response.redirect(file.url);
+    return this.sendSignedArtifact(response, file, 'application/zip');
   }
 
   @Post(':publicId/sunat/baja/consultar-ticket')
@@ -257,7 +257,7 @@ export class SalesController {
       publicId,
       'xml',
     );
-    return response.redirect(file.url);
+    return this.sendSignedArtifact(response, file, 'application/xml');
   }
 
   @Get(':publicId/sunat/baja/cdr')
@@ -272,7 +272,7 @@ export class SalesController {
       publicId,
       'cdr',
     );
-    return response.redirect(file.url);
+    return this.sendSignedArtifact(response, file, 'application/zip');
   }
 
   @Get(':publicId')
@@ -319,5 +319,27 @@ export class SalesController {
     }
 
     return user.sub;
+  }
+
+  private async sendSignedArtifact(
+    response: Response,
+    file: { fileName: string; url: string },
+    contentType: string,
+  ) {
+    const artifact = await fetch(file.url);
+
+    if (!artifact.ok) {
+      response.status(artifact.status).send('Archivo SUNAT no disponible');
+      return;
+    }
+
+    const buffer = Buffer.from(await artifact.arrayBuffer());
+    response.set({
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="${file.fileName}"`,
+      'Content-Length': buffer.length,
+    });
+
+    response.send(buffer);
   }
 }
