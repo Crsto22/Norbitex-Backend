@@ -11,10 +11,13 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
+import { PdfConcurrencyService } from '../../common/pdf/pdf-concurrency.service';
+import { rateLimits } from '../../common/rate-limits';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { getCommercialScope } from '../../common/commercial-access';
 import { QuotationsPdfService } from './quotations-pdf.service';
@@ -32,6 +35,7 @@ export class QuotationsController {
   constructor(
     private readonly quotationsService: QuotationsService,
     private readonly quotationsPdfService: QuotationsPdfService,
+    private readonly pdfConcurrency: PdfConcurrencyService,
   ) {}
 
   @Post()
@@ -56,6 +60,7 @@ export class QuotationsController {
   }
 
   @Get(':publicId/pdf')
+  @Throttle(rateLimits.pdf)
   async generatePdf(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -66,9 +71,11 @@ export class QuotationsController {
       getCommercialScope(user),
       publicId,
     );
-    const pdf = await this.quotationsPdfService.generateQuotationPdf(
-      this.getEmpresaId(user),
-      publicId,
+    const pdf = await this.pdfConcurrency.run(() =>
+      this.quotationsPdfService.generateQuotationPdf(
+        this.getEmpresaId(user),
+        publicId,
+      ),
     );
     response.set({
       'Content-Type': 'application/pdf',

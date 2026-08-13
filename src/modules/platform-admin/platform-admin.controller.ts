@@ -10,9 +10,12 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { PlanCodigo } from '@prisma/client';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { PdfConcurrencyService } from '../../common/pdf/pdf-concurrency.service';
+import { rateLimits } from '../../common/rate-limits';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { UpdatePlanPricingDto } from '../plans/dto/update-plan-pricing.dto';
 import { UpdatePlanLimitsDto } from '../plans/dto/update-plan-limits.dto';
@@ -61,6 +64,7 @@ export class PlatformAdminController {
     private readonly plansService: PlansService,
     private readonly platformOveragesService: PlatformOveragesService,
     private readonly platformAffiliatesService: PlatformAffiliatesService,
+    private readonly pdfConcurrency: PdfConcurrencyService,
   ) {}
 
   @Get('affiliates')
@@ -114,11 +118,14 @@ export class PlatformAdminController {
   }
 
   @Get('affiliates/settlements/:id/pdf')
+  @Throttle(rateLimits.pdf)
   async downloadAffiliateSettlement(
     @Param('id') id: string,
     @Res() response: Response,
   ) {
-    const file = await this.platformAffiliatesService.generateSettlementPdf(id);
+    const file = await this.pdfConcurrency.run(() =>
+      this.platformAffiliatesService.generateSettlementPdf(id),
+    );
     response.setHeader('Content-Type', 'application/pdf');
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader(
@@ -143,6 +150,7 @@ export class PlatformAdminController {
   }
 
   @Get('dashboard')
+  @Throttle(rateLimits.dashboard)
   getDashboard(@Query() query: PlatformDashboardQueryDto) {
     return this.platformAdminService.getDashboard(new Date(), query.dateFilter);
   }

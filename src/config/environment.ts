@@ -13,6 +13,7 @@ const requiredProductionVariables = [
   'CLOUDFLARE_R2_PUBLIC_URL',
   'SUNAT_SECRETS_ENCRYPTION_KEY',
   'LOCAL_STORAGE_DIR',
+  'METRICS_TOKEN',
 ] as const;
 
 export function validateEnvironment(config: Record<string, unknown>) {

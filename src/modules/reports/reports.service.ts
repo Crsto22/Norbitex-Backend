@@ -14,6 +14,7 @@ import {
   scopedCreatorId,
   type CommercialScope,
 } from '../../common/commercial-access';
+import { ResponseCacheService } from '../../common/cache/response-cache.service';
 import {
   FindReportQueryDto,
   ReportDateFilter,
@@ -30,9 +31,24 @@ type ReportContext = {
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cache: ResponseCacheService,
+  ) {}
 
   async findSales(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindReportQueryDto,
+  ) {
+    return this.cache.getOrSet(
+      this.cache.key('reports:sales', empresaId, scope, query),
+      30_000,
+      () => this.findSalesUncached(empresaId, scope, query),
+    );
+  }
+
+  private async findSalesUncached(
     empresaId: bigint,
     scope: CommercialScope,
     query: FindReportQueryDto,
@@ -140,6 +156,18 @@ export class ReportsService {
   }
 
   async findProducts(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindReportQueryDto,
+  ) {
+    return this.cache.getOrSet(
+      this.cache.key('reports:products', empresaId, scope, query),
+      30_000,
+      () => this.findProductsUncached(empresaId, scope, query),
+    );
+  }
+
+  private async findProductsUncached(
     empresaId: bigint,
     scope: CommercialScope,
     query: FindReportQueryDto,
@@ -275,6 +303,18 @@ export class ReportsService {
     scope: CommercialScope,
     query: FindReportQueryDto,
   ) {
+    return this.cache.getOrSet(
+      this.cache.key('reports:clients', empresaId, scope, query),
+      30_000,
+      () => this.findClientsUncached(empresaId, scope, query),
+    );
+  }
+
+  private async findClientsUncached(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindReportQueryDto,
+  ) {
     const context = await this.resolveContext(empresaId, scope, query, true);
     const completedWhere = {
       ...this.buildSaleWhere(empresaId, context.sucursalId, context.creatorId),
@@ -367,6 +407,18 @@ export class ReportsService {
   }
 
   async findUsers(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindReportQueryDto,
+  ) {
+    return this.cache.getOrSet(
+      this.cache.key('reports:users', empresaId, scope, query),
+      30_000,
+      () => this.findUsersUncached(empresaId, scope, query),
+    );
+  }
+
+  private async findUsersUncached(
     empresaId: bigint,
     scope: CommercialScope,
     query: FindReportQueryDto,

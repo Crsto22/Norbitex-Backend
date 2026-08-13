@@ -10,10 +10,13 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
+import { PdfConcurrencyService } from '../../common/pdf/pdf-concurrency.service';
+import { rateLimits } from '../../common/rate-limits';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { getCommercialScope } from '../../common/commercial-access';
 import { CreditNoteScopeGuard } from './guards/credit-note-scope.guard';
@@ -35,6 +38,7 @@ export class CreditNotesController {
     private readonly creditNotePdfService: CreditNotePdfService,
     private readonly sunatCreditNoteEmissionService: SunatCreditNoteEmissionService,
     private readonly salesService: SalesService,
+    private readonly pdfConcurrency: PdfConcurrencyService,
   ) {}
 
   @Get()
@@ -67,14 +71,14 @@ export class CreditNotesController {
   }
 
   @Get(':publicId/pdf')
+  @Throttle(rateLimits.pdf)
   async generatePdf(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const pdf = await this.creditNotePdfService.generatePdf(
-      this.getEmpresaId(user),
-      publicId,
+    const pdf = await this.pdfConcurrency.run(() =>
+      this.creditNotePdfService.generatePdf(this.getEmpresaId(user), publicId),
     );
     response.set({
       'Content-Type': 'application/pdf',
@@ -86,6 +90,7 @@ export class CreditNotesController {
   }
 
   @Post(':publicId/sunat/retry')
+  @Throttle(rateLimits.sunat)
   retrySunat(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -97,6 +102,7 @@ export class CreditNotesController {
   }
 
   @Get(':publicId/sunat/xml')
+  @Throttle(rateLimits.sunat)
   async downloadSunatXml(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -111,6 +117,7 @@ export class CreditNotesController {
   }
 
   @Get(':publicId/sunat/cdr')
+  @Throttle(rateLimits.sunat)
   async downloadSunatCdr(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,

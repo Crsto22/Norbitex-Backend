@@ -5,15 +5,18 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
+import { rateLimits } from '../../common/rate-limits';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { getCommercialScope } from '../../common/commercial-access';
 import { FindReportQueryDto } from './dto/find-report-query.dto';
 import { ReportsService } from './reports.service';
 
 @UseGuards(ModuleAccessGuard)
+@Throttle(rateLimits.reports)
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}

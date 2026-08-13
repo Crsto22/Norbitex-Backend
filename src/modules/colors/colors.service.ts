@@ -6,6 +6,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ResponseCacheService } from '../../common/cache/response-cache.service';
 import { CreateColorDto } from './dto/create-color.dto';
 import { FindColorsQueryDto } from './dto/find-colors-query.dto';
 import { UpdateColorDto } from './dto/update-color.dto';
@@ -15,9 +16,18 @@ export class ColorsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly cache: ResponseCacheService,
   ) {}
 
   async findAll(empresaId: bigint, query: FindColorsQueryDto) {
+    return this.cache.getOrSet(
+      this.cache.key(this.cachePrefix(empresaId), query),
+      60_000,
+      () => this.findAllUncached(empresaId, query),
+    );
+  }
+
+  private async findAllUncached(empresaId: bigint, query: FindColorsQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? this.getDefaultPaginationLimit();
     const search = query.search?.trim();
@@ -106,6 +116,7 @@ export class ColorsService {
         },
       });
 
+      this.clearCache(empresaId);
       return this.toResponse(restoredColor);
     }
 
@@ -119,6 +130,7 @@ export class ColorsService {
       },
     });
 
+    this.clearCache(empresaId);
     return this.toResponse(color);
   }
 
@@ -147,6 +159,7 @@ export class ColorsService {
         data,
       });
 
+      this.clearCache(empresaId);
       return this.toResponse(color);
     } catch (error) {
       if (
@@ -171,6 +184,7 @@ export class ColorsService {
       },
     });
 
+    this.clearCache(empresaId);
     return this.toResponse(color);
   }
 
@@ -192,6 +206,14 @@ export class ColorsService {
 
   private cleanName(name: string) {
     return name.trim().replace(/\s+/g, ' ');
+  }
+
+  private cachePrefix(empresaId: bigint) {
+    return `catalog:colors:${empresaId.toString()}`;
+  }
+
+  private clearCache(empresaId: bigint) {
+    this.cache.deletePrefix(this.cachePrefix(empresaId));
   }
 
   private getDefaultPaginationLimit() {

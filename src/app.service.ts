@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import { RequestMetricsService } from './common/metrics/request-metrics.service';
 import { PrismaService } from './prisma/prisma.service';
 
 @Injectable()
 export class AppService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly metrics: RequestMetricsService,
+  ) {}
 
   getHello(): string {
     return 'Norbitex API';
@@ -15,5 +19,9 @@ export class AppService {
       status: 'ok',
       timestamp: new Date().toISOString(),
     };
+  }
+
+  metricsSnapshot() {
+    return this.metrics.snapshot();
   }
 }

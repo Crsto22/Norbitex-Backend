@@ -12,10 +12,13 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { PdfConcurrencyService } from '../../common/pdf/pdf-concurrency.service';
+import { rateLimits } from '../../common/rate-limits';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { PlatformAdminGuard } from '../platform-admin/platform-admin.guard';
 import {
@@ -33,7 +36,10 @@ import { PlatformBillingService } from './platform-billing.service';
 @UseGuards(PlatformAdminGuard)
 @Controller('platform-admin/billing')
 export class PlatformBillingAdminController {
-  constructor(private readonly billing: PlatformBillingService) {}
+  constructor(
+    private readonly billing: PlatformBillingService,
+    private readonly pdfConcurrency: PdfConcurrencyService,
+  ) {}
 
   @Get('issuer') getIssuer() {
     return this.billing.getIssuerConfig();
@@ -83,13 +89,14 @@ export class PlatformBillingAdminController {
   ) {
     return this.billing.issueHistorical(user, dto);
   }
-  @Post('receipts/:id/retry') retry(
-    @CurrentUser() user: JwtPayload,
-    @Param('id') id: string,
-  ) {
+  @Post('receipts/:id/retry')
+  @Throttle(rateLimits.sunat)
+  retry(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.billing.retry(user, id);
   }
-  @Post('receipts/:id/cancel') cancel(
+  @Post('receipts/:id/cancel')
+  @Throttle(rateLimits.sunat)
+  cancel(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Body() dto: RequestPlatformCancellationDto,
@@ -97,6 +104,7 @@ export class PlatformBillingAdminController {
     return this.billing.requestCancellation(user, id, dto);
   }
   @Get('receipts/:id/cancellation/download/:kind')
+  @Throttle(rateLimits.sunat)
   async downloadCancellation(
     @Param('id') id: string,
     @Param('kind') kind: string,
@@ -118,6 +126,7 @@ export class PlatformBillingAdminController {
   }
 
   @Get('receipts/:id/download/:kind')
+  @Throttle(rateLimits.pdf)
   async download(
     @Param('id') id: string,
     @Param('kind') kind: string,
@@ -125,7 +134,10 @@ export class PlatformBillingAdminController {
   ) {
     if (!['pdf', 'xml', 'cdr'].includes(kind))
       throw new BadRequestException('Formato no valido');
-    const file = await this.billing.download(id, kind as 'pdf' | 'xml' | 'cdr');
+    const file =
+      kind === 'pdf'
+        ? await this.pdfConcurrency.run(() => this.billing.download(id, 'pdf'))
+        : await this.billing.download(id, kind as 'xml' | 'cdr');
     if ('url' in file && file.url) return response.redirect(file.url);
     response.setHeader('Content-Type', file.contentType!);
     response.setHeader('Cache-Control', 'no-store');
@@ -138,7 +150,10 @@ export class PlatformBillingAdminController {
 }
 @Controller('billing/receipts')
 export class CompanyBillingController {
-  constructor(private readonly billing: PlatformBillingService) {}
+  constructor(
+    private readonly billing: PlatformBillingService,
+    private readonly pdfConcurrency: PdfConcurrencyService,
+  ) {}
 
   @Get()
   find(
@@ -149,6 +164,7 @@ export class CompanyBillingController {
   }
 
   @Get(':id/download/:kind')
+  @Throttle(rateLimits.pdf)
   async download(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
@@ -157,11 +173,13 @@ export class CompanyBillingController {
   ) {
     if (!['pdf', 'xml', 'cdr'].includes(kind))
       throw new BadRequestException('Formato no valido');
-    const file = await this.billing.download(
-      id,
-      kind as 'pdf' | 'xml' | 'cdr',
-      this.ownerCompany(user),
-    );
+    const empresaId = this.ownerCompany(user);
+    const file =
+      kind === 'pdf'
+        ? await this.pdfConcurrency.run(() =>
+            this.billing.download(id, 'pdf', empresaId),
+          )
+        : await this.billing.download(id, kind as 'xml' | 'cdr', empresaId);
     if ('url' in file && file.url) return response.redirect(file.url);
     response.setHeader('Content-Type', file.contentType!);
     response.setHeader('Cache-Control', 'no-store');

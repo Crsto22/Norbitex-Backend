@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Patch, Post, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { rateLimits } from '../../common/rate-limits';
 import { AuthService } from './auth.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { ChangeMyPasswordDto } from './dto/change-my-password.dto';
@@ -26,12 +28,14 @@ export class AuthController {
 
   @Public()
   @Post('register')
+  @Throttle(rateLimits.auth)
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
   @Public()
   @Post('verify-email')
+  @Throttle(rateLimits.auth)
   verifyEmail(@Body() dto: VerifyEmailDto) {
     return this.authService.verifyEmail(dto);
   }
@@ -75,6 +79,7 @@ export class AuthController {
 
   @Public()
   @Post('login')
+  @Throttle(rateLimits.auth)
   login(
     @Body() dto: LoginDto,
     @Req() request: Request,
@@ -88,24 +93,28 @@ export class AuthController {
 
   @Public()
   @Post('forgot-password')
+  @Throttle(rateLimits.auth)
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto);
   }
 
   @Public()
   @Post('reset-password')
+  @Throttle(rateLimits.auth)
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
   }
 
   @Public()
   @Post('validate-reset-token')
+  @Throttle(rateLimits.auth)
   validateResetToken(@Body() dto: ValidateResetTokenDto) {
     return this.authService.validateResetToken(dto);
   }
 
   @Public()
   @Post('refresh')
+  @Throttle(rateLimits.auth)
   refresh(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
@@ -121,6 +130,7 @@ export class AuthController {
 
   @Public()
   @Post('logout')
+  @Throttle(rateLimits.auth)
   async logout(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,

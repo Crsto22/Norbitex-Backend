@@ -25,16 +25,46 @@ export class PrismaService
   }
 }
 
-function getDatabaseUrl() {
-  if (process.env.DATABASE_URL) {
-    return process.env.DATABASE_URL;
+export function getDatabaseUrl(env: NodeJS.ProcessEnv = process.env) {
+  if (env.DATABASE_URL) {
+    return withPoolSettings(env.DATABASE_URL, env);
   }
 
-  const host = process.env.DB_HOST ?? 'localhost';
-  const port = process.env.DB_PORT ?? '5432';
-  const database = process.env.DB_NAME ?? 'Nobitex';
-  const user = process.env.DB_USER ?? 'postgres';
-  const password = encodeURIComponent(process.env.DB_PASSWORD ?? '');
+  const host = env.DB_HOST ?? 'localhost';
+  const port = env.DB_PORT ?? '5432';
+  const database = env.DB_NAME ?? 'Nobitex';
+  const user = env.DB_USER ?? 'postgres';
+  const password = encodeURIComponent(env.DB_PASSWORD ?? '');
 
-  return `postgresql://${user}:${password}@${host}:${port}/${database}?schema=public`;
+  return withPoolSettings(
+    `postgresql://${user}:${password}@${host}:${port}/${database}?schema=public`,
+    env,
+  );
+}
+
+function withPoolSettings(databaseUrl: string, env: NodeJS.ProcessEnv) {
+  const url = new URL(databaseUrl);
+  setMissingPositiveInt(
+    url,
+    'connection_limit',
+    env.DB_POOL_CONNECTION_LIMIT,
+    '10',
+  );
+  setMissingPositiveInt(url, 'pool_timeout', env.DB_POOL_TIMEOUT_SECONDS, '10');
+
+  return url.toString();
+}
+
+function setMissingPositiveInt(
+  url: URL,
+  key: string,
+  value: string | undefined,
+  fallback: string,
+) {
+  if (url.searchParams.has(key)) return;
+
+  const parsed = Number(value ?? fallback);
+  if (Number.isInteger(parsed) && parsed > 0) {
+    url.searchParams.set(key, String(parsed));
+  }
 }

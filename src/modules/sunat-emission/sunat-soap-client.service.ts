@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class SunatSoapClientService {
+  constructor(private readonly configService: ConfigService) {}
+
   async sendBill(params: {
     endpoint: string;
     username: string;
@@ -15,7 +18,7 @@ export class SunatSoapClientService {
       fileName: params.zipFileName,
       contentFile: params.zipBytes.toString('base64'),
     });
-    const response = await fetch(params.endpoint, {
+    const response = await this.request(params.endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/xml; charset=utf-8',
@@ -59,7 +62,7 @@ export class SunatSoapClientService {
       fileName: params.zipFileName,
       contentFile: params.zipBytes.toString('base64'),
     });
-    const response = await fetch(params.endpoint, {
+    const response = await this.request(params.endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/xml; charset=utf-8',
@@ -93,7 +96,7 @@ export class SunatSoapClientService {
     ticket: string;
   }) {
     const body = this.buildStatusEnvelope(params);
-    const response = await fetch(params.endpoint, {
+    const response = await this.request(params.endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/xml; charset=utf-8',
@@ -178,6 +181,27 @@ export class SunatSoapClientService {
 
   private parseFault(xml: string) {
     return this.firstTag(xml, 'faultstring') || this.firstTag(xml, 'message');
+  }
+
+  private async request(url: string, init: RequestInit) {
+    try {
+      return await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(this.timeoutMs()),
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        throw new Error(`SUNAT no respondio en ${this.timeoutMs()}ms`);
+      }
+      throw error;
+    }
+  }
+
+  private timeoutMs() {
+    const seconds = Number(
+      this.configService.get<string>('SUNAT_SOAP_TIMEOUT_SECONDS'),
+    );
+    return (Number.isFinite(seconds) && seconds > 0 ? seconds : 60) * 1000;
   }
 
   private firstTag(xml: string, localName: string) {

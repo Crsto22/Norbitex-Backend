@@ -11,10 +11,13 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
+import { PdfConcurrencyService } from '../../common/pdf/pdf-concurrency.service';
+import { rateLimits } from '../../common/rate-limits';
 import { SaleScopeGuard } from './guards/sale-scope.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { getCommercialScope } from '../../common/commercial-access';
@@ -43,6 +46,7 @@ export class SalesController {
     private readonly salesPdfService: SalesPdfService,
     private readonly sunatEmissionService: SunatEmissionService,
     private readonly sunatBajaService: SunatBajaService,
+    private readonly pdfConcurrency: PdfConcurrencyService,
   ) {}
 
   // ── Products (static route BEFORE :publicId) ────────────────────────
@@ -141,14 +145,14 @@ export class SalesController {
 
   @Get(':publicId/pdf')
   @RequireModule('historial-ventas', 'comprobantes')
+  @Throttle(rateLimits.pdf)
   async generatePdf(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const pdf = await this.salesPdfService.generateSalePdf(
-      this.getEmpresaId(user),
-      publicId,
+    const pdf = await this.pdfConcurrency.run(() =>
+      this.salesPdfService.generateSalePdf(this.getEmpresaId(user), publicId),
     );
     response.set({
       'Content-Type': 'application/pdf',
@@ -161,14 +165,17 @@ export class SalesController {
 
   @Get(':publicId/ticket')
   @RequireModule('historial-ventas', 'comprobantes')
+  @Throttle(rateLimits.pdf)
   async generateTicket(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const pdf = await this.salesPdfService.generateSaleTicketPdf(
-      this.getEmpresaId(user),
-      publicId,
+    const pdf = await this.pdfConcurrency.run(() =>
+      this.salesPdfService.generateSaleTicketPdf(
+        this.getEmpresaId(user),
+        publicId,
+      ),
     );
     response.set({
       'Content-Type': 'application/pdf',
@@ -181,6 +188,7 @@ export class SalesController {
 
   @Get(':publicId/sunat')
   @RequireModule('historial-ventas', 'comprobantes')
+  @Throttle(rateLimits.sunat)
   getSunatStatus(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -193,6 +201,7 @@ export class SalesController {
 
   @Post(':publicId/sunat/retry')
   @RequireModule('historial-ventas', 'comprobantes')
+  @Throttle(rateLimits.sunat)
   retrySunat(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -205,6 +214,7 @@ export class SalesController {
 
   @Get(':publicId/sunat/xml')
   @RequireModule('historial-ventas', 'comprobantes')
+  @Throttle(rateLimits.sunat)
   async downloadSunatXml(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -220,6 +230,7 @@ export class SalesController {
 
   @Get(':publicId/sunat/cdr')
   @RequireModule('historial-ventas', 'comprobantes')
+  @Throttle(rateLimits.sunat)
   async downloadSunatCdr(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -235,6 +246,7 @@ export class SalesController {
 
   @Post(':publicId/sunat/baja/consultar-ticket')
   @RequireModule('historial-ventas', 'comprobantes')
+  @Throttle(rateLimits.sunat)
   consultarTicketBajaSunat(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -247,6 +259,7 @@ export class SalesController {
 
   @Get(':publicId/sunat/baja/xml')
   @RequireModule('historial-ventas', 'comprobantes')
+  @Throttle(rateLimits.sunat)
   async downloadSunatBajaXml(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -262,6 +275,7 @@ export class SalesController {
 
   @Get(':publicId/sunat/baja/cdr')
   @RequireModule('historial-ventas', 'comprobantes')
+  @Throttle(rateLimits.sunat)
   async downloadSunatBajaCdr(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,

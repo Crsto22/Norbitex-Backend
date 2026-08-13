@@ -1,12 +1,15 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { rateLimits } from '../../common/rate-limits';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { DocumentoConsultaService } from './documento-consulta.service';
 
 @UseGuards(ModuleAccessGuard)
 @RequireModule('clientes', 'ventas-pos', 'cotizaciones', 'empresa')
+@Throttle(rateLimits.sunat)
 @Controller('documento')
 export class DocumentoConsultaController {
   constructor(

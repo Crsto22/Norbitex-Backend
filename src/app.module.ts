@@ -1,8 +1,15 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { createHash } from 'node:crypto';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { ResponseCacheModule } from './common/cache/response-cache.module';
+import { RequestMetricsModule } from './common/metrics/request-metrics.module';
+import { PdfConcurrencyModule } from './common/pdf/pdf-concurrency.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BrandsModule } from './modules/brands/brands.module';
 import { BranchesModule } from './modules/branches/branches.module';
@@ -39,7 +46,23 @@ import { validateEnvironment } from './config/environment';
       cache: true,
       validate: validateEnvironment,
     }),
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        throttlers: [
+          {
+            ttl: numberEnv(configService, 'RATE_LIMIT_TTL_SECONDS', 60) * 1000,
+            limit: numberEnv(configService, 'RATE_LIMIT_REQUESTS', 120),
+          },
+        ],
+        getTracker: (request: Record<string, unknown>) =>
+          getRateLimitTracker(request),
+      }),
+    }),
     ScheduleModule.forRoot(),
+    ResponseCacheModule,
+    RequestMetricsModule,
+    PdfConcurrencyModule,
     PrismaModule,
     PlansModule,
     AuthModule,
@@ -69,6 +92,29 @@ import { validateEnvironment } from './config/environment';
     StockModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}
+
+function numberEnv(
+  configService: ConfigService,
+  name: string,
+  fallback: number,
+) {
+  const value = Number(configService.get<string>(name));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function getRateLimitTracker(request: Record<string, unknown>) {
+  const headers = request.headers as Record<string, string | string[]>;
+  const authorization = headerValue(headers?.authorization);
+  if (authorization) {
+    return `auth:${createHash('sha256').update(authorization).digest('hex')}`;
+  }
+
+  return `ip:${typeof request.ip === 'string' ? request.ip : 'unknown'}`;
+}
+
+function headerValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}

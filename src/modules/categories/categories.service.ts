@@ -6,6 +6,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ResponseCacheService } from '../../common/cache/response-cache.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { FindCategoriesQueryDto } from './dto/find-categories-query.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
@@ -15,9 +16,21 @@ export class CategoriesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly cache: ResponseCacheService,
   ) {}
 
   async findAll(empresaId: bigint, query: FindCategoriesQueryDto) {
+    return this.cache.getOrSet(
+      this.cache.key(this.cachePrefix(empresaId), query),
+      60_000,
+      () => this.findAllUncached(empresaId, query),
+    );
+  }
+
+  private async findAllUncached(
+    empresaId: bigint,
+    query: FindCategoriesQueryDto,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? this.getDefaultPaginationLimit();
     const search = query.search?.trim();
@@ -103,6 +116,7 @@ export class CategoriesService {
         },
       });
 
+      this.clearCache(empresaId);
       return this.toResponse(restoredCategory);
     }
 
@@ -116,6 +130,7 @@ export class CategoriesService {
       },
     });
 
+    this.clearCache(empresaId);
     return this.toResponse(category);
   }
 
@@ -144,6 +159,7 @@ export class CategoriesService {
         data,
       });
 
+      this.clearCache(empresaId);
       return this.toResponse(category);
     } catch (error) {
       if (
@@ -168,6 +184,7 @@ export class CategoriesService {
       },
     });
 
+    this.clearCache(empresaId);
     return this.toResponse(category);
   }
 
@@ -197,6 +214,14 @@ export class CategoriesService {
   private cleanOptionalText(text?: string) {
     const cleanText = text?.trim().replace(/\s+/g, ' ');
     return cleanText || null;
+  }
+
+  private cachePrefix(empresaId: bigint) {
+    return `catalog:categories:${empresaId.toString()}`;
+  }
+
+  private clearCache(empresaId: bigint) {
+    this.cache.deletePrefix(this.cachePrefix(empresaId));
   }
 
   private getDefaultPaginationLimit() {

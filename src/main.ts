@@ -5,6 +5,7 @@ import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { resolve } from 'node:path';
 import { AppModule } from './app.module';
+import { RequestMetricsService } from './common/metrics/request-metrics.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -13,17 +14,18 @@ async function bootstrap() {
   const corsOrigins = getCorsOrigins();
 
   server.disable('x-powered-by');
-  if (isProduction) server.set('trust proxy', 1);
+  if (isProduction) server.set('trust proxy', getTrustProxyHops());
   app.enableShutdownHooks();
 
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Metrics-Token'],
   });
   app.use(cookieParser());
   app.use(securityHeaders(isProduction));
+  app.use(app.get(RequestMetricsService).middleware());
   app.use('/storage', express.static(getLocalStorageRoot()));
   app.useGlobalPipes(
     new ValidationPipe({
@@ -61,6 +63,11 @@ function getLocalStorageRoot() {
   return resolve(
     process.env.LOCAL_STORAGE_DIR || resolve(process.cwd(), 'storage'),
   );
+}
+
+function getTrustProxyHops() {
+  const value = Number(process.env.TRUST_PROXY_HOPS);
+  return Number.isFinite(value) && value > 0 ? value : 1;
 }
 
 function getCorsOrigins() {

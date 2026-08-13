@@ -12,6 +12,7 @@ import {
   scopedCreatorId,
   type CommercialScope,
 } from '../../common/commercial-access';
+import { ResponseCacheService } from '../../common/cache/response-cache.service';
 import {
   DashboardDateFilter,
   FindDashboardQueryDto,
@@ -27,9 +28,24 @@ type TrendBucket = {
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cache: ResponseCacheService,
+  ) {}
 
   async find(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindDashboardQueryDto,
+  ) {
+    return this.cache.getOrSet(
+      this.cache.key('dashboard', empresaId, scope, query),
+      30_000,
+      () => this.findUncached(empresaId, scope, query),
+    );
+  }
+
+  private async findUncached(
     empresaId: bigint,
     scope: CommercialScope,
     query: FindDashboardQueryDto,

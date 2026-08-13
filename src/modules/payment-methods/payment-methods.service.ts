@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { MetodoPagoEstado, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ResponseCacheService } from '../../common/cache/response-cache.service';
 import { CreatePaymentMethodDto } from './dto/create-payment-method.dto';
 import { FindPaymentMethodsQueryDto } from './dto/find-payment-methods-query.dto';
 import { UpdatePaymentMethodDto } from './dto/update-payment-method.dto';
@@ -16,9 +17,21 @@ export class PaymentMethodsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly cache: ResponseCacheService,
   ) {}
 
   async findAll(empresaId: bigint, query: FindPaymentMethodsQueryDto) {
+    return this.cache.getOrSet(
+      this.cache.key(this.cachePrefix(empresaId), query),
+      60_000,
+      () => this.findAllUncached(empresaId, query),
+    );
+  }
+
+  private async findAllUncached(
+    empresaId: bigint,
+    query: FindPaymentMethodsQueryDto,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? this.getDefaultPaginationLimit();
     const search = query.search?.trim();
@@ -117,6 +130,7 @@ export class PaymentMethodsService {
         },
       });
 
+      this.clearCache(empresaId);
       return this.toResponse(restoredMethod);
     }
 
@@ -137,6 +151,7 @@ export class PaymentMethodsService {
       },
     });
 
+    this.clearCache(empresaId);
     return this.toResponse(method);
   }
 
@@ -171,6 +186,7 @@ export class PaymentMethodsService {
         data,
       });
 
+      this.clearCache(empresaId);
       return this.toResponse(method);
     } catch (error) {
       if (
@@ -203,6 +219,7 @@ export class PaymentMethodsService {
       },
     });
 
+    this.clearCache(empresaId);
     return this.toResponse(method);
   }
 
@@ -229,6 +246,14 @@ export class PaymentMethodsService {
 
   private buildNameKey(name: string) {
     return this.cleanName(name).toLowerCase();
+  }
+
+  private cachePrefix(empresaId: bigint) {
+    return `catalog:payment-methods:${empresaId.toString()}`;
+  }
+
+  private clearCache(empresaId: bigint) {
+    this.cache.deletePrefix(this.cachePrefix(empresaId));
   }
 
   private getDefaultPaginationLimit() {

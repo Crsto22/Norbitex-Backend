@@ -12,10 +12,13 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
+import { PdfConcurrencyService } from '../../common/pdf/pdf-concurrency.service';
+import { rateLimits } from '../../common/rate-limits';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import {
   getCommercialScope,
@@ -39,6 +42,7 @@ export class GuiaRemisionController {
   constructor(
     private readonly guiaRemisionService: GuiaRemisionService,
     private readonly guiaRemisionPdfService: GuiaRemisionPdfService,
+    private readonly pdfConcurrency: PdfConcurrencyService,
   ) {}
 
   @Get('autocompletar/venta')
@@ -84,14 +88,17 @@ export class GuiaRemisionController {
   }
 
   @Get(':publicId/pdf')
+  @Throttle(rateLimits.pdf)
   async pdf(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const pdf = await this.guiaRemisionPdfService.generatePdf(
-      this.getEmpresaId(user),
-      publicId,
+    const pdf = await this.pdfConcurrency.run(() =>
+      this.guiaRemisionPdfService.generatePdf(
+        this.getEmpresaId(user),
+        publicId,
+      ),
     );
     response.set({
       'Content-Type': 'application/pdf',
@@ -103,6 +110,7 @@ export class GuiaRemisionController {
   }
 
   @Get(':publicId/sunat/xml')
+  @Throttle(rateLimits.sunat)
   async downloadXml(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -117,6 +125,7 @@ export class GuiaRemisionController {
   }
 
   @Get(':publicId/sunat/cdr')
+  @Throttle(rateLimits.sunat)
   async downloadCdr(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -131,11 +140,13 @@ export class GuiaRemisionController {
   }
 
   @Post(':publicId/emitir')
+  @Throttle(rateLimits.sunat)
   emitir(@CurrentUser() user: JwtPayload, @Param('publicId') publicId: string) {
     return this.guiaRemisionService.emitir(this.getEmpresaId(user), publicId);
   }
 
   @Post(':publicId/consultar-cdr')
+  @Throttle(rateLimits.sunat)
   consultarCdr(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,

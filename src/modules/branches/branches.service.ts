@@ -9,6 +9,7 @@ import { Prisma, SucursalEstado, SucursalTipo } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PlansService } from '../plans/plans.service';
 import type { CommercialScope } from '../../common/commercial-access';
+import { ResponseCacheService } from '../../common/cache/response-cache.service';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { FindBranchesQueryDto } from './dto/find-branches-query.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
@@ -19,9 +20,22 @@ export class BranchesService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly plansService: PlansService,
+    private readonly cache: ResponseCacheService,
   ) {}
 
   async findAll(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindBranchesQueryDto,
+  ) {
+    return this.cache.getOrSet(
+      this.cache.key(this.cachePrefix(empresaId), scope, query),
+      60_000,
+      () => this.findAllUncached(empresaId, scope, query),
+    );
+  }
+
+  private async findAllUncached(
     empresaId: bigint,
     scope: CommercialScope,
     query: FindBranchesQueryDto,
@@ -177,6 +191,7 @@ export class BranchesService {
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
 
+      this.clearCache(empresaId);
       return this.toResponse(branch);
     } catch (error) {
       this.handlePrismaError(error);
@@ -269,6 +284,7 @@ export class BranchesService {
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
 
+      this.clearCache(empresaId);
       return this.toResponse(branch);
     } catch (error) {
       this.handlePrismaError(error);
@@ -287,6 +303,7 @@ export class BranchesService {
       },
     });
 
+    this.clearCache(empresaId);
     return this.toResponse(branch);
   }
 
@@ -352,6 +369,14 @@ export class BranchesService {
 
   private buildNameKey(name: string) {
     return this.cleanText(name).toLowerCase();
+  }
+
+  private cachePrefix(empresaId: bigint) {
+    return `catalog:branches:${empresaId.toString()}`;
+  }
+
+  private clearCache(empresaId: bigint) {
+    this.cache.deletePrefix(this.cachePrefix(empresaId));
   }
 
   private getDefaultPaginationLimit() {
