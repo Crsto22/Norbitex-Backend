@@ -759,6 +759,7 @@ model ProductoColorImagen {
 
 model ProductoVariante {
   id                    BigInt                 @id @default(autoincrement())
+  publicId              String                 @unique @default(uuid()) @map("public_id") @db.VarChar(36)
   empresaId             BigInt                 @map("empresa_id")
   productoId            BigInt                 @map("producto_id")
   productoColorId       BigInt                 @map("producto_color_id")
@@ -788,6 +789,7 @@ model ProductoVariante {
   @@unique([empresaId, sku])
   @@unique([empresaId, codigoBarras])
   @@index([empresaId])
+  @@index([publicId])
   @@index([productoId])
   @@index([tallaId])
   @@index([deletedAt])

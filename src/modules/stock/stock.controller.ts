@@ -16,6 +16,7 @@ import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CreateStockMovementDto } from './dto/create-stock-movement.dto';
 import { CreateStockTransferDto } from './dto/create-stock-transfer.dto';
 import { FindStockKardexQueryDto } from './dto/find-stock-kardex-query.dto';
+import { FindStockKardexVariantsQueryDto } from './dto/find-stock-kardex-variants-query.dto';
 import { FindStockMovementsQueryDto } from './dto/find-stock-movements-query.dto';
 import { FindStockTransfersQueryDto } from './dto/find-stock-transfers-query.dto';
 import { StockService } from './stock.service';
@@ -69,6 +70,34 @@ export class StockController {
     return this.stockService.findKardex(
       this.getEmpresaId(user),
       getCommercialScope(user),
+      query,
+    );
+  }
+
+  @Get('kardex/variants')
+  @RequireModule('stock-kardex')
+  findKardexVariants(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: FindStockKardexVariantsQueryDto,
+  ) {
+    return this.stockService.findKardexVariants(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
+  }
+
+  @Get('kardex/:variantPublicId')
+  @RequireModule('stock-kardex')
+  findKardexByVariantPublicId(
+    @CurrentUser() user: JwtPayload,
+    @Param('variantPublicId') variantPublicId: string,
+    @Query() query: FindStockKardexQueryDto,
+  ) {
+    return this.stockService.findKardexByVariantPublicId(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      variantPublicId,
       query,
     );
   }

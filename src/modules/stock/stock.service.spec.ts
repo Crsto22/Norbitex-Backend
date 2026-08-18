@@ -165,6 +165,7 @@ describe('StockService', () => {
   it('calcula el resumen de kardex por variante y sucursal', async () => {
     const variant = {
       id: 3n,
+      publicId: 'variant-uuid-1',
       sku: 'SKU-1',
       codigoBarras: null,
       producto: {
@@ -259,6 +260,89 @@ describe('StockService', () => {
       expect.objectContaining({
         cantidad: 4,
         valorMovimiento: '32',
+      }),
+    );
+  });
+
+  it('lista variantes para seleccionar Kardex con filtros y paginacion', async () => {
+    const variant = {
+      id: 3n,
+      publicId: 'variant-uuid-1',
+      sku: 'SKU-1',
+      codigoBarras: null,
+      activo: true,
+      precioCompra: new Prisma.Decimal(5),
+      precioVenta: new Prisma.Decimal(10),
+      producto: {
+        id: 9n,
+        publicId: 'prod_1',
+        nombre: 'Polo',
+        tipo: 'variantes',
+        marca: { id: 1n, nombre: 'Marca' },
+        categoria: { id: 2n, nombre: 'Categoria' },
+      },
+      productoColor: {
+        color: { id: 4n, nombre: 'Rojo', hex: '#ff0000' },
+        imagenes: [
+          {
+            urlThumbnail: 'thumb.webp',
+            urlWebp: 'image.webp',
+            urlOriginal: 'image.png',
+          },
+        ],
+      },
+      talla: { id: 5n, nombre: 'M' },
+      inventarios: [
+        {
+          sucursalId: 7n,
+          stockActual: 12,
+          sucursal: { id: 7n, nombre: 'Tienda', tipo: 'tienda' },
+        },
+      ],
+    };
+    const prisma = {
+      $transaction: jest.fn().mockResolvedValue([[variant], 1]),
+      productoVariante: {
+        findMany: jest.fn(),
+        count: jest.fn(),
+      },
+    };
+    const scoped = {
+      userId: 1n,
+      branchId: null,
+      visibility: 'todas',
+      isOwner: true,
+    };
+
+    const result = await new StockService(prisma as never).findKardexVariants(
+      1n,
+      scoped as never,
+      {
+        search: 'polo',
+        colorId: '4',
+        tallaId: '5',
+        sucursalId: '7',
+        page: 1,
+        limit: 12,
+      },
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalled();
+    expect(result.meta).toEqual({
+      page: 1,
+      limit: 12,
+      total: 1,
+      totalPages: 1,
+    });
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({
+        variantPublicId: 'variant-uuid-1',
+        nombre: 'Polo',
+        color: expect.objectContaining({ nombre: 'Rojo' }),
+        talla: expect.objectContaining({ nombre: 'M' }),
+        stockTotal: 12,
+        stockSucursal: 12,
+        imageUrl: 'thumb.webp',
       }),
     );
   });

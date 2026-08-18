@@ -9,8 +9,9 @@ import {
 } from 'class-validator';
 
 export class FindStockKardexQueryDto {
+  @IsOptional()
   @IsNumberString()
-  productoVarianteId!: string;
+  productoVarianteId?: string;
 
   @IsOptional()
   @IsNumberString()

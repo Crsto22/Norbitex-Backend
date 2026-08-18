@@ -18,6 +18,7 @@ import {
 } from '../../common/commercial-access';
 import { CreateStockMovementDto } from './dto/create-stock-movement.dto';
 import { CreateStockTransferDto } from './dto/create-stock-transfer.dto';
+import { FindStockKardexVariantsQueryDto } from './dto/find-stock-kardex-variants-query.dto';
 import { FindStockKardexQueryDto } from './dto/find-stock-kardex-query.dto';
 import { FindStockMovementsQueryDto } from './dto/find-stock-movements-query.dto';
 import { FindStockTransfersQueryDto } from './dto/find-stock-transfers-query.dto';
@@ -39,6 +40,7 @@ type ChangeStockInput = {
 
 const productSelect = {
   id: true,
+  publicId: true,
   sku: true,
   codigoBarras: true,
   producto: {
@@ -48,6 +50,45 @@ const productSelect = {
     select: { color: { select: { nombre: true, hex: true } } },
   },
   talla: { select: { nombre: true } },
+} satisfies Prisma.ProductoVarianteSelect;
+
+const kardexVariantSelect = {
+  id: true,
+  publicId: true,
+  sku: true,
+  codigoBarras: true,
+  activo: true,
+  precioCompra: true,
+  precioVenta: true,
+  producto: {
+    select: {
+      id: true,
+      publicId: true,
+      nombre: true,
+      tipo: true,
+      marca: { select: { id: true, nombre: true } },
+      categoria: { select: { id: true, nombre: true } },
+    },
+  },
+  productoColor: {
+    select: {
+      color: { select: { id: true, nombre: true, hex: true } },
+      imagenes: {
+        where: { esPrincipal: true },
+        select: { urlThumbnail: true, urlWebp: true, urlOriginal: true },
+        orderBy: { orden: 'asc' as const },
+        take: 1,
+      },
+    },
+  },
+  talla: { select: { id: true, nombre: true } },
+  inventarios: {
+    select: {
+      sucursalId: true,
+      stockActual: true,
+      sucursal: { select: { id: true, nombre: true, tipo: true } },
+    },
+  },
 } satisfies Prisma.ProductoVarianteSelect;
 
 const movementInclude = {
@@ -210,13 +251,122 @@ export class StockService {
     scope: CommercialScope,
     query: FindStockKardexQueryDto,
   ) {
+    if (!query.productoVarianteId) {
+      throw new BadRequestException('Selecciona un producto');
+    }
+    return this.findKardexByVariantWhere(empresaId, scope, query, {
+      id: BigInt(query.productoVarianteId),
+    });
+  }
+
+  async findKardexByVariantPublicId(
+    empresaId: bigint,
+    scope: CommercialScope,
+    variantPublicId: string,
+    query: FindStockKardexQueryDto,
+  ) {
+    return this.findKardexByVariantWhere(empresaId, scope, query, {
+      publicId: variantPublicId,
+    });
+  }
+
+  async findKardexVariants(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindStockKardexVariantsQueryDto,
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 12;
+    const scopedBranchId = resolveScopedBranchId(scope, query.sucursalId);
+    const search = query.search?.trim();
+    const where: Prisma.ProductoVarianteWhereInput = {
+      empresaId,
+      activo: true,
+      deletedAt: null,
+      producto: {
+        deletedAt: null,
+        activo: true,
+        ...(query.categoriaId
+          ? { categoriaId: BigInt(query.categoriaId) }
+          : {}),
+      },
+      ...(query.colorId
+        ? { productoColor: { colorId: BigInt(query.colorId), activo: true } }
+        : {}),
+      ...(query.tallaId ? { tallaId: BigInt(query.tallaId) } : {}),
+      ...(scopedBranchId
+        ? {
+            inventarios: {
+              some: {
+                empresaId,
+                sucursalId: scopedBranchId,
+                stockActual: { gt: 0 },
+              },
+            },
+          }
+        : {}),
+      ...(search
+        ? {
+            OR: [
+              { sku: { contains: search, mode: 'insensitive' } },
+              { codigoBarras: { contains: search, mode: 'insensitive' } },
+              {
+                producto: {
+                  nombre: { contains: search, mode: 'insensitive' },
+                },
+              },
+              {
+                productoColor: {
+                  color: { nombre: { contains: search, mode: 'insensitive' } },
+                },
+              },
+              { talla: { nombre: { contains: search, mode: 'insensitive' } } },
+            ],
+          }
+        : {}),
+    };
+
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.productoVariante.findMany({
+        where,
+        select: kardexVariantSelect,
+        orderBy: [
+          { producto: { nombre: 'asc' } },
+          { productoColor: { color: { nombre: 'asc' } } },
+          { talla: { nombre: 'asc' } },
+          { id: 'asc' },
+        ],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.productoVariante.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((row) =>
+        this.toKardexVariantResponse(row, { sucursalId: scopedBranchId }),
+      ),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
+  private async findKardexByVariantWhere(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindStockKardexQueryDto,
+    variantWhere: Pick<Prisma.ProductoVarianteWhereInput, 'id' | 'publicId'>,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 25;
-    const productoVarianteId = BigInt(query.productoVarianteId);
     const scopedBranchId = resolveScopedBranchId(scope, query.sucursalId);
     const variant = await this.prisma.productoVariante.findFirst({
       where: {
-        id: productoVarianteId,
+        ...variantWhere,
         empresaId,
         activo: true,
         deletedAt: null,
@@ -228,13 +378,13 @@ export class StockService {
 
     const where: Prisma.StockMovimientoWhereInput = {
       empresaId,
-      productoVarianteId,
+      productoVarianteId: variant.id,
       ...(scopedBranchId ? { sucursalId: scopedBranchId } : {}),
       ...this.createdAtWhere(query.from, query.to),
     };
     const beforeWhere: Prisma.StockMovimientoWhereInput = {
       empresaId,
-      productoVarianteId,
+      productoVarianteId: variant.id,
       ...(scopedBranchId ? { sucursalId: scopedBranchId } : {}),
       ...(query.from ? { createdAt: { lt: new Date(query.from) } } : {}),
     };
@@ -770,6 +920,7 @@ export class StockService {
 
   private toProduct(variant: {
     id: bigint;
+    publicId: string;
     sku: string | null;
     codigoBarras: string | null;
     producto: {
@@ -784,6 +935,7 @@ export class StockService {
     const normal = variant.producto.tipo === ProductoTipo.normal;
     return {
       productoVarianteId: variant.id.toString(),
+      productoVariantePublicId: variant.publicId,
       productoId: variant.producto.id.toString(),
       productoPublicId: variant.producto.publicId,
       nombre: variant.producto.nombre,
@@ -792,6 +944,80 @@ export class StockService {
       codigoBarras: variant.codigoBarras,
       color: normal ? null : variant.productoColor.color,
       talla: normal ? null : variant.talla.nombre,
+    };
+  }
+
+  private toKardexVariantResponse(
+    variant: Prisma.ProductoVarianteGetPayload<{
+      select: typeof kardexVariantSelect;
+    }>,
+    options: { sucursalId?: bigint | null } = {},
+  ) {
+    const normal = variant.producto.tipo === ProductoTipo.normal;
+    const inventories = options.sucursalId
+      ? variant.inventarios.filter(
+          (inventory) => inventory.sucursalId === options.sucursalId,
+        )
+      : variant.inventarios;
+    const image = variant.productoColor.imagenes[0] ?? null;
+
+    return {
+      id: variant.id.toString(),
+      variantPublicId: variant.publicId,
+      productoId: variant.producto.id.toString(),
+      productoPublicId: variant.producto.publicId,
+      nombre: variant.producto.nombre,
+      tipo: variant.producto.tipo,
+      sku: variant.sku,
+      codigoBarras: variant.codigoBarras,
+      precioCompra: variant.precioCompra?.toString() ?? null,
+      precioVenta: variant.precioVenta.toString(),
+      activo: variant.activo,
+      marca: variant.producto.marca
+        ? {
+            id: variant.producto.marca.id.toString(),
+            nombre: variant.producto.marca.nombre,
+          }
+        : null,
+      categoria: variant.producto.categoria
+        ? {
+            id: variant.producto.categoria.id.toString(),
+            nombre: variant.producto.categoria.nombre,
+          }
+        : null,
+      color: normal
+        ? null
+        : {
+            id: variant.productoColor.color.id.toString(),
+            nombre: variant.productoColor.color.nombre,
+            hex: variant.productoColor.color.hex,
+          },
+      talla: normal
+        ? null
+        : {
+            id: variant.talla.id.toString(),
+            nombre: variant.talla.nombre,
+          },
+      imageUrl:
+        image?.urlThumbnail ?? image?.urlWebp ?? image?.urlOriginal ?? null,
+      stockTotal: variant.inventarios.reduce(
+        (total, inventory) => total + inventory.stockActual,
+        0,
+      ),
+      stockSucursal: options.sucursalId
+        ? inventories.reduce(
+            (total, inventory) => total + inventory.stockActual,
+            0,
+          )
+        : null,
+      inventarios: inventories.map((inventory) => ({
+        sucursal: {
+          id: inventory.sucursal.id.toString(),
+          nombre: inventory.sucursal.nombre,
+          tipo: inventory.sucursal.tipo,
+        },
+        stockActual: inventory.stockActual,
+      })),
     };
   }
 
