@@ -18,6 +18,7 @@ import {
 } from '../../common/commercial-access';
 import { CreateStockMovementDto } from './dto/create-stock-movement.dto';
 import { CreateStockTransferDto } from './dto/create-stock-transfer.dto';
+import { FindStockKardexQueryDto } from './dto/find-stock-kardex-query.dto';
 import { FindStockMovementsQueryDto } from './dto/find-stock-movements-query.dto';
 import { FindStockTransfersQueryDto } from './dto/find-stock-transfers-query.dto';
 
@@ -33,6 +34,7 @@ type ChangeStockInput = {
   referenciaId?: bigint | null;
   traspasoId?: bigint | null;
   stockMinimo?: number;
+  costoUnitario?: Prisma.Decimal.Value | null;
 };
 
 const productSelect = {
@@ -191,6 +193,7 @@ export class StockService {
                   : StockMovimientoTipo.salida_manual,
               motivo,
               creadoPorId: scope.userId,
+              costoUnitario: item.costoUnitario,
             }),
           );
         }
@@ -200,6 +203,122 @@ export class StockService {
     );
 
     return { data: movements.map((row) => this.toMovementResponse(row)) };
+  }
+
+  async findKardex(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindStockKardexQueryDto,
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const productoVarianteId = BigInt(query.productoVarianteId);
+    const scopedBranchId = resolveScopedBranchId(scope, query.sucursalId);
+    const variant = await this.prisma.productoVariante.findFirst({
+      where: {
+        id: productoVarianteId,
+        empresaId,
+        activo: true,
+        deletedAt: null,
+        producto: { deletedAt: null },
+      },
+      select: productSelect,
+    });
+    if (!variant) throw new NotFoundException('Producto no encontrado');
+
+    const where: Prisma.StockMovimientoWhereInput = {
+      empresaId,
+      productoVarianteId,
+      ...(scopedBranchId ? { sucursalId: scopedBranchId } : {}),
+      ...this.createdAtWhere(query.from, query.to),
+    };
+    const beforeWhere: Prisma.StockMovimientoWhereInput = {
+      empresaId,
+      productoVarianteId,
+      ...(scopedBranchId ? { sucursalId: scopedBranchId } : {}),
+      ...(query.from ? { createdAt: { lt: new Date(query.from) } } : {}),
+    };
+
+    const [rows, total, totals] = await this.prisma.$transaction([
+      this.prisma.stockMovimiento.findMany({
+        where,
+        include: movementInclude,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.stockMovimiento.count({ where }),
+      this.prisma.stockMovimiento.findMany({
+        where,
+        select: {
+          direccion: true,
+          cantidad: true,
+          valorMovimiento: true,
+        },
+      }),
+    ]);
+    const previousRows = query.from
+      ? await this.prisma.stockMovimiento.findMany({
+          where: beforeWhere,
+          orderBy: [
+            { sucursalId: 'asc' },
+            { createdAt: 'desc' },
+            { id: 'desc' },
+          ],
+          distinct: ['sucursalId'],
+          select: {
+            stockPosterior: true,
+            valorStockPosterior: true,
+          },
+        })
+      : [];
+
+    const saldoInicial = previousRows.reduce(
+      (sum, row) => sum + row.stockPosterior,
+      0,
+    );
+    const valorInicial = previousRows.reduce(
+      (sum, row) => sum.plus(row.valorStockPosterior ?? 0),
+      new Prisma.Decimal(0),
+    );
+    const entradas = totals
+      .filter((row) => row.direccion === StockMovimientoDireccion.entrada)
+      .reduce((sum, row) => sum + row.cantidad, 0);
+    const salidas = totals
+      .filter((row) => row.direccion === StockMovimientoDireccion.salida)
+      .reduce((sum, row) => sum + row.cantidad, 0);
+    const valorEntradas = totals
+      .filter((row) => row.direccion === StockMovimientoDireccion.entrada)
+      .reduce(
+        (sum, row) => sum.plus(row.valorMovimiento ?? 0),
+        new Prisma.Decimal(0),
+      );
+    const valorSalidas = totals
+      .filter((row) => row.direccion === StockMovimientoDireccion.salida)
+      .reduce(
+        (sum, row) => sum.plus(row.valorMovimiento ?? 0),
+        new Prisma.Decimal(0),
+      );
+
+    return {
+      producto: this.toProduct(variant),
+      sucursalId: scopedBranchId?.toString() ?? null,
+      resumen: {
+        saldoInicial,
+        entradas,
+        salidas,
+        saldoFinal: saldoInicial + entradas - salidas,
+        valorInicial: valorInicial.toString(),
+        valorEntradas: valorEntradas.toString(),
+        valorSalidas: valorSalidas.toString(),
+        valorFinal: valorInicial
+          .plus(valorEntradas)
+          .minus(valorSalidas)
+          .toString(),
+      },
+      data: rows.map((row) => this.toMovementResponse(row)),
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async findTransfers(
@@ -352,7 +471,7 @@ export class StockService {
         });
 
         for (const item of items) {
-          await this.changeStock(tx, {
+          const salida = await this.changeStock(tx, {
             empresaId,
             sucursalId: origenId,
             productoVarianteId: item.id,
@@ -375,6 +494,7 @@ export class StockService {
             referenciaTipo: 'traspaso',
             referenciaId: created.id,
             traspasoId: created.id,
+            costoUnitario: salida.costoUnitario,
           });
         }
 
@@ -416,6 +536,24 @@ export class StockService {
       });
     }
 
+    const costoAnterior = new Prisma.Decimal(current?.costoPromedio ?? 0);
+    const valorAnterior = new Prisma.Decimal(current?.valorStock ?? 0);
+    const costoUnitario =
+      input.delta > 0
+        ? await this.resolveEntryCost(tx, input, costoAnterior)
+        : costoAnterior;
+    const valorMovimiento = costoUnitario.mul(Math.abs(input.delta));
+    const valorPosterior =
+      stockPosterior === 0
+        ? new Prisma.Decimal(0)
+        : input.delta > 0
+          ? valorAnterior.plus(valorMovimiento)
+          : valorAnterior.minus(valorMovimiento);
+    const costoPosterior =
+      stockPosterior > 0
+        ? valorPosterior.div(stockPosterior)
+        : new Prisma.Decimal(0);
+
     await tx.inventarioSucursal.upsert({
       where: {
         sucursalId_productoVarianteId: {
@@ -429,9 +567,13 @@ export class StockService {
         productoVarianteId: input.productoVarianteId,
         stockActual: stockPosterior,
         stockMinimo: input.stockMinimo ?? 0,
+        costoPromedio: costoPosterior,
+        valorStock: valorPosterior,
       },
       update: {
         stockActual: stockPosterior,
+        costoPromedio: costoPosterior,
+        valorStock: valorPosterior,
         ...(input.stockMinimo === undefined
           ? {}
           : { stockMinimo: input.stockMinimo }),
@@ -451,6 +593,12 @@ export class StockService {
         cantidad: Math.abs(input.delta),
         stockAnterior,
         stockPosterior,
+        costoUnitario,
+        costoPromedioAnterior: costoAnterior,
+        costoPromedioPosterior: costoPosterior,
+        valorMovimiento,
+        valorStockAnterior: valorAnterior,
+        valorStockPosterior: valorPosterior,
         motivo: input.motivo,
         creadoPorId: input.creadoPorId,
         referenciaTipo: input.referenciaTipo,
@@ -478,6 +626,7 @@ export class StockService {
     });
     const delta = input.stockActual - (current?.stockActual ?? 0);
     if (delta === 0) {
+      const currentCost = new Prisma.Decimal(current?.costoPromedio ?? 0);
       return tx.inventarioSucursal.upsert({
         where: {
           sucursalId_productoVarianteId: {
@@ -491,11 +640,30 @@ export class StockService {
           productoVarianteId: input.productoVarianteId,
           stockActual: input.stockActual,
           stockMinimo: input.stockMinimo ?? 0,
+          costoPromedio: currentCost,
+          valorStock: currentCost.mul(input.stockActual),
         },
-        update: { stockMinimo: input.stockMinimo ?? current?.stockMinimo ?? 0 },
+        update: {
+          stockMinimo: input.stockMinimo ?? current?.stockMinimo ?? 0,
+        },
       });
     }
     return this.changeStock(tx, { ...input, delta });
+  }
+
+  private async resolveEntryCost(
+    tx: Prisma.TransactionClient,
+    input: ChangeStockInput,
+    currentCost: Prisma.Decimal,
+  ) {
+    if (input.costoUnitario !== undefined && input.costoUnitario !== null) {
+      return new Prisma.Decimal(input.costoUnitario);
+    }
+    const variant = await tx.productoVariante.findUnique({
+      where: { id: input.productoVarianteId },
+      select: { precioCompra: true },
+    });
+    return new Prisma.Decimal(variant?.precioCompra ?? currentCost);
   }
 
   private async ensureActiveBranches(
@@ -540,7 +708,11 @@ export class StockService {
   }
 
   private cleanItems(
-    items: Array<{ productoVarianteId: string; cantidad: number }>,
+    items: Array<{
+      productoVarianteId: string;
+      cantidad: number;
+      costoUnitario?: number;
+    }>,
   ) {
     const seen = new Set<string>();
     const cleaned = items.map((item) => {
@@ -548,7 +720,11 @@ export class StockService {
         throw new BadRequestException('No repitas un producto en la operacion');
       }
       seen.add(item.productoVarianteId);
-      return { id: BigInt(item.productoVarianteId), cantidad: item.cantidad };
+      return {
+        id: BigInt(item.productoVarianteId),
+        cantidad: item.cantidad,
+        costoUnitario: item.costoUnitario,
+      };
     });
     return cleaned.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
@@ -629,6 +805,12 @@ export class StockService {
       cantidad: row.cantidad,
       stockAnterior: row.stockAnterior,
       stockPosterior: row.stockPosterior,
+      costoUnitario: row.costoUnitario?.toString() ?? null,
+      costoPromedioAnterior: row.costoPromedioAnterior?.toString() ?? null,
+      costoPromedioPosterior: row.costoPromedioPosterior?.toString() ?? null,
+      valorMovimiento: row.valorMovimiento?.toString() ?? null,
+      valorStockAnterior: row.valorStockAnterior?.toString() ?? null,
+      valorStockPosterior: row.valorStockPosterior?.toString() ?? null,
       motivo: row.motivo,
       referenciaTipo: row.referenciaTipo,
       referenciaId: row.referenciaId?.toString() ?? null,

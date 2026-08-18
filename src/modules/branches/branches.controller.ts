@@ -41,6 +41,7 @@ export class BranchesController {
     'reportes-usuarios',
     'stock-movimientos',
     'stock-traspasos',
+    'stock-kardex',
   )
   findAll(
     @CurrentUser() user: JwtPayload,

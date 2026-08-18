@@ -34,6 +34,7 @@ export class ProductsController {
     'gre-remitente',
     'stock-movimientos',
     'stock-traspasos',
+    'stock-kardex',
   )
   findAll(
     @CurrentUser() user: JwtPayload,
@@ -52,6 +53,7 @@ export class ProductsController {
     'gre-remitente',
     'stock-movimientos',
     'stock-traspasos',
+    'stock-kardex',
   )
   findOne(
     @CurrentUser() user: JwtPayload,

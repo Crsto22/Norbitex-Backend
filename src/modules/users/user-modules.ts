@@ -43,6 +43,11 @@ export const userModules = [
     route: '/stock/traspasos',
   },
   {
+    key: 'stock-kardex',
+    label: 'Kardex de stock',
+    route: '/stock/kardex',
+  },
+  {
     key: 'sucursales',
     label: 'Sucursales',
     route: '/administracion/sucursales',
@@ -89,6 +94,7 @@ export const warehouseUserModuleKeySet = new Set<string>([
   'colores',
   'stock-movimientos',
   'stock-traspasos',
+  'stock-kardex',
   'sucursales',
   'gre-remitente',
   'conductores',

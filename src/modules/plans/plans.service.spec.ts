@@ -65,6 +65,10 @@ describe('PlansService', () => {
       ),
     ).toEqual(['ventas-pos', 'reportes-clientes']);
 
+    expect(
+      service.getEffectiveModuleKeys(company, [], ['stock-movimientos']),
+    ).toContain('stock-kardex');
+
     const ownerModules = service.getEffectiveModuleKeys(company, ['OWNER'], []);
     expect(ownerModules).toContain('ventas-pos');
     expect(ownerModules).toContain('reportes-clientes');
@@ -78,6 +82,7 @@ describe('PlansService', () => {
     expect(modules).toContain('comprobantes');
     expect(modules).toContain('reportes-ventas');
     expect(modules).toContain('reportes-productos');
+    expect(modules).toContain('stock-kardex');
     expect(modules).not.toContain('caja');
     expect(modules).not.toContain('usuarios');
     expect(modules).not.toContain('gre-remitente');

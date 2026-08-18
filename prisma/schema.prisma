@@ -801,6 +801,8 @@ model InventarioSucursal {
   productoVarianteId BigInt           @map("producto_variante_id")
   stockActual        Int              @default(0) @map("stock_actual")
   stockMinimo        Int              @default(0) @map("stock_minimo")
+  costoPromedio      Decimal          @default(0) @map("costo_promedio") @db.Decimal(12, 4)
+  valorStock         Decimal          @default(0) @map("valor_stock") @db.Decimal(14, 4)
   createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   empresa            Empresa          @relation(fields: [empresaId], references: [id], onDelete: Cascade)
@@ -814,26 +816,32 @@ model InventarioSucursal {
 }
 
 model StockMovimiento {
-  id                 BigInt                   @id @default(autoincrement())
-  empresaId          BigInt                   @map("empresa_id")
-  sucursalId         BigInt                   @map("sucursal_id")
-  productoVarianteId BigInt                   @map("producto_variante_id")
-  direccion          StockMovimientoDireccion
-  tipo               StockMovimientoTipo
-  cantidad           Int
-  stockAnterior      Int                      @map("stock_anterior")
-  stockPosterior     Int                      @map("stock_posterior")
-  motivo             String?                  @db.VarChar(500)
-  referenciaTipo     String?                  @map("referencia_tipo") @db.VarChar(40)
-  referenciaId       BigInt?                  @map("referencia_id")
-  traspasoId         BigInt?                  @map("traspaso_id")
-  creadoPorId        BigInt?                  @map("creado_por_id")
-  createdAt          DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
-  empresa            Empresa                  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  sucursal           Sucursal                 @relation(fields: [sucursalId], references: [id], onDelete: Restrict)
-  productoVariante   ProductoVariante         @relation(fields: [productoVarianteId], references: [id], onDelete: Restrict)
-  traspaso           StockTraspaso?           @relation(fields: [traspasoId], references: [id], onDelete: Restrict)
-  creadoPor          Usuario?                 @relation("StockMovimientoCreadoPor", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  id                     BigInt                   @id @default(autoincrement())
+  empresaId              BigInt                   @map("empresa_id")
+  sucursalId             BigInt                   @map("sucursal_id")
+  productoVarianteId     BigInt                   @map("producto_variante_id")
+  direccion              StockMovimientoDireccion
+  tipo                   StockMovimientoTipo
+  cantidad               Int
+  stockAnterior          Int                      @map("stock_anterior")
+  stockPosterior         Int                      @map("stock_posterior")
+  costoUnitario          Decimal?                 @map("costo_unitario") @db.Decimal(12, 4)
+  costoPromedioAnterior  Decimal?                 @map("costo_promedio_anterior") @db.Decimal(12, 4)
+  costoPromedioPosterior Decimal?                 @map("costo_promedio_posterior") @db.Decimal(12, 4)
+  valorMovimiento        Decimal?                 @map("valor_movimiento") @db.Decimal(14, 4)
+  valorStockAnterior     Decimal?                 @map("valor_stock_anterior") @db.Decimal(14, 4)
+  valorStockPosterior    Decimal?                 @map("valor_stock_posterior") @db.Decimal(14, 4)
+  motivo                 String?                  @db.VarChar(500)
+  referenciaTipo         String?                  @map("referencia_tipo") @db.VarChar(40)
+  referenciaId           BigInt?                  @map("referencia_id")
+  traspasoId             BigInt?                  @map("traspaso_id")
+  creadoPorId            BigInt?                  @map("creado_por_id")
+  createdAt              DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  empresa                Empresa                  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  sucursal               Sucursal                 @relation(fields: [sucursalId], references: [id], onDelete: Restrict)
+  productoVariante       ProductoVariante         @relation(fields: [productoVarianteId], references: [id], onDelete: Restrict)
+  traspaso               StockTraspaso?           @relation(fields: [traspasoId], references: [id], onDelete: Restrict)
+  creadoPor              Usuario?                 @relation("StockMovimientoCreadoPor", fields: [creadoPorId], references: [id], onDelete: SetNull)
 
   @@index([empresaId, createdAt])
   @@index([empresaId, sucursalId, createdAt])

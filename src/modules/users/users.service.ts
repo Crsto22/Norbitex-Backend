@@ -375,7 +375,15 @@ export class UsersService {
       throw new BadRequestException(`El modulo ${invalidKey} no existe`);
     }
 
-    return cleanKeys;
+    return this.expandStockKardexModule(cleanKeys);
+  }
+
+  private expandStockKardexModule(moduleKeys: string[]) {
+    const selected = new Set(moduleKeys);
+    if (selected.has('stock-movimientos') || selected.has('stock-traspasos')) {
+      selected.add('stock-kardex');
+    }
+    return Array.from(selected);
   }
 
   private async findCompanyUser(
@@ -507,7 +515,9 @@ export class UsersService {
     const isOwner = user.roles.some(({ rol }) => rol.codigo === 'OWNER');
     const moduleKeys = isOwner
       ? userModules.map((module) => module.key)
-      : user.modulos.map((module) => module.moduleKey);
+      : this.expandStockKardexModule(
+          user.modulos.map((module) => module.moduleKey),
+        );
     const modules = moduleKeys.flatMap((moduleKey) => {
       const module = userModuleMap.get(moduleKey);
       return module ? [module] : [];

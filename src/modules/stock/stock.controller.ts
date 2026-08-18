@@ -15,6 +15,7 @@ import { getCommercialScope } from '../../common/commercial-access';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CreateStockMovementDto } from './dto/create-stock-movement.dto';
 import { CreateStockTransferDto } from './dto/create-stock-transfer.dto';
+import { FindStockKardexQueryDto } from './dto/find-stock-kardex-query.dto';
 import { FindStockMovementsQueryDto } from './dto/find-stock-movements-query.dto';
 import { FindStockTransfersQueryDto } from './dto/find-stock-transfers-query.dto';
 import { StockService } from './stock.service';
@@ -25,7 +26,7 @@ export class StockController {
   constructor(private readonly stockService: StockService) {}
 
   @Get('locations')
-  @RequireModule('stock-movimientos', 'stock-traspasos')
+  @RequireModule('stock-movimientos', 'stock-traspasos', 'stock-kardex')
   findLocations(@CurrentUser() user: JwtPayload) {
     return this.stockService.findLocations(
       this.getEmpresaId(user),
@@ -56,6 +57,19 @@ export class StockController {
       this.getEmpresaId(user),
       getCommercialScope(user),
       dto,
+    );
+  }
+
+  @Get('kardex')
+  @RequireModule('stock-kardex')
+  findKardex(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: FindStockKardexQueryDto,
+  ) {
+    return this.stockService.findKardex(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
     );
   }
 

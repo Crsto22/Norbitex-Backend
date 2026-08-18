@@ -38,6 +38,7 @@ const coreModuleKeys = [
   'colores',
   'stock-movimientos',
   'stock-traspasos',
+  'stock-kardex',
   'sucursales',
   'usuarios',
   'reportes-ventas',

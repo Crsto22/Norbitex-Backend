@@ -510,7 +510,23 @@ export class PlansService {
 
     return roles.includes('OWNER')
       ? Array.from(available)
-      : assignedModuleKeys.filter((moduleKey) => available.has(moduleKey));
+      : this.expandIncludedModuleKeys(assignedModuleKeys, available);
+  }
+
+  private expandIncludedModuleKeys(
+    moduleKeys: string[],
+    available: Set<string>,
+  ) {
+    const selected = new Set(
+      moduleKeys.filter((moduleKey) => available.has(moduleKey)),
+    );
+    if (
+      available.has('stock-kardex') &&
+      (selected.has('stock-movimientos') || selected.has('stock-traspasos'))
+    ) {
+      selected.add('stock-kardex');
+    }
+    return Array.from(selected);
   }
 
   async getCurrent(

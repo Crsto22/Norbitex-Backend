@@ -592,9 +592,11 @@ export class AuthService {
       email: current.usuario.email,
       telefono: current.usuario.telefono,
       roles,
-      moduleKeys:
-        user.moduleKeys ??
-        this.getSessionModuleKeys(current.empresa, roles, current.modulos),
+      moduleKeys: this.plansService.getEffectiveModuleKeys(
+        current.empresa,
+        roles,
+        user.moduleKeys ?? current.modulos.map((module) => module.moduleKey),
+      ),
       sucursalId: roles.includes('OWNER')
         ? null
         : (current.sucursalId?.toString() ?? null),
