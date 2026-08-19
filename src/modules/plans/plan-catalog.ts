@@ -25,6 +25,7 @@ const coreModuleKeys = [
   'ventas-pos',
   'caja',
   'cotizaciones',
+  'entregas-pendientes',
   'clientes',
   'historial-ventas',
   'historial-cotizaciones',
