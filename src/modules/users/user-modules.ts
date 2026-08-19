@@ -3,6 +3,11 @@ export const userModules = [
   { key: 'ventas-pos', label: 'Ventas POS', route: '/ventas' },
   { key: 'caja', label: 'Caja', route: '/caja' },
   { key: 'cotizaciones', label: 'Cotizaciones', route: '/cotizaciones' },
+  {
+    key: 'entregas-pendientes',
+    label: 'Entregas pendientes',
+    route: '/entregas-pendientes',
+  },
   { key: 'clientes', label: 'Clientes', route: '/clientes' },
   {
     key: 'historial-ventas',

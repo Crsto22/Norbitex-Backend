@@ -448,6 +448,8 @@ export class QuotationsService {
       })),
       pagos: dto.pagos,
       observaciones: dto.observaciones ?? quotation.observaciones ?? undefined,
+      recogerDespues: dto.recogerDespues,
+      recojoHasta: dto.recojoHasta,
       requestId,
     });
 

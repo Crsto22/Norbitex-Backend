@@ -26,6 +26,7 @@ import { SalesService } from './sales.service';
 import { SunatBajaService } from '../sunat-emission/sunat-baja.service';
 import { SunatEmissionService } from '../sunat-emission/sunat-emission.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import { DeliverSaleDto } from './dto/deliver-sale.dto';
 import {
   FindComprobantesQueryDto,
   FindSalesQueryDto,
@@ -140,6 +141,19 @@ export class SalesController {
       this.getEmpresaId(user),
       getCommercialScope(user),
       query,
+    );
+  }
+
+  @Get('deliveries')
+  @RequireModule('entregas-pendientes')
+  findDeliveries(
+    @CurrentUser() user: JwtPayload,
+    @Query('estado') estado?: 'pendiente' | 'entregada',
+  ) {
+    return this.salesService.findDeliveries(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      estado === 'entregada' ? 'entregada' : 'pendiente',
     );
   }
 
@@ -299,6 +313,21 @@ export class SalesController {
       this.getEmpresaId(user),
       getCommercialScope(user),
       publicId,
+    );
+  }
+
+  @Post(':publicId/deliver')
+  @RequireModule('entregas-pendientes')
+  deliver(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: DeliverSaleDto,
+  ) {
+    return this.salesService.deliverSale(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+      dto,
     );
   }
 

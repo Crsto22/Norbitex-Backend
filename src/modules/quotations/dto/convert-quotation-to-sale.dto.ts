@@ -1,6 +1,8 @@
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
+  IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
@@ -32,4 +34,12 @@ export class ConvertQuotationToSaleDto {
   @IsOptional()
   @IsString()
   observaciones?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  recogerDespues?: boolean;
+
+  @IsOptional()
+  @IsISO8601()
+  recojoHasta?: string;
 }

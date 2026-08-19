@@ -243,6 +243,12 @@ enum VentaEstado {
   nc_emitida
 }
 
+enum VentaEntregaEstado {
+  pendiente
+  parcial
+  entregada
+}
+
 enum VentaDescuentoTipo {
   porcentaje
   monto
@@ -367,6 +373,7 @@ model Empresa {
   productoColorImagenes           ProductoColorImagen[]
   metodosPago                     MetodoPago[]
   ventas                          Venta[]
+  ventasCodigoInternoSecuencias   VentaCodigoInternoSecuencia[]
   notasCredito                    NotaCredito[]
   guiasRemision                   GuiaRemision[]
   catalogoTransporteParticipantes CatalogoTransporteParticipante[]
@@ -904,6 +911,7 @@ model Usuario {
   refreshTokens                      RefreshToken[]
   passwordResetTokens                PasswordResetToken[]
   ventasCreadas                      Venta[]
+  ventasEntregadas                   VentaEntrega[]                       @relation("VentaEntregaUsuario")
   notasCreditoCreadas                NotaCredito[]
   guiasRemisionCreadas               GuiaRemision[]
   cajasSesion                        CajaSesion[]
@@ -1782,6 +1790,7 @@ model CatalogoVehiculo {
 model Venta {
   id                    BigInt               @id @default(autoincrement())
   publicId              String               @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  codigoInterno         String               @map("codigo_interno") @db.VarChar(20)
   empresaId             BigInt               @map("empresa_id")
   sucursalId            BigInt?              @map("sucursal_id")
   clienteId             BigInt?              @map("cliente_id")
@@ -1803,6 +1812,9 @@ model Venta {
   igvMonto              Decimal              @default(0) @map("igv_monto") @db.Decimal(12, 2)
   total                 Decimal              @db.Decimal(12, 2)
   estado                VentaEstado          @default(completada)
+  recojoPosterior       Boolean              @default(false) @map("recojo_posterior")
+  recojoHasta           DateTime?            @map("recojo_hasta") @db.Date
+  estadoEntrega         VentaEntregaEstado   @default(entregada) @map("estado_entrega")
   sunatEstado           SunatEstado          @default(no_aplica) @map("sunat_estado")
   sunatCodigo           String?              @map("sunat_codigo") @db.VarChar(20)
   sunatMensaje          String?              @map("sunat_mensaje") @db.VarChar(500)
@@ -1842,6 +1854,7 @@ model Venta {
   cajaSesion            CajaSesion?          @relation(fields: [cajaSesionId], references: [id], onDelete: SetNull)
   sunatBajaLote         SunatBajaLote?       @relation(fields: [sunatBajaLoteId], references: [id], onDelete: SetNull)
   detalles              VentaDetalle[]
+  entregas              VentaEntrega[]
   notasCredito          NotaCredito[]
   pagos                 VentaPago[]
   cajaMovimientos       CajaMovimiento[]
@@ -1849,6 +1862,7 @@ model Venta {
   sunatBajaItems        SunatBajaItem[]
 
   @@unique([serieComprobanteId, numero])
+  @@unique([empresaId, codigoInterno])
   @@unique([empresaId, requestId])
   @@index([empresaId])
   @@index([empresaId, tipoComprobante])
@@ -1858,6 +1872,7 @@ model Venta {
   @@index([empresaId, creadoPorId, estado, createdAt])
   @@index([empresaId, anuladoAt])
   @@index([empresaId, esExcedentePlan, createdAt])
+  @@index([empresaId, recojoPosterior, estadoEntrega, createdAt])
   @@index([empresaId, sunatEstado])
   @@index([empresaId, sunatBajaEstado])
   @@index([sunatBajaLoteId])
@@ -1866,8 +1881,23 @@ model Venta {
   @@index([cajaSesionId])
   @@index([serie, numero])
   @@index([correlativo])
+  @@index([codigoInterno])
   @@index([createdAt])
   @@map("venta")
+}
+
+model VentaCodigoInternoSecuencia {
+  id            BigInt   @id @default(autoincrement())
+  empresaId     BigInt   @map("empresa_id")
+  anio          Int
+  numeroActual  Int      @default(0) @map("numero_actual")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa       Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@unique([empresaId, anio])
+  @@index([empresaId])
+  @@map("venta_codigo_interno_secuencia")
 }
 
 model VentaDetalle {
@@ -1876,6 +1906,7 @@ model VentaDetalle {
   productoVarianteId      BigInt               @map("producto_variante_id")
   descripcion             String?              @db.VarChar(255)
   cantidad                Int
+  cantidadEntregada       Int                  @default(0) @map("cantidad_entregada")
   unidadMedidaCodigo      String               @default("NIU") @map("unidad_medida_codigo") @db.VarChar(10)
   tipoAfectacionIgvCodigo String               @default("10") @map("tipo_afectacion_igv_codigo") @db.VarChar(4)
   precioUnitario          Decimal              @db.Decimal(12, 2)
@@ -1891,10 +1922,44 @@ model VentaDetalle {
   venta                   Venta                @relation(fields: [ventaId], references: [id], onDelete: Cascade)
   productoVariante        ProductoVariante     @relation(fields: [productoVarianteId], references: [id], onDelete: Restrict)
   notasCreditoDetalle     NotaCreditoDetalle[]
+  entregasDetalle         VentaEntregaDetalle[]
 
   @@index([ventaId])
   @@index([productoVarianteId])
   @@map("venta_detalle")
+}
+
+model VentaEntrega {
+  id               BigInt                 @id @default(autoincrement())
+  publicId         String                 @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  ventaId          BigInt                 @map("venta_id")
+  entregadoPorId   BigInt?                @map("entregado_por_id")
+  retiranteDni     String?                @map("retirante_dni") @db.VarChar(20)
+  retiranteNombre  String?                @map("retirante_nombre") @db.VarChar(150)
+  notas            String?                @db.VarChar(500)
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  venta            Venta                  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  entregadoPor     Usuario?               @relation("VentaEntregaUsuario", fields: [entregadoPorId], references: [id], onDelete: SetNull)
+  detalles         VentaEntregaDetalle[]
+
+  @@index([ventaId])
+  @@index([entregadoPorId])
+  @@index([createdAt])
+  @@map("venta_entrega")
+}
+
+model VentaEntregaDetalle {
+  id             BigInt       @id @default(autoincrement())
+  entregaId      BigInt       @map("entrega_id")
+  ventaDetalleId BigInt       @map("venta_detalle_id")
+  cantidad       Int
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  entrega        VentaEntrega @relation(fields: [entregaId], references: [id], onDelete: Cascade)
+  ventaDetalle   VentaDetalle @relation(fields: [ventaDetalleId], references: [id], onDelete: Restrict)
+
+  @@index([entregaId])
+  @@index([ventaDetalleId])
+  @@map("venta_entrega_detalle")
 }
 
 model NotaCredito {

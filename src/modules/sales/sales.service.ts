@@ -14,6 +14,7 @@ import {
   SunatEstado,
   StockMovimientoTipo,
   SucursalTipo,
+  VentaEntregaEstado,
   VentaEstado,
   VentaTipoComprobante,
 } from '@prisma/client';
@@ -27,6 +28,7 @@ import { parseUnitPrice } from '../../common/unit-price';
 import { PlansService } from '../plans/plans.service';
 import { StockService } from '../stock/stock.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import { DeliverSaleDto } from './dto/deliver-sale.dto';
 import {
   FindComprobantesQueryDto,
   FindSalesQueryDto,
@@ -436,6 +438,11 @@ export class SalesService {
       throw new NotFoundException('Cliente no encontrado');
     }
 
+    const recogerDespues = dto.recogerDespues === true;
+    if (recogerDespues) {
+      this.validatePickupClient(cliente);
+    }
+
     if (electronicSale) {
       await this.validateSunatSalePrerequisites(
         empresaId,
@@ -542,6 +549,7 @@ export class SalesService {
         productoVarianteId: line.productoVarianteId,
         descripcion: line.descripcion,
         cantidad: line.cantidad,
+        cantidadEntregada: recogerDespues ? 0 : line.cantidad,
         unidadMedidaCodigo: line.unidadMedidaCodigo,
         tipoAfectacionIgvCodigo: line.tipoAfectacionIgvCodigo,
         precioUnitario: line.precioUnitario,
@@ -628,10 +636,16 @@ export class SalesService {
 
           const numero = updatedSerie.numeroActual;
           const correlativo = `${serie.serie}-${numero.toString().padStart(6, '0')}`;
+          const codigoInterno = await this.generateInternalSaleCode(
+            tx,
+            empresaId,
+            new Date(),
+          );
 
           const ventaData = await tx.venta.create({
             data: {
               empresaId,
+              codigoInterno,
               requestId: dto.requestId ?? null,
               sucursalId: dto.sucursalId ? BigInt(dto.sucursalId) : null,
               clienteId: dto.clienteId ? BigInt(dto.clienteId) : null,
@@ -655,6 +669,13 @@ export class SalesService {
               igvMonto: calculated.igvMonto,
               total,
               estado: VentaEstado.completada,
+              recojoPosterior: recogerDespues,
+              recojoHasta: dto.recojoHasta
+                ? new Date(`${dto.recojoHasta.slice(0, 10)}T00:00:00.000Z`)
+                : null,
+              estadoEntrega: recogerDespues
+                ? VentaEntregaEstado.pendiente
+                : VentaEntregaEstado.entregada,
               sunatEstado: electronicSale
                 ? SunatEstado.pendiente_envio
                 : SunatEstado.no_aplica,
@@ -668,6 +689,7 @@ export class SalesService {
                   productoVarianteId: d.productoVarianteId,
                   descripcion: d.descripcion,
                   cantidad: d.cantidad,
+                  cantidadEntregada: d.cantidadEntregada,
                   unidadMedidaCodigo: d.unidadMedidaCodigo,
                   tipoAfectacionIgvCodigo: d.tipoAfectacionIgvCodigo,
                   precioUnitario: d.precioUnitario,
@@ -971,6 +993,144 @@ export class SalesService {
     };
   }
 
+  async findDeliveries(
+    empresaId: bigint,
+    scope: CommercialScope,
+    estado: 'pendiente' | 'entregada' = 'pendiente',
+  ) {
+    const where: Prisma.VentaWhereInput = {
+      empresaId,
+      recojoPosterior: true,
+      estado: { not: VentaEstado.anulada },
+      estadoEntrega:
+        estado === 'entregada'
+          ? VentaEntregaEstado.entregada
+          : { in: [VentaEntregaEstado.pendiente, VentaEntregaEstado.parcial] },
+      ...(scope.branchId ? { sucursalId: scope.branchId } : {}),
+      ...(scopedCreatorId(scope)
+        ? { creadoPorId: scopedCreatorId(scope)! }
+        : {}),
+    };
+
+    const ventas = await this.prisma.venta.findMany({
+      where,
+      include: ventaInclude,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    return { data: ventas.map((v) => this.toVentaResponse(v)) };
+  }
+
+  async deliverSale(
+    empresaId: bigint,
+    scope: CommercialScope,
+    publicId: string,
+    dto: DeliverSaleDto,
+  ) {
+    if (!dto.detalles.length) {
+      throw new BadRequestException('Seleccione al menos un producto');
+    }
+
+    const venta = await this.prisma.venta.findFirst({
+      where: this.saleAccessWhere(empresaId, scope, publicId),
+      include: { detalles: true },
+    });
+
+    if (!venta) {
+      throw new NotFoundException('Venta no encontrada');
+    }
+
+    if (venta.estado === VentaEstado.anulada) {
+      throw new BadRequestException('No se puede entregar una venta anulada');
+    }
+
+    if (!venta.recojoPosterior) {
+      throw new BadRequestException('La venta no esta marcada para recojo');
+    }
+
+    if (venta.estadoEntrega === VentaEntregaEstado.entregada) {
+      throw new BadRequestException('La venta ya fue entregada');
+    }
+
+    const detailMap = new Map(venta.detalles.map((d) => [d.id.toString(), d]));
+    const requested = new Map<string, number>();
+
+    for (const item of dto.detalles) {
+      requested.set(
+        item.ventaDetalleId,
+        (requested.get(item.ventaDetalleId) ?? 0) + item.cantidad,
+      );
+    }
+
+    for (const [detalleId, cantidad] of requested) {
+      const detail = detailMap.get(detalleId);
+      if (!detail) {
+        throw new BadRequestException('Producto de venta invalido');
+      }
+
+      const pendiente = detail.cantidad - detail.cantidadEntregada;
+      if (cantidad > pendiente) {
+        throw new BadRequestException(
+          'La cantidad a entregar supera el pendiente',
+        );
+      }
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const entrega = await tx.ventaEntrega.create({
+        data: {
+          ventaId: venta.id,
+          entregadoPorId: scope.userId,
+          retiranteDni: dto.retiranteDni?.trim() || null,
+          retiranteNombre: dto.retiranteNombre?.trim() || null,
+          notas: dto.notas?.trim() || null,
+          detalles: {
+            create: Array.from(requested.entries()).map(
+              ([ventaDetalleId, cantidad]) => ({
+                ventaDetalleId: BigInt(ventaDetalleId),
+                cantidad,
+              }),
+            ),
+          },
+        },
+      });
+
+      for (const [ventaDetalleId, cantidad] of requested) {
+        await tx.ventaDetalle.update({
+          where: { id: BigInt(ventaDetalleId) },
+          data: { cantidadEntregada: { increment: cantidad } },
+        });
+      }
+
+      const detalles = await tx.ventaDetalle.findMany({
+        where: { ventaId: venta.id },
+        select: { cantidad: true, cantidadEntregada: true },
+      });
+      const totalPendiente = detalles.reduce(
+        (sum, d) => sum + Math.max(0, d.cantidad - d.cantidadEntregada),
+        0,
+      );
+
+      await tx.venta.update({
+        where: { id: venta.id },
+        data: {
+          estadoEntrega:
+            totalPendiente === 0
+              ? VentaEntregaEstado.entregada
+              : VentaEntregaEstado.parcial,
+        },
+      });
+
+      return entrega;
+    });
+
+    return {
+      entrega: { publicId: updated.publicId },
+      venta: await this.findOne(empresaId, scope, publicId),
+    };
+  }
+
   // ── Find One Sale ──────────────────────────────────────────────────
 
   async findOne(empresaId: bigint, scope: CommercialScope, publicId: string) {
@@ -1209,6 +1369,48 @@ export class SalesService {
   }
 
   // ── Private Helpers ────────────────────────────────────────────────
+
+  private validatePickupClient(
+    cliente: {
+      tipoDocumento: ClienteTipoDocumento;
+      numeroDocumento: string | null;
+    } | null,
+  ) {
+    if (!cliente?.numeroDocumento) {
+      throw new BadRequestException(
+        'Para recoger despues debe seleccionar un cliente con DNI o RUC',
+      );
+    }
+
+    const validDni =
+      cliente.tipoDocumento === ClienteTipoDocumento.dni &&
+      /^\d{8}$/.test(cliente.numeroDocumento);
+    const validRuc =
+      cliente.tipoDocumento === ClienteTipoDocumento.ruc &&
+      /^\d{11}$/.test(cliente.numeroDocumento);
+
+    if (!validDni && !validRuc) {
+      throw new BadRequestException(
+        'Para recoger despues el cliente debe tener DNI o RUC valido',
+      );
+    }
+  }
+
+  private async generateInternalSaleCode(
+    tx: Prisma.TransactionClient,
+    empresaId: bigint,
+    date: Date,
+  ) {
+    const anio = date.getUTCFullYear();
+    const sequence = await tx.ventaCodigoInternoSecuencia.upsert({
+      where: { empresaId_anio: { empresaId, anio } },
+      create: { empresaId, anio, numeroActual: 1 },
+      update: { numeroActual: { increment: 1 } },
+      select: { numeroActual: true },
+    });
+
+    return `VTA-${anio}-${sequence.numeroActual.toString().padStart(6, '0')}`;
+  }
 
   private async resolveSerie(
     empresaId: bigint,
@@ -1559,11 +1761,15 @@ export class SalesService {
   private toVentaResponse(venta: VentaWithRelations) {
     return {
       publicId: venta.publicId,
+      codigoInterno: venta.codigoInterno,
       tipoComprobante: venta.tipoComprobante,
       serie: venta.serie,
       numero: venta.numero,
       correlativo: venta.correlativo,
       estado: venta.estado,
+      recojoPosterior: venta.recojoPosterior,
+      recojoHasta: venta.recojoHasta?.toISOString() ?? null,
+      estadoEntrega: venta.estadoEntrega,
       moneda: venta.moneda,
       formaPago: venta.formaPago,
       subtotal: venta.subtotal.toString(),
@@ -1632,6 +1838,7 @@ export class SalesService {
           id: d.id.toString(),
           descripcion: d.descripcion,
           cantidad: d.cantidad,
+          cantidadEntregada: d.cantidadEntregada,
           unidadMedidaCodigo: d.unidadMedidaCodigo,
           tipoAfectacionIgvCodigo: d.tipoAfectacionIgvCodigo,
           precioUnitario: d.precioUnitario.toString(),
