@@ -26,6 +26,7 @@ import { PlatformAdminModule } from './modules/platform-admin/platform-admin.mod
 import { PlatformBillingModule } from './modules/platform-billing/platform-billing.module';
 import { PlansModule } from './modules/plans/plans.module';
 import { ProductsModule } from './modules/products/products.module';
+import { PurchasesModule } from './modules/purchases/purchases.module';
 import { QuotationsModule } from './modules/quotations/quotations.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SalesModule } from './modules/sales/sales.module';
@@ -78,6 +79,7 @@ import { validateEnvironment } from './config/environment';
     DocumentoConsultaModule,
     GuiaRemisionModule,
     ProductsModule,
+    PurchasesModule,
     SalesModule,
     QuotationsModule,
     ReportsModule,

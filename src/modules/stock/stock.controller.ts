@@ -27,7 +27,12 @@ export class StockController {
   constructor(private readonly stockService: StockService) {}
 
   @Get('locations')
-  @RequireModule('stock-movimientos', 'stock-traspasos', 'stock-kardex')
+  @RequireModule(
+    'stock-movimientos',
+    'stock-traspasos',
+    'stock-kardex',
+    'compras-ordenes',
+  )
   findLocations(@CurrentUser() user: JwtPayload) {
     return this.stockService.findLocations(
       this.getEmpresaId(user),

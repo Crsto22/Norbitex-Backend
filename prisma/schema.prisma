@@ -191,11 +191,18 @@ enum StockMovimientoTipo {
   entrada_manual
   salida_manual
   ajuste_producto
+  compra
   venta
   anulacion_venta
   nota_credito
   traspaso_entrada
   traspaso_salida
+}
+
+enum CompraComprobanteTipo {
+  factura
+  boleta
+  otro
 }
 
 enum MetodoPagoEstado {
@@ -364,6 +371,8 @@ model Empresa {
   categorias                      Categoria[]
   sucursales                      Sucursal[]
   clientes                        Cliente[]
+  proveedores                     Proveedor[]
+  comprasOrdenes                  CompraOrden[]
   productos                       Producto[]
   productoColores                 ProductoColor[]
   productoVariantes               ProductoVariante[]
@@ -547,6 +556,75 @@ model Cliente {
   @@map("cliente")
 }
 
+model Proveedor {
+  id               BigInt          @id @default(autoincrement())
+  empresaId        BigInt          @map("empresa_id")
+  ruc              String          @db.VarChar(11)
+  razonSocial      String          @map("razon_social") @db.VarChar(200)
+  nombreComercial  String?         @map("nombre_comercial") @db.VarChar(200)
+  direccion        String?         @db.VarChar(255)
+  telefono         String?         @db.VarChar(30)
+  email            String?         @db.VarChar(150)
+  personaContacto  String?         @map("persona_contacto") @db.VarChar(150)
+  telefonoContacto String?         @map("telefono_contacto") @db.VarChar(30)
+  activo           Boolean         @default(true)
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa          Empresa         @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  ordenes          CompraOrden[]
+
+  @@unique([empresaId, ruc])
+  @@index([empresaId])
+  @@index([empresaId, activo])
+  @@index([empresaId, createdAt])
+  @@map("proveedor")
+}
+
+model CompraOrden {
+  id                   BigInt                 @id @default(autoincrement())
+  publicId             String                 @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  empresaId            BigInt                 @map("empresa_id")
+  proveedorId          BigInt                 @map("proveedor_id")
+  destinoSucursalId    BigInt                 @map("destino_sucursal_id")
+  creadoPorId          BigInt?                @map("creado_por_id")
+  proveedorRuc         String                 @map("proveedor_ruc") @db.VarChar(11)
+  proveedorRazonSocial String                 @map("proveedor_razon_social") @db.VarChar(200)
+  tipoComprobante      CompraComprobanteTipo? @map("tipo_comprobante")
+  fechaEmision         DateTime?              @map("fecha_emision") @db.Date
+  serie                String?                @db.VarChar(20)
+  numero               String?                @db.VarChar(30)
+  total                Decimal                @db.Decimal(12, 2)
+  createdAt            DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa              Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  proveedor            Proveedor              @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  destinoSucursal      Sucursal               @relation("CompraOrdenDestino", fields: [destinoSucursalId], references: [id], onDelete: Restrict)
+  creadoPor            Usuario?               @relation("CompraOrdenCreadoPor", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  detalles             CompraOrdenDetalle[]
+
+  @@index([empresaId, createdAt])
+  @@index([empresaId, proveedorId, createdAt])
+  @@index([empresaId, destinoSucursalId, createdAt])
+  @@index([empresaId, tipoComprobante, serie, numero])
+  @@map("compra_orden")
+}
+
+model CompraOrdenDetalle {
+  id                 BigInt          @id @default(autoincrement())
+  ordenId            BigInt          @map("orden_id")
+  productoVarianteId BigInt          @map("producto_variante_id")
+  cantidad           Int
+  costoUnitario      Decimal         @map("costo_unitario") @db.Decimal(12, 2)
+  total              Decimal         @db.Decimal(12, 2)
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  orden              CompraOrden     @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  productoVariante   ProductoVariante @relation(fields: [productoVarianteId], references: [id], onDelete: Restrict)
+
+  @@unique([ordenId, productoVarianteId])
+  @@index([productoVarianteId])
+  @@map("compra_orden_detalle")
+}
+
 model Sucursal {
   id                         BigInt                     @id @default(autoincrement())
   empresaId                  BigInt                     @map("empresa_id")
@@ -567,6 +645,7 @@ model Sucursal {
   stockMovimientos           StockMovimiento[]
   stockTraspasosOrigen       StockTraspaso[]            @relation("StockTraspasoOrigen")
   stockTraspasosDestino      StockTraspaso[]            @relation("StockTraspasoDestino")
+  comprasOrdenes             CompraOrden[]              @relation("CompraOrdenDestino")
   ventas                     Venta[]
   notasCredito               NotaCredito[]
   guiasRemision              GuiaRemision[]             @relation("GuiaRemisionSucursal")
@@ -787,6 +866,7 @@ model ProductoVariante {
   inventarios           InventarioSucursal[]
   stockMovimientos      StockMovimiento[]
   stockTraspasoDetalles StockTraspasoDetalle[]
+  compraOrdenDetalles   CompraOrdenDetalle[]
   ventaDetalles         VentaDetalle[]
   notasCreditoDetalle   NotaCreditoDetalle[]
   cotizacionDetalles    CotizacionDetalle[]
@@ -934,6 +1014,7 @@ model Usuario {
   consultasDocumentoRealizadas       ConsultaDocumento[]
   stockMovimientosCreados            StockMovimiento[]                    @relation("StockMovimientoCreadoPor")
   stockTraspasosCreados              StockTraspaso[]                      @relation("StockTraspasoCreadoPor")
+  comprasOrdenesCreadas              CompraOrden[]                        @relation("CompraOrdenCreadoPor")
   afiliadosCreados                   Afiliado[]                           @relation("AfiliadoCreadoPor")
   afiliadosActualizados              Afiliado[]                           @relation("AfiliadoActualizadoPor")
   liquidacionesAfiliadoCerradas      LiquidacionAfiliado[]                @relation("LiquidacionAfiliadoCerradaPor")

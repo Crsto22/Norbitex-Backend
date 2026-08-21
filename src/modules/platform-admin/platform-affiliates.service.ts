@@ -237,7 +237,8 @@ export class PlatformAffiliatesService {
   }
 
   async validatePublicCode(code: string | undefined) {
-    const normalized = typeof code === 'string' ? code.trim().toUpperCase() : '';
+    const normalized =
+      typeof code === 'string' ? code.trim().toUpperCase() : '';
     const empty = {
       valid: false as const,
       code: normalized,

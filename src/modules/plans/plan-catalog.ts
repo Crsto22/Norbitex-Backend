@@ -40,6 +40,8 @@ const coreModuleKeys = [
   'stock-movimientos',
   'stock-traspasos',
   'stock-kardex',
+  'compras-ordenes',
+  'compras-proveedores',
   'sucursales',
   'usuarios',
   'reportes-ventas',
