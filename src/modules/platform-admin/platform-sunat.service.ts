@@ -79,16 +79,31 @@ export class PlatformSunatService {
         orderBy: { nombreComercial: 'asc' },
         skip: (page - 1) * limit,
         take: limit,
-        select: this.companySelect(),
+        select: {
+          id: true,
+          nombreComercial: true,
+          razonSocial: true,
+          ruc: true,
+          dni: true,
+          email: true,
+          estado: true,
+          planCodigo: true,
+        },
       }),
       this.prisma.empresa.count({ where }),
     ]);
-    const endpoints = await this.getEndpointAvailability();
 
     return {
-      data: companies.map((company) =>
-        this.mapCompanySummary(company, endpoints),
-      ),
+      data: companies.map((company) => ({
+        id: company.id.toString(),
+        name: company.nombreComercial,
+        legalName: company.razonSocial,
+        document: company.ruc ?? company.dni,
+        email: company.email,
+        state: company.estado,
+        planCode: company.planCodigo,
+        planName: this.plansService.getDefinition(company.planCodigo).name,
+      })),
       meta: {
         page,
         limit,
