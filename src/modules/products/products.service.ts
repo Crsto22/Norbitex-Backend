@@ -22,6 +22,7 @@ import { StockService } from '../stock/stock.service';
 import { R2StorageService } from '../storage/r2-storage.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { FindProductsQueryDto } from './dto/find-products-query.dto';
+import { resolveSunatUnitCode } from './sunat-unit-codes';
 
 type ProductColorInput = {
   colorId: string;
@@ -1266,14 +1267,14 @@ export class ProductsService {
     tx: Prisma.TransactionClient,
     codigoInput: string,
   ) {
-    const codigo = codigoInput.trim().toUpperCase() || 'NIU';
+    const unit = resolveSunatUnitCode(codigoInput);
 
     return tx.unidadMedida.upsert({
-      where: { codigo },
-      update: { activo: true },
+      where: { codigo: unit.code },
+      update: { descripcion: unit.description, activo: true },
       create: {
-        codigo,
-        descripcion: codigo === 'NIU' ? 'Unidad' : codigo,
+        codigo: unit.code,
+        descripcion: unit.description,
         activo: true,
       },
     });
@@ -1588,6 +1589,7 @@ export class ProductsService {
               some: {
                 empresaId: params.empresaId,
                 sucursalId: params.sucursalId,
+                stockActual: { gt: 0 },
               },
             },
           }

@@ -75,6 +75,11 @@ const ventaInclude = {
     },
   },
   creadoPor: { select: { id: true, nombre: true, apellido: true } },
+  entregas: {
+    select: { createdAt: true },
+    orderBy: { createdAt: 'desc' },
+    take: 1,
+  },
   detalles: {
     include: {
       productoVariante: {
@@ -1769,6 +1774,7 @@ export class SalesService {
       estado: venta.estado,
       recojoPosterior: venta.recojoPosterior,
       recojoHasta: venta.recojoHasta?.toISOString() ?? null,
+      fechaEntrega: venta.entregas[0]?.createdAt.toISOString() ?? null,
       estadoEntrega: venta.estadoEntrega,
       moneda: venta.moneda,
       formaPago: venta.formaPago,

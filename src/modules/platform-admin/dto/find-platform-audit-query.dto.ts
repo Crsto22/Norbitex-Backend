@@ -43,6 +43,10 @@ export class FindPlatformAuditQueryDto {
     'company_limits_updated',
     'overage_closed',
     'overage_paid',
+    'company_fiscal_data_updated',
+    'sunat_config_updated',
+    'sunat_certificate_uploaded',
+    'sunat_certificate_deleted',
     'platform_billing_config_updated',
     'platform_receipt_issued',
     'platform_receipt_retried',
@@ -68,6 +72,10 @@ export class FindPlatformAuditQueryDto {
     | 'company_limits_updated'
     | 'overage_closed'
     | 'overage_paid'
+    | 'company_fiscal_data_updated'
+    | 'sunat_config_updated'
+    | 'sunat_certificate_uploaded'
+    | 'sunat_certificate_deleted'
     | 'platform_billing_config_updated'
     | 'platform_receipt_issued'
     | 'platform_receipt_retried'
