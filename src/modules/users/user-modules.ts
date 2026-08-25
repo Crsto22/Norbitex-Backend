@@ -88,6 +88,41 @@ export const userModules = [
     label: 'Reporte de usuarios',
     route: '/reportes/usuarios',
   },
+  {
+    key: 'asistencias-dashboard',
+    label: 'Dashboard de asistencias',
+    route: '/asistencias/dashboard',
+  },
+  {
+    key: 'asistencias-personal',
+    label: 'Personal',
+    route: '/asistencias/personal',
+  },
+  {
+    key: 'asistencias-marcajes',
+    label: 'Asistencias',
+    route: '/asistencias/marcajes',
+  },
+  {
+    key: 'asistencias-turnos',
+    label: 'Turnos',
+    route: '/asistencias/turnos',
+  },
+  {
+    key: 'asistencias-puntos-qr',
+    label: 'Puntos QR',
+    route: '/asistencias/puntos-qr',
+  },
+  {
+    key: 'asistencias-reportes',
+    label: 'Reportes de asistencias',
+    route: '/asistencias/reportes',
+  },
+  {
+    key: 'asistencias-configuracion',
+    label: 'Configuracion de asistencias',
+    route: '/asistencias/configuracion',
+  },
   { key: 'empresa', label: 'Empresa', route: '/configuracion/empresa' },
   {
     key: 'metodos-pago',

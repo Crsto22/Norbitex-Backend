@@ -51,12 +51,27 @@ const coreModuleKeys = [
   'mi-cuenta',
 ] as const satisfies readonly UserModuleKey[];
 
-const basicModuleKeys = coreModuleKeys.filter(
+const attendanceModuleKeys = [
+  'asistencias-dashboard',
+  'asistencias-personal',
+  'asistencias-marcajes',
+  'asistencias-turnos',
+  'asistencias-puntos-qr',
+  'asistencias-reportes',
+  'asistencias-configuracion',
+] as const satisfies readonly UserModuleKey[];
+
+const allCoreModuleKeys = [
+  ...coreModuleKeys,
+  ...attendanceModuleKeys,
+] as const satisfies readonly UserModuleKey[];
+
+const basicModuleKeys = allCoreModuleKeys.filter(
   (key) => !['caja', 'usuarios'].includes(key),
-) as Exclude<(typeof coreModuleKeys)[number], 'caja' | 'usuarios'>[];
+) as Exclude<(typeof allCoreModuleKeys)[number], 'caja' | 'usuarios'>[];
 
 const growthModuleKeys = [
-  ...coreModuleKeys,
+  ...allCoreModuleKeys,
   'reportes-clientes',
   'reportes-usuarios',
 ] as const satisfies readonly UserModuleKey[];

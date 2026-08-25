@@ -83,6 +83,8 @@ describe('PlansService', () => {
     expect(modules).toContain('reportes-ventas');
     expect(modules).toContain('reportes-productos');
     expect(modules).toContain('stock-kardex');
+    expect(modules).toContain('asistencias-dashboard');
+    expect(modules).toContain('asistencias-marcajes');
     expect(modules).not.toContain('caja');
     expect(modules).not.toContain('usuarios');
     expect(modules).not.toContain('gre-remitente');
