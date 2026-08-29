@@ -19,10 +19,14 @@ import {
   CloseOverageDto,
   FindOveragesQueryDto,
   PayOverageDto,
+  UpdateCompanyAttendanceCapacityDto,
+  UpdateCompanyAttendanceAddonDto,
   UpdateCompanyExtraLimitsDto,
 } from './dto/platform-overages.dto';
 import { PlatformBillingService } from '../platform-billing/platform-billing.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { UpdateCompanyModulesDto } from './dto/update-company-modules.dto';
+import { userModuleKeys, userModuleKeySet } from '../users/user-modules';
 
 const liquidationInclude = {
   empresa: {
@@ -61,6 +65,13 @@ type CompanyWithLimits = {
   id: bigint;
   nombreComercial: string;
   planCodigo: PlanCodigo;
+  planInicioAt: Date;
+  planFinAt: Date | null;
+  asistenciasActiva: boolean;
+  asistenciasTrabajadoresLimite: bigint;
+  asistenciasPuntosQrLimite: bigint;
+  asistenciasInicioAt: Date | null;
+  asistenciasFinAt: Date | null;
   limitesAdicionales: {
     usuarios: bigint;
     sucursales: bigint;
@@ -70,6 +81,8 @@ type CompanyWithLimits = {
     comprobantes: bigint;
     consultasDocumento: bigint;
     almacenamientoBytes: bigint;
+    trabajadoresAsistencia: bigint;
+    puntosQrAsistencia: bigint;
     updatedAt: Date;
   } | null;
 };
@@ -91,6 +104,13 @@ export class PlatformOveragesService {
         id: true,
         nombreComercial: true,
         planCodigo: true,
+        planInicioAt: true,
+        planFinAt: true,
+        asistenciasActiva: true,
+        asistenciasTrabajadoresLimite: true,
+        asistenciasPuntosQrLimite: true,
+        asistenciasInicioAt: true,
+        asistenciasFinAt: true,
         limitesAdicionales: true,
       },
     });
@@ -113,6 +133,13 @@ export class PlatformOveragesService {
           id: true,
           nombreComercial: true,
           planCodigo: true,
+          planInicioAt: true,
+          planFinAt: true,
+          asistenciasActiva: true,
+          asistenciasTrabajadoresLimite: true,
+          asistenciasPuntosQrLimite: true,
+          asistenciasInicioAt: true,
+          asistenciasFinAt: true,
           limitesAdicionales: true,
         },
       });
@@ -126,6 +153,8 @@ export class PlatformOveragesService {
         comprobantes: BigInt(dto.documents),
         consultasDocumento: BigInt(dto.documentQueries),
         almacenamientoBytes: BigInt(dto.storageBytes),
+        trabajadoresAsistencia: BigInt(dto.attendanceEmployees),
+        puntosQrAsistencia: BigInt(dto.attendanceQrPoints),
         actualizadoPorId: actorId,
       };
       const updated = await tx.empresaLimiteAdicional.upsert({
@@ -178,6 +207,358 @@ export class PlatformOveragesService {
     }
 
     return outcome.result;
+  }
+
+  async getCompanyAttendanceAddon(id: string) {
+    const empresaId = this.parseId(id, 'empresa');
+    const company = await this.prisma.empresa.findUnique({
+      where: { id: empresaId },
+      select: {
+        id: true,
+        nombreComercial: true,
+        planCodigo: true,
+        planInicioAt: true,
+        planFinAt: true,
+        asistenciasActiva: true,
+        asistenciasTrabajadoresLimite: true,
+        asistenciasPuntosQrLimite: true,
+        asistenciasInicioAt: true,
+        asistenciasFinAt: true,
+        _count: {
+          select: {
+            empleados: { where: { estado: 'activo' } },
+            puntosQrAsistencia: { where: { estado: 'activo' } },
+          },
+        },
+      },
+    });
+    if (!company) throw new NotFoundException('Empresa no encontrada');
+    return this.mapCompanyAttendanceAddon(company);
+  }
+
+  async updateCompanyAttendanceAddon(
+    actor: JwtPayload,
+    id: string,
+    dto: UpdateCompanyAttendanceAddonDto,
+  ) {
+    const empresaId = this.parseId(id, 'empresa');
+    const actorId = this.parseId(actor.sub, 'administrador');
+    const startsAt = dto.active ? new Date(dto.startsAt ?? new Date()) : null;
+    const endsAt = dto.active && dto.endsAt ? new Date(dto.endsAt) : null;
+    if (dto.active && !endsAt) {
+      throw new BadRequestException(
+        'La fecha de fin de Asistencias es obligatoria',
+      );
+    }
+    if (startsAt && endsAt && endsAt < startsAt) {
+      throw new BadRequestException(
+        'La fecha de fin debe ser posterior al inicio',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "empresa" WHERE "id" = ${empresaId} FOR UPDATE`;
+      const current = await tx.empresa.findUnique({
+        where: { id: empresaId },
+        select: {
+          id: true,
+          nombreComercial: true,
+          planCodigo: true,
+          planInicioAt: true,
+          planFinAt: true,
+          asistenciasActiva: true,
+          asistenciasTrabajadoresLimite: true,
+          asistenciasPuntosQrLimite: true,
+          asistenciasInicioAt: true,
+          asistenciasFinAt: true,
+        },
+      });
+      if (!current) throw new NotFoundException('Empresa no encontrada');
+
+      const [activeEmployees, activeQrPoints] = await Promise.all([
+        tx.empleado.count({ where: { empresaId, estado: 'activo' } }),
+        tx.puntoQrAsistencia.count({ where: { empresaId, estado: 'activo' } }),
+      ]);
+      if (dto.active && activeEmployees > dto.employeesLimit) {
+        throw new ConflictException({
+          code: 'ATTENDANCE_EMPLOYEE_LIMIT_BELOW_USAGE',
+          message:
+            'El limite de trabajadores no puede ser menor al consumo actual',
+          used: activeEmployees,
+          limit: dto.employeesLimit,
+        });
+      }
+      if (dto.active && activeQrPoints > dto.qrPointsLimit) {
+        throw new ConflictException({
+          code: 'ATTENDANCE_QR_LIMIT_BELOW_USAGE',
+          message:
+            'El limite de puntos QR no puede ser menor al consumo actual',
+          used: activeQrPoints,
+          limit: dto.qrPointsLimit,
+        });
+      }
+
+      const updated = await tx.empresa.update({
+        where: { id: empresaId },
+        data: {
+          asistenciasActiva: dto.active,
+          asistenciasTrabajadoresLimite: BigInt(
+            dto.active ? dto.employeesLimit : 0,
+          ),
+          asistenciasPuntosQrLimite: BigInt(dto.active ? dto.qrPointsLimit : 0),
+          asistenciasInicioAt: startsAt,
+          asistenciasFinAt: endsAt,
+        },
+        select: {
+          id: true,
+          nombreComercial: true,
+          planCodigo: true,
+          planInicioAt: true,
+          planFinAt: true,
+          asistenciasActiva: true,
+          asistenciasTrabajadoresLimite: true,
+          asistenciasPuntosQrLimite: true,
+          asistenciasInicioAt: true,
+          asistenciasFinAt: true,
+          _count: {
+            select: {
+              empleados: { where: { estado: 'activo' } },
+              puntosQrAsistencia: { where: { estado: 'activo' } },
+            },
+          },
+        },
+      });
+
+      await tx.platformAuditLog.create({
+        data: {
+          empresaId,
+          usuarioId: actorId,
+          category: 'plan',
+          action: 'company_attendance_addon_updated',
+          source: 'admin',
+          description: `Asistencias actualizadas para ${current.nombreComercial}`,
+          metadata: {
+            previous: this.plansService.mapAttendanceAddon(current),
+            current: this.plansService.mapAttendanceAddon(updated),
+          },
+        },
+      });
+
+      return this.mapCompanyAttendanceAddon(updated);
+    });
+  }
+
+  async updateCompanyAttendanceCapacity(
+    actor: JwtPayload,
+    id: string,
+    dto: UpdateCompanyAttendanceCapacityDto,
+  ) {
+    const empresaId = this.parseId(id, 'empresa');
+    const actorId = this.parseId(actor.sub, 'administrador');
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "empresa" WHERE "id" = ${empresaId} FOR UPDATE`;
+      const current = await tx.empresa.findUnique({
+        where: { id: empresaId },
+        select: {
+          id: true,
+          nombreComercial: true,
+          planCodigo: true,
+          planInicioAt: true,
+          planFinAt: true,
+          asistenciasActiva: true,
+          asistenciasTrabajadoresLimite: true,
+          asistenciasPuntosQrLimite: true,
+          asistenciasInicioAt: true,
+          asistenciasFinAt: true,
+        },
+      });
+      if (!current) throw new NotFoundException('Empresa no encontrada');
+      if (!this.plansService.mapAttendanceAddon(current).effectiveActive) {
+        throw new ConflictException({
+          code: 'ATTENDANCE_SUBSCRIPTION_INACTIVE',
+          message: 'La empresa no tiene una suscripcion de Asistencias vigente',
+        });
+      }
+
+      const [activeEmployees, activeQrPoints] = await Promise.all([
+        tx.empleado.count({ where: { empresaId, estado: 'activo' } }),
+        tx.puntoQrAsistencia.count({ where: { empresaId, estado: 'activo' } }),
+      ]);
+      if (activeEmployees > dto.employeesLimit) {
+        throw new ConflictException({
+          code: 'ATTENDANCE_EMPLOYEE_LIMIT_BELOW_USAGE',
+          message:
+            'El limite de trabajadores no puede ser menor al consumo actual',
+          used: activeEmployees,
+          limit: dto.employeesLimit,
+        });
+      }
+      if (activeQrPoints > dto.qrPointsLimit) {
+        throw new ConflictException({
+          code: 'ATTENDANCE_QR_LIMIT_BELOW_USAGE',
+          message:
+            'El limite de puntos QR no puede ser menor al consumo actual',
+          used: activeQrPoints,
+          limit: dto.qrPointsLimit,
+        });
+      }
+
+      const updated = await tx.empresa.update({
+        where: { id: empresaId },
+        data: {
+          asistenciasTrabajadoresLimite: BigInt(dto.employeesLimit),
+          asistenciasPuntosQrLimite: BigInt(dto.qrPointsLimit),
+        },
+        select: {
+          id: true,
+          nombreComercial: true,
+          planCodigo: true,
+          planInicioAt: true,
+          planFinAt: true,
+          asistenciasActiva: true,
+          asistenciasTrabajadoresLimite: true,
+          asistenciasPuntosQrLimite: true,
+          asistenciasInicioAt: true,
+          asistenciasFinAt: true,
+          _count: {
+            select: {
+              empleados: { where: { estado: 'activo' } },
+              puntosQrAsistencia: { where: { estado: 'activo' } },
+            },
+          },
+        },
+      });
+
+      await tx.platformAuditLog.create({
+        data: {
+          empresaId,
+          usuarioId: actorId,
+          category: 'plan',
+          action: 'attendance_capacity_updated',
+          source: 'admin',
+          description: `Capacidad de Asistencias actualizada para ${current.nombreComercial}`,
+          metadata: {
+            previous: {
+              employeesLimit: Number(current.asistenciasTrabajadoresLimite),
+              qrPointsLimit: Number(current.asistenciasPuntosQrLimite),
+            },
+            current: {
+              employeesLimit: dto.employeesLimit,
+              qrPointsLimit: dto.qrPointsLimit,
+            },
+          },
+        },
+      });
+
+      return this.mapCompanyAttendanceAddon(updated);
+    });
+  }
+
+  async getCompanyModules(id: string) {
+    const empresaId = this.parseId(id, 'empresa');
+    const company = await this.prisma.empresa.findUnique({
+      where: { id: empresaId },
+      select: {
+        id: true,
+        nombreComercial: true,
+        planCodigo: true,
+        planInicioAt: true,
+        planFinAt: true,
+        asistenciasActiva: true,
+        asistenciasInicioAt: true,
+        asistenciasFinAt: true,
+        modulosPlanPersonalizados: true,
+      },
+    });
+    if (!company) throw new NotFoundException('Empresa no encontrada');
+    return this.mapCompanyModules(this.prisma, company);
+  }
+
+  async updateCompanyModules(
+    actor: JwtPayload,
+    id: string,
+    dto: UpdateCompanyModulesDto,
+  ) {
+    const empresaId = this.parseId(id, 'empresa');
+    const actorId = this.parseId(actor.sub, 'administrador');
+    const moduleKeys = this.cleanModuleKeys(dto.moduleKeys);
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "empresa" WHERE "id" = ${empresaId} FOR UPDATE`;
+      const company = await tx.empresa.findUnique({
+        where: { id: empresaId },
+        select: {
+          id: true,
+          nombreComercial: true,
+          planCodigo: true,
+          planInicioAt: true,
+          planFinAt: true,
+          asistenciasActiva: true,
+          asistenciasInicioAt: true,
+          asistenciasFinAt: true,
+          modulosPlanPersonalizados: true,
+        },
+      });
+      if (!company) throw new NotFoundException('Empresa no encontrada');
+
+      const previous = await this.buildCompanyModuleSets(
+        tx,
+        company,
+        company.modulosPlanPersonalizados,
+      );
+      const selected = new Set(moduleKeys);
+      const overrides = userModuleKeys.flatMap((moduleKey) => {
+        const selectedValue = selected.has(moduleKey);
+        const baseValue = previous.base.has(moduleKey);
+        return selectedValue === baseValue
+          ? []
+          : [
+              {
+                empresaId,
+                moduleKey,
+                enabled: selectedValue,
+                actualizadoPorId: actorId,
+              },
+            ];
+      });
+
+      await tx.empresaModuloPlan.deleteMany({ where: { empresaId } });
+      if (overrides.length) {
+        await tx.empresaModuloPlan.createMany({ data: overrides });
+      }
+
+      await tx.platformAuditLog.create({
+        data: {
+          empresaId,
+          usuarioId: actorId,
+          category: 'plan',
+          action: 'company_modules_updated',
+          source: 'admin',
+          description: `Modulos personalizados actualizados para ${company.nombreComercial}`,
+          metadata: {
+            previous: Array.from(previous.effective),
+            current: moduleKeys,
+          },
+        },
+      });
+
+      const updated = await tx.empresa.findUniqueOrThrow({
+        where: { id: empresaId },
+        select: {
+          id: true,
+          nombreComercial: true,
+          planCodigo: true,
+          planInicioAt: true,
+          planFinAt: true,
+          asistenciasActiva: true,
+          asistenciasInicioAt: true,
+          asistenciasFinAt: true,
+          modulosPlanPersonalizados: true,
+        },
+      });
+      return this.mapCompanyModules(tx, updated);
+    });
   }
 
   async findOverages(query: FindOveragesQueryDto, now = new Date()) {
@@ -431,16 +812,145 @@ export class PlatformOveragesService {
     const additionalLimits = this.plansService.mapAdditionalLimits(
       company.limitesAdicionales,
     );
+    const effectiveLimits = this.plansService.withAttendanceLimits(
+      baseLimits,
+      additionalLimits,
+      company,
+    );
     return {
       company: { id: company.id.toString(), name: company.nombreComercial },
       baseLimits,
       additionalLimits,
-      effectiveLimits: this.plansService.buildEffectiveLimits(
-        baseLimits,
-        additionalLimits,
+      effectiveLimits,
+      attendance: this.plansService.mapAttendanceAddon(
+        company,
+        await this.plansService.getAttendancePricing(),
       ),
       updatedAt: company.limitesAdicionales?.updatedAt?.toISOString() ?? null,
     };
+  }
+
+  private async mapCompanyModules(
+    tx: Prisma.TransactionClient | PrismaService,
+    company: {
+      id: bigint;
+      nombreComercial: string;
+      planCodigo: PlanCodigo;
+      planInicioAt: Date;
+      planFinAt: Date | null;
+      asistenciasActiva: boolean;
+      asistenciasInicioAt: Date | null;
+      asistenciasFinAt: Date | null;
+      modulosPlanPersonalizados: {
+        moduleKey: string;
+        enabled: boolean;
+        updatedAt: Date;
+      }[];
+    },
+  ) {
+    const sets = await this.buildCompanyModuleSets(
+      tx,
+      company,
+      company.modulosPlanPersonalizados,
+    );
+    const updatedAt = company.modulosPlanPersonalizados
+      .map((module) => module.updatedAt)
+      .sort((a, b) => b.getTime() - a.getTime())[0];
+
+    return {
+      company: { id: company.id.toString(), name: company.nombreComercial },
+      planCode: company.planCodigo,
+      baseModuleKeys: Array.from(sets.base),
+      overrideModuleKeys: company.modulosPlanPersonalizados.map((module) => ({
+        moduleKey: module.moduleKey,
+        enabled: module.enabled,
+      })),
+      effectiveModuleKeys: Array.from(sets.effective),
+      updatedAt: updatedAt?.toISOString() ?? null,
+    };
+  }
+
+  private async buildCompanyModuleSets(
+    tx: Prisma.TransactionClient | PrismaService,
+    company: {
+      id: bigint;
+      planCodigo: PlanCodigo;
+      planInicioAt: Date;
+      planFinAt: Date | null;
+      asistenciasActiva: boolean;
+      asistenciasInicioAt: Date | null;
+      asistenciasFinAt: Date | null;
+    },
+    overrides: { moduleKey: string; enabled: boolean }[],
+  ) {
+    const attendanceKeys = new Set<string>(
+      this.plansService.getDefinition(PlanCodigo.asistencias_basico).moduleKeys,
+    );
+    const planModules = await tx.planModulo.findMany({
+      where: { planCodigo: company.planCodigo, enabled: true },
+      select: { moduleKey: true },
+    });
+    const base = new Set(
+      planModules.length
+        ? planModules.map((module) => module.moduleKey)
+        : this.plansService.getDefinition(company.planCodigo).moduleKeys,
+    );
+    for (const moduleKey of attendanceKeys) base.delete(moduleKey);
+    if (this.plansService.mapAttendanceAddon(company).effectiveActive) {
+      for (const moduleKey of attendanceKeys) base.add(moduleKey);
+    }
+    const effective = new Set(base);
+    for (const override of overrides) {
+      if (!userModuleKeySet.has(override.moduleKey)) continue;
+      if (
+        attendanceKeys.has(override.moduleKey) &&
+        !this.plansService.mapAttendanceAddon(company).effectiveActive
+      ) {
+        effective.delete(override.moduleKey);
+        continue;
+      }
+      if (override.enabled) effective.add(override.moduleKey);
+      else effective.delete(override.moduleKey);
+    }
+    return { base, effective };
+  }
+
+  private async mapCompanyAttendanceAddon(company: {
+    id: bigint;
+    nombreComercial: string;
+    planCodigo: PlanCodigo;
+    planInicioAt: Date;
+    planFinAt: Date | null;
+    asistenciasActiva: boolean;
+    asistenciasTrabajadoresLimite: bigint;
+    asistenciasPuntosQrLimite: bigint;
+    asistenciasInicioAt: Date | null;
+    asistenciasFinAt: Date | null;
+    _count?: { empleados: number; puntosQrAsistencia: number };
+  }) {
+    const pricing = await this.plansService.getAttendancePricing();
+    return {
+      company: { id: company.id.toString(), name: company.nombreComercial },
+      pricing,
+      ...this.plansService.mapAttendanceAddon(company, pricing),
+      usage: {
+        employees: company._count?.empleados ?? 0,
+        qrPoints: company._count?.puntosQrAsistencia ?? 0,
+      },
+    };
+  }
+
+  private cleanModuleKeys(moduleKeys: string[]) {
+    const cleaned = Array.from(
+      new Set(moduleKeys.map((moduleKey) => moduleKey.trim()).filter(Boolean)),
+    );
+    const invalid = cleaned.find(
+      (moduleKey) => !userModuleKeySet.has(moduleKey),
+    );
+    if (invalid) {
+      throw new BadRequestException(`El modulo ${invalid} no existe`);
+    }
+    return cleaned;
   }
 
   private mapOverageRow(
@@ -542,6 +1052,8 @@ type ExtraLimits = {
   documents: number;
   documentQueries: number;
   storageBytes: number;
+  attendanceEmployees: number;
+  attendanceQrPoints: number;
 };
 
 export function describeLimitIncreases(
@@ -561,6 +1073,8 @@ export function describeLimitIncreases(
     { key: 'documents', label: 'comprobantes' },
     { key: 'documentQueries', label: 'consultas DNI/RUC' },
     { key: 'storageBytes', label: 'almacenamiento', format: formatStorage },
+    { key: 'attendanceEmployees', label: 'trabajadores' },
+    { key: 'attendanceQrPoints', label: 'puntos QR' },
   ];
 
   return resources.flatMap(({ key, label, format }) => {

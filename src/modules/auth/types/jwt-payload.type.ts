@@ -17,4 +17,5 @@ export type JwtPayload = {
   sucursalTipo?: 'tienda' | 'almacen' | null;
   visibilidadOperaciones?: 'propias' | 'todas';
   setup?: 'company';
+  type?: 'worker';
 };

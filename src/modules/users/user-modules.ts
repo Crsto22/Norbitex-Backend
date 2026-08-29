@@ -100,8 +100,13 @@ export const userModules = [
   },
   {
     key: 'asistencias-marcajes',
-    label: 'Asistencias',
+    label: 'Marcaciones',
     route: '/asistencias/marcajes',
+  },
+  {
+    key: 'asistencias-historial-marcaciones',
+    label: 'Historial de marcaciones',
+    route: '/asistencias/historial-marcaciones',
   },
   {
     key: 'asistencias-turnos',

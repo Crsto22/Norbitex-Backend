@@ -34,6 +34,11 @@ const planColors: Record<PlanCodigo, string> = {
   emprendedor: '#10b981',
   crecimiento: '#f59e0b',
   empresarial: '#8b5cf6',
+  pos_basico: '#0ea5e9',
+  asistencias_basico: '#14b8a6',
+  asistencias_pro: '#22c55e',
+  completo_emprende: '#f97316',
+  completo_empresa: '#7c3aed',
 };
 
 type MonthBucket = {
@@ -134,6 +139,11 @@ export class PlatformAdminService {
           planCodigo: true,
           planInicioAt: true,
           planFinAt: true,
+          asistenciasActiva: true,
+          asistenciasTrabajadoresLimite: true,
+          asistenciasPuntosQrLimite: true,
+          asistenciasInicioAt: true,
+          asistenciasFinAt: true,
           limitesAdicionales: true,
           createdAt: true,
         },
@@ -214,6 +224,11 @@ export class PlatformAdminService {
           planCodigo: true,
           planInicioAt: true,
           planFinAt: true,
+          asistenciasActiva: true,
+          asistenciasTrabajadoresLimite: true,
+          asistenciasPuntosQrLimite: true,
+          asistenciasInicioAt: true,
+          asistenciasFinAt: true,
           createdAt: true,
           usuarios: {
             where: { roles: { some: { rol: { codigo: 'OWNER' } } } },
@@ -278,6 +293,7 @@ export class PlatformAdminService {
             : null,
           users: company._count.usuarios,
           branches: company._count.sucursales,
+          attendance: this.plansService.mapAttendanceAddon(company),
         };
       }),
       meta: this.buildMeta(page, limit, total),
@@ -314,6 +330,11 @@ export class PlatformAdminService {
         planCodigo: true,
         planInicioAt: true,
         planFinAt: true,
+        asistenciasActiva: true,
+        asistenciasTrabajadoresLimite: true,
+        asistenciasPuntosQrLimite: true,
+        asistenciasInicioAt: true,
+        asistenciasFinAt: true,
         createdAt: true,
         afiliacion: {
           include: {
@@ -370,6 +391,7 @@ export class PlatformAdminService {
         : null,
       users: company._count.usuarios,
       branches: company._count.sucursales,
+      attendance: this.plansService.mapAttendanceAddon(company),
       affiliateEligible:
         company._count.pagosSuscripcion === 0 &&
         company.afiliacion?.estado !== 'interrumpida',
@@ -416,6 +438,11 @@ export class PlatformAdminService {
           planCodigo: true,
           planInicioAt: true,
           planFinAt: true,
+          asistenciasActiva: true,
+          asistenciasTrabajadoresLimite: true,
+          asistenciasPuntosQrLimite: true,
+          asistenciasInicioAt: true,
+          asistenciasFinAt: true,
           limitesAdicionales: true,
         },
       }),
@@ -449,6 +476,8 @@ export class PlatformAdminService {
       documents,
       documentQueries,
       storage,
+      attendanceEmployees,
+      attendanceQrPoints,
     ] = await Promise.all([
       this.prisma.empresaUsuario.groupBy({
         by: ['empresaId'],
@@ -512,6 +541,18 @@ export class PlatformAdminService {
         orderBy: { empresaId: 'asc' },
         _sum: { sizeBytes: true },
       }),
+      this.prisma.empleado.groupBy({
+        by: ['empresaId'],
+        where: { empresaId: { in: companyIds }, estado: 'activo' },
+        orderBy: { empresaId: 'asc' },
+        _count: { _all: true },
+      }),
+      this.prisma.puntoQrAsistencia.groupBy({
+        by: ['empresaId'],
+        where: { empresaId: { in: companyIds }, estado: 'activo' },
+        orderBy: { empresaId: 'asc' },
+        _count: { _all: true },
+      }),
     ]);
     const countMap = (
       groups: { empresaId: bigint; _count: { _all: number } }[],
@@ -527,6 +568,8 @@ export class PlatformAdminService {
       variants: countMap(variants),
       documents: countMap(documents),
       documentQueries: countMap(documentQueries),
+      attendanceEmployees: countMap(attendanceEmployees),
+      attendanceQrPoints: countMap(attendanceQrPoints),
       storageBytes: new Map(
         storage.map((group) => [
           group.empresaId.toString(),
@@ -558,6 +601,8 @@ export class PlatformAdminService {
           documents: usageMaps.documents.get(id) ?? 0,
           documentQueries: usageMaps.documentQueries.get(id) ?? 0,
           storageBytes: usageMaps.storageBytes.get(id) ?? 0,
+          attendanceEmployees: usageMaps.attendanceEmployees.get(id) ?? 0,
+          attendanceQrPoints: usageMaps.attendanceQrPoints.get(id) ?? 0,
         };
         const definition = this.plansService.getDefinition(company.planCodigo);
         const baseLimits = baseLimitsByPlan.get(company.planCodigo);
@@ -565,9 +610,10 @@ export class PlatformAdminService {
         const additionalLimits = this.plansService.mapAdditionalLimits(
           company.limitesAdicionales,
         );
-        const effectiveLimits = this.plansService.buildEffectiveLimits(
+        const effectiveLimits = this.plansService.withAttendanceLimits(
           baseLimits,
           additionalLimits,
+          company,
         );
 
         return {

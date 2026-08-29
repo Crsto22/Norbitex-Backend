@@ -4,7 +4,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { calculatePlanSalePricing, PlansService } from './plans.service';
 
 describe('PlansService', () => {
-  const service = new PlansService({} as PrismaService);
+  const service = new PlansService({
+    planModulo: { findMany: jest.fn().mockResolvedValue([]) },
+    empresaModuloPlan: { findMany: jest.fn().mockResolvedValue([]) },
+  } as never as PrismaService);
   const startsAt = new Date('2026-07-01T12:00:00.000Z');
   const entrepreneurLimits = {
     usuarios: 2n,
@@ -15,6 +18,8 @@ describe('PlansService', () => {
     comprobantes: 500n,
     consultasDocumento: 50n,
     almacenamientoBytes: 1024n * 1024n * 1024n,
+    trabajadoresAsistencia: 15n,
+    puntosQrAsistencia: 2n,
     updatedAt: startsAt,
   };
 
@@ -50,7 +55,7 @@ describe('PlansService', () => {
     ).toBe('active');
   });
 
-  it('intersects assigned modules and limits owners to their plan', () => {
+  it('intersects assigned modules and limits owners to their plan', async () => {
     const company = {
       planCodigo: PlanCodigo.emprendedor,
       planInicioAt: startsAt,
@@ -58,7 +63,7 @@ describe('PlansService', () => {
     };
 
     expect(
-      service.getEffectiveModuleKeys(
+      await service.getEffectiveModuleKeys(
         company,
         [],
         ['ventas-pos', 'reportes-clientes'],
@@ -66,13 +71,61 @@ describe('PlansService', () => {
     ).toEqual(['ventas-pos', 'reportes-clientes']);
 
     expect(
-      service.getEffectiveModuleKeys(company, [], ['stock-movimientos']),
+      await service.getEffectiveModuleKeys(company, [], ['stock-movimientos']),
     ).toContain('stock-kardex');
 
-    const ownerModules = service.getEffectiveModuleKeys(company, ['OWNER'], []);
+    const ownerModules = await service.getEffectiveModuleKeys(
+      company,
+      ['OWNER'],
+      [],
+    );
     expect(ownerModules).toContain('ventas-pos');
     expect(ownerModules).toContain('reportes-clientes');
     expect(ownerModules).not.toContain('reportes-usuarios');
+  });
+
+  it('adds attendance modules only when the company addon is active', async () => {
+    const company = {
+      planCodigo: PlanCodigo.basico,
+      planInicioAt: startsAt,
+      planFinAt: null,
+      asistenciasActiva: true,
+      asistenciasTrabajadoresLimite: 10n,
+      asistenciasPuntosQrLimite: 1n,
+      asistenciasInicioAt: startsAt,
+      asistenciasFinAt: new Date('2099-01-31T05:00:00.000Z'),
+    };
+
+    await expect(
+      service.getEffectiveModuleKeys(
+        { ...company, asistenciasActiva: false, asistenciasFinAt: null },
+        ['OWNER'],
+        [],
+      ),
+    ).resolves.not.toContain('asistencias-dashboard');
+    await expect(
+      service.getEffectiveModuleKeys(company, ['OWNER'], []),
+    ).resolves.toContain('asistencias-dashboard');
+    await expect(
+      service.getEffectiveModuleKeys(
+        { ...company, asistenciasFinAt: new Date('2020-01-31T05:00:00.000Z') },
+        ['OWNER'],
+        [],
+      ),
+    ).resolves.not.toContain('asistencias-dashboard');
+    await expect(
+      service.getEffectiveModuleKeys(
+        {
+          ...company,
+          planCodigo: PlanCodigo.prueba,
+          planFinAt: new Date('2099-01-31T05:00:00.000Z'),
+          asistenciasActiva: false,
+          asistenciasFinAt: null,
+        },
+        ['OWNER'],
+        [],
+      ),
+    ).resolves.toContain('asistencias-dashboard');
   });
 
   it('keeps the basic plan limited to essential operations', () => {
@@ -83,8 +136,8 @@ describe('PlansService', () => {
     expect(modules).toContain('reportes-ventas');
     expect(modules).toContain('reportes-productos');
     expect(modules).toContain('stock-kardex');
-    expect(modules).toContain('asistencias-dashboard');
-    expect(modules).toContain('asistencias-marcajes');
+    expect(modules).not.toContain('asistencias-dashboard');
+    expect(modules).not.toContain('asistencias-marcajes');
     expect(modules).not.toContain('caja');
     expect(modules).not.toContain('usuarios');
     expect(modules).not.toContain('gre-remitente');

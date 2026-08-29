@@ -8,7 +8,13 @@ import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { DocumentoConsultaService } from './documento-consulta.service';
 
 @UseGuards(ModuleAccessGuard)
-@RequireModule('clientes', 'ventas-pos', 'cotizaciones', 'empresa')
+@RequireModule(
+  'clientes',
+  'ventas-pos',
+  'cotizaciones',
+  'empresa',
+  'asistencias-personal',
+)
 @Throttle(rateLimits.sunat)
 @Controller('documento')
 export class DocumentoConsultaController {

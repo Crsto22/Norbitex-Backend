@@ -7,7 +7,10 @@ import {
 import {
   CobroAdicionalEstado,
   ClienteTipoDocumento,
+  ComisionAfiliadoEstado,
+  ComisionAfiliadoTipo,
   LiquidacionExcedenteEstado,
+  LiquidacionAfiliadoEstado,
   PagoSuscripcionEstado,
   PlataformaComprobanteEstado,
   PlataformaComprobanteTipo,
@@ -40,6 +43,14 @@ const receiptInclude = {
   },
   detalles: true,
   pagoSuscripcion: {
+    select: {
+      id: true,
+      estado: true,
+      metodoPago: true,
+      metodoPagoOtro: true,
+    },
+  },
+  suscripcionAsistencia: {
     select: {
       id: true,
       estado: true,
@@ -346,9 +357,14 @@ export class PlatformBillingService {
           actorId,
           empresaId: source.empresaId,
           type: dto.receiptType,
-          description: `Plan ${source.planCodigo} por ${source.meses} mes(es)`,
-          quantity: new Prisma.Decimal(1),
           total: source.montoTotal,
+          items: [
+            {
+              description: `Plan ${source.planCodigo} por ${source.meses} mes(es)`,
+              quantity: new Prisma.Decimal(1),
+              total: source.montoTotal,
+            },
+          ],
           pagoSuscripcionId: source.id,
         });
       }
@@ -362,9 +378,14 @@ export class PlatformBillingService {
         actorId,
         empresaId: source.empresaId,
         type: dto.receiptType,
-        description: `Comprobantes excedentes ${source.periodo}`,
-        quantity: new Prisma.Decimal(source.cantidad),
         total: source.montoTotal,
+        items: [
+          {
+            description: `Comprobantes excedentes ${source.periodo}`,
+            quantity: new Prisma.Decimal(source.cantidad),
+            total: source.montoTotal,
+          },
+        ],
         liquidacionExcedenteId: source.id,
       });
     });
@@ -416,9 +437,14 @@ export class PlatformBillingService {
         actorId,
         empresaId,
         type: dto.receiptType,
-        description: dto.description,
-        quantity: new Prisma.Decimal(dto.quantity),
         total,
+        items: [
+          {
+            description: dto.description,
+            quantity: new Prisma.Decimal(dto.quantity),
+            total,
+          },
+        ],
         cobroAdicionalId: charge.id,
       });
     });
@@ -683,9 +709,35 @@ export class PlatformBillingService {
   ) {
     return this.createReceipt(tx, {
       ...params,
-      quantity: new Prisma.Decimal(1),
+      items: [
+        {
+          description: params.description,
+          quantity: new Prisma.Decimal(1),
+          total: params.total,
+        },
+      ],
       pagoSuscripcionId: params.paymentId,
     });
+  }
+
+  createReceiptForCheckout(
+    tx: Tx,
+    params: {
+      requestId: string;
+      actorId: bigint;
+      empresaId: bigint;
+      type: PlataformaComprobanteTipo;
+      total: Prisma.Decimal;
+      pagoSuscripcionId?: bigint;
+      suscripcionAsistenciaId?: bigint;
+      items: Array<{
+        description: string;
+        quantity: Prisma.Decimal;
+        total: Prisma.Decimal;
+      }>;
+    },
+  ) {
+    return this.createReceipt(tx, params);
   }
 
   createReceiptForOverage(
@@ -703,7 +755,13 @@ export class PlatformBillingService {
   ) {
     return this.createReceipt(tx, {
       ...params,
-      quantity: new Prisma.Decimal(params.quantity),
+      items: [
+        {
+          description: params.description,
+          quantity: new Prisma.Decimal(params.quantity),
+          total: params.total,
+        },
+      ],
       liquidacionExcedenteId: params.liquidationId,
     });
   }
@@ -715,10 +773,14 @@ export class PlatformBillingService {
       actorId: bigint;
       empresaId: bigint;
       type: PlataformaComprobanteTipo;
-      description: string;
-      quantity: Prisma.Decimal;
       total: Prisma.Decimal;
+      items: Array<{
+        description: string;
+        quantity: Prisma.Decimal;
+        total: Prisma.Decimal;
+      }>;
       pagoSuscripcionId?: bigint;
+      suscripcionAsistenciaId?: bigint;
       liquidacionExcedenteId?: bigint;
       cobroAdicionalId?: bigint;
     },
@@ -747,6 +809,17 @@ export class PlatformBillingService {
         : await this.requireElectronicConfig(tx);
     const igvPercent = config?.igvPorcentaje ?? new Prisma.Decimal(18);
     const { base, igv } = calculateIncludedTax(params.total, igvPercent);
+    const details = params.items.map((item) => {
+      const taxes = calculateIncludedTax(item.total, igvPercent);
+      return {
+        descripcion: item.description,
+        cantidad: item.quantity,
+        precioUnitario: item.total.div(item.quantity).toDecimalPlaces(2),
+        baseImponible: taxes.base,
+        igv: taxes.igv,
+        total: item.total,
+      };
+    });
     const sequence = await this.nextNumber(tx, params.type);
     const receipt = await tx.comprobantePlataforma.create({
       data: {
@@ -758,6 +831,7 @@ export class PlatformBillingService {
         serie: sequence.serie,
         numero: sequence.numero,
         pagoSuscripcionId: params.pagoSuscripcionId,
+        suscripcionAsistenciaId: params.suscripcionAsistenciaId,
         liquidacionExcedenteId: params.liquidacionExcedenteId,
         cobroAdicionalId: params.cobroAdicionalId,
         receptorTipoDocumento: receiver.type,
@@ -772,16 +846,7 @@ export class PlatformBillingService {
             ? PlataformaComprobanteEstado.aceptado
             : PlataformaComprobanteEstado.pendiente,
         detalles: {
-          create: {
-            descripcion: params.description,
-            cantidad: params.quantity,
-            precioUnitario: params.total
-              .div(params.quantity)
-              .toDecimalPlaces(2),
-            baseImponible: base,
-            igv,
-            total: params.total,
-          },
+          create: details,
         },
         ...(params.type === PlataformaComprobanteTipo.nota_venta
           ? {}
@@ -915,6 +980,46 @@ export class PlatformBillingService {
           motivoAnulacion: reason,
         },
       });
+      await this.reverseAffiliateCommission(tx, receipt, new Date());
+    }
+    if (receipt.suscripcionAsistenciaId) {
+      const subscription = await tx.suscripcionAsistencia.findUnique({
+        where: { id: receipt.suscripcionAsistenciaId },
+      });
+      if (!subscription || subscription.estado !== 'activa')
+        throw new ConflictException('La suscripcion ya no puede revertirse');
+      const latest = await tx.suscripcionAsistencia.findFirst({
+        where: {
+          empresaId: receipt.empresaId,
+          estado: 'activa',
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      });
+      if (latest?.id !== subscription.id)
+        throw new ConflictException(
+          'Existe una operacion de Asistencias posterior',
+        );
+      await tx.empresa.update({
+        where: { id: receipt.empresaId },
+        data: {
+          asistenciasActiva: subscription.asistenciaAnteriorActiva,
+          asistenciasTrabajadoresLimite:
+            subscription.limiteAnteriorTrabajadores,
+          asistenciasPuntosQrLimite: subscription.limiteAnteriorPuntosQr,
+          asistenciasInicioAt: subscription.asistenciaAnteriorInicioAt,
+          asistenciasFinAt: subscription.asistenciaAnteriorFinAt,
+        },
+      });
+      await tx.suscripcionAsistencia.update({
+        where: { id: subscription.id },
+        data: {
+          estado: 'cancelada',
+          anuladoPorId: actorId,
+          anuladoAt: new Date(),
+          motivoAnulacion: reason,
+        },
+      });
+      await this.reverseAffiliateCommission(tx, receipt, new Date());
     } else if (receipt.liquidacionExcedenteId) {
       await tx.liquidacionExcedente.update({
         where: { id: receipt.liquidacionExcedenteId },
@@ -927,6 +1032,72 @@ export class PlatformBillingService {
           estado: CobroAdicionalEstado.anulado,
           anuladoAt: new Date(),
           motivoAnulacion: reason,
+        },
+      });
+    }
+  }
+
+  private async reverseAffiliateCommission(
+    tx: Tx,
+    receipt: Pick<
+      Receipt,
+      'pagoSuscripcionId' | 'suscripcionAsistenciaId' | 'empresaId'
+    >,
+    now: Date,
+  ) {
+    const commission = await tx.comisionAfiliado.findFirst({
+      where: {
+        tipo: ComisionAfiliadoTipo.venta,
+        OR: [
+          ...(receipt.pagoSuscripcionId
+            ? [{ pagoSuscripcionId: receipt.pagoSuscripcionId }]
+            : []),
+          ...(receipt.suscripcionAsistenciaId
+            ? [{ suscripcionAsistenciaId: receipt.suscripcionAsistenciaId }]
+            : []),
+        ],
+      },
+      include: { liquidacion: true },
+    });
+    if (!commission) return;
+
+    if (commission.estado === ComisionAfiliadoEstado.pendiente) {
+      await tx.comisionAfiliado.update({
+        where: { id: commission.id },
+        data: { estado: ComisionAfiliadoEstado.anulada },
+      });
+      return;
+    }
+
+    if (
+      commission.liquidacion?.estado === LiquidacionAfiliadoEstado.pendiente
+    ) {
+      await tx.comisionAfiliado.update({
+        where: { id: commission.id },
+        data: { estado: ComisionAfiliadoEstado.anulada },
+      });
+      await tx.liquidacionAfiliado.update({
+        where: { id: commission.liquidacion.id },
+        data: {
+          cantidad: { decrement: 1 },
+          montoTotal: { decrement: commission.monto },
+        },
+      });
+      return;
+    }
+
+    if (commission.liquidacion?.estado === LiquidacionAfiliadoEstado.pagada) {
+      await tx.comisionAfiliado.create({
+        data: {
+          afiliadoId: commission.afiliadoId,
+          empresaId: receipt.empresaId,
+          pagoSuscripcionId: commission.pagoSuscripcionId,
+          suscripcionAsistenciaId: commission.suscripcionAsistenciaId,
+          tipo: ComisionAfiliadoTipo.ajuste_anulacion,
+          periodo: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
+          baseCalculo: commission.baseCalculo,
+          porcentaje: commission.porcentaje,
+          monto: commission.monto.negated(),
         },
       });
     }
@@ -1043,11 +1214,19 @@ export class PlatformBillingService {
         : null,
       source: row.pagoSuscripcionId
         ? { type: 'subscription', id: row.pagoSuscripcionId.toString() }
-        : row.liquidacionExcedenteId
-          ? { type: 'overage', id: row.liquidacionExcedenteId.toString() }
-          : row.cobroAdicionalId
-            ? { type: 'extra', id: row.cobroAdicionalId.toString() }
-            : { type: 'credit-note', id: row.comprobanteOrigenId?.toString() },
+        : row.suscripcionAsistenciaId
+          ? {
+              type: 'attendance-subscription',
+              id: row.suscripcionAsistenciaId.toString(),
+            }
+          : row.liquidacionExcedenteId
+            ? { type: 'overage', id: row.liquidacionExcedenteId.toString() }
+            : row.cobroAdicionalId
+              ? { type: 'extra', id: row.cobroAdicionalId.toString() }
+              : {
+                  type: 'credit-note',
+                  id: row.comprobanteOrigenId?.toString(),
+                },
       details: row.detalles.map((line) => ({
         id: line.id.toString(),
         description: line.descripcion,
@@ -1127,6 +1306,7 @@ export class PlatformBillingService {
   private receiptPaymentLabel(receipt: Receipt) {
     const source =
       receipt.pagoSuscripcion ??
+      receipt.suscripcionAsistencia ??
       receipt.liquidacionExcedente ??
       receipt.cobroAdicional;
     if (!source?.metodoPago) return 'Contado';

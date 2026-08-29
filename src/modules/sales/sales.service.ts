@@ -28,6 +28,7 @@ import { parseUnitPrice } from '../../common/unit-price';
 import { PlansService } from '../plans/plans.service';
 import { StockService } from '../stock/stock.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import { ConvertSaleDto } from './dto/convert-sale.dto';
 import { DeliverSaleDto } from './dto/deliver-sale.dto';
 import {
   FindComprobantesQueryDto,
@@ -449,11 +450,7 @@ export class SalesService {
     }
 
     if (electronicSale) {
-      await this.validateSunatSalePrerequisites(
-        empresaId,
-        dto.tipoComprobante,
-        cliente,
-      );
+      await this.validateSunatSalePrerequisites(empresaId);
     }
 
     const varianteIds = dto.detalles.map((d) => BigInt(d.productoVarianteId));
@@ -549,6 +546,9 @@ export class SalesService {
     const subtotal = calculated.subtotal;
     const descuentoGlobalMonto = calculated.descuentoMonto;
     const total = calculated.total;
+
+    this.validateSaleCustomerRequirements(dto.tipoComprobante, cliente, total);
+
     const detallesData: Prisma.VentaDetalleUncheckedCreateWithoutVentaInput[] =
       calculated.lines.map((line) => ({
         productoVarianteId: line.productoVarianteId,
@@ -799,6 +799,177 @@ export class SalesService {
       });
 
     return this.toVentaResponse(venta);
+  }
+
+  async convertSaleDocument(
+    empresaId: bigint,
+    scope: CommercialScope,
+    publicId: string,
+    dto: ConvertSaleDto,
+  ) {
+    if (
+      dto.tipoComprobante !== VentaTipoComprobante.boleta &&
+      dto.tipoComprobante !== VentaTipoComprobante.factura
+    ) {
+      throw new BadRequestException(
+        'Solo se puede convertir a boleta o factura',
+      );
+    }
+
+    const venta = await this.prisma.venta.findFirst({
+      where: this.saleAccessWhere(empresaId, scope, publicId),
+      include: { detalles: { orderBy: { id: 'asc' } } },
+    });
+
+    if (!venta) {
+      throw new NotFoundException('Venta no encontrada');
+    }
+
+    if (venta.tipoComprobante !== VentaTipoComprobante.nota_venta) {
+      throw new BadRequestException(
+        'Solo se puede convertir una nota de venta',
+      );
+    }
+
+    if (venta.estado !== VentaEstado.completada) {
+      throw new BadRequestException(
+        'Solo se puede convertir una venta completada',
+      );
+    }
+
+    const clienteId = dto.clienteId ? BigInt(dto.clienteId) : venta.clienteId;
+    const cliente = clienteId
+      ? await this.prisma.cliente.findFirst({
+          where: { id: clienteId, empresaId },
+        })
+      : null;
+
+    if (clienteId && !cliente) {
+      throw new NotFoundException('Cliente no encontrado');
+    }
+
+    this.validateSaleCustomerRequirements(
+      dto.tipoComprobante,
+      cliente,
+      venta.total,
+    );
+    await this.validateSunatSalePrerequisites(empresaId);
+
+    const serie = await this.resolveSerie(
+      empresaId,
+      dto.tipoComprobante,
+      venta.sucursalId,
+    );
+    this.validateElectronicSerie(dto.tipoComprobante, serie.serie);
+
+    const sunatConfig = await this.prisma.sunatConfig.findUnique({
+      where: { empresaId },
+      select: { igvPorcentaje: true },
+    });
+    const igvPorcentaje = sunatConfig?.igvPorcentaje ?? new Prisma.Decimal(18);
+    const calculated = this.sunatTaxService.calculate({
+      tipoComprobante: dto.tipoComprobante,
+      lines: venta.detalles.map((detalle) => ({
+        productoVarianteId: detalle.productoVarianteId,
+        cantidad: detalle.cantidad,
+        precioUnitario: detalle.precioUnitario,
+        descuentoTipo: detalle.descuentoTipo,
+        descuentoValor: detalle.descuentoValor,
+        descripcion: detalle.descripcion,
+        unidadMedidaCodigo: detalle.unidadMedidaCodigo,
+        tipoAfectacionIgvCodigo: detalle.tipoAfectacionIgvCodigo,
+      })),
+      descuentoTipo: venta.descuentoTipo ?? undefined,
+      descuentoValor: venta.descuentoValor,
+      igvPorcentaje,
+    });
+
+    const converted = await this.prisma.$transaction(
+      async (tx) => {
+        const updatedSerie = await tx.serieComprobante.update({
+          where: { id: serie.id },
+          data: { numeroActual: { increment: 1 } },
+        });
+        const numero = updatedSerie.numeroActual;
+        const correlativo = `${serie.serie}-${numero.toString().padStart(6, '0')}`;
+
+        await Promise.all(
+          calculated.lines.map((line, index) =>
+            tx.ventaDetalle.update({
+              where: { id: venta.detalles[index].id },
+              data: {
+                valorUnitario: line.valorUnitario,
+                descuentoMonto: line.descuentoMonto,
+                valorVenta: line.valorVenta,
+                igvMonto: line.igvMonto,
+                subtotal: line.subtotal,
+                total: line.total,
+              },
+            }),
+          ),
+        );
+
+        const ventaData = await tx.venta.update({
+          where: { id: venta.id },
+          data: {
+            clienteId: clienteId ?? null,
+            tipoComprobante: dto.tipoComprobante,
+            serieComprobanteId: serie.id,
+            serie: serie.serie,
+            numero,
+            correlativo,
+            subtotal: calculated.subtotal,
+            descuentoMonto: calculated.descuentoMonto,
+            igvPorcentaje: calculated.igvPorcentaje,
+            opGravadas: calculated.opGravadas,
+            opExoneradas: calculated.opExoneradas,
+            opInafectas: calculated.opInafectas,
+            igvMonto: calculated.igvMonto,
+            total: calculated.total,
+            sunatEstado: SunatEstado.pendiente_envio,
+            sunatCodigo: null,
+            sunatMensaje: null,
+            sunatHash: null,
+            sunatXmlKey: null,
+            sunatCdrKey: null,
+            sunatEnviadoAt: null,
+            sunatRespondidoAt: null,
+          },
+          include: ventaInclude,
+        });
+
+        await tx.sunatJob.upsert({
+          where: {
+            tipoDocumento_documentoId: {
+              tipoDocumento: 'venta',
+              documentoId: venta.id,
+            },
+          },
+          create: {
+            empresaId,
+            tipoDocumento: 'venta',
+            documentoId: venta.id,
+            estado: 'pendiente_envio',
+            nextRetryAt: new Date(),
+          },
+          update: {
+            estado: 'pendiente_envio',
+            intentos: 0,
+            ultimoCodigo: null,
+            ultimoError: null,
+            lockedAt: null,
+            lastAttemptAt: null,
+            processedAt: null,
+            nextRetryAt: new Date(),
+          },
+        });
+
+        return ventaData;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    return this.toVentaResponse(converted);
   }
 
   async findByRequestIdResponse(empresaId: bigint, requestId?: string) {
@@ -1581,15 +1752,7 @@ export class SalesService {
     }
   }
 
-  private async validateSunatSalePrerequisites(
-    empresaId: bigint,
-    tipoComprobante: VentaTipoComprobante,
-    cliente: {
-      tipoDocumento: ClienteTipoDocumento;
-      numeroDocumento: string | null;
-      razonSocial: string | null;
-    } | null,
-  ) {
+  private async validateSunatSalePrerequisites(empresaId: bigint) {
     const config = await this.prisma.sunatConfig.findUnique({
       where: { empresaId },
       include: { empresa: { select: { planCodigo: true } } },
@@ -1629,19 +1792,41 @@ export class SalesService {
         'No hay endpoint global BILL_SERVICE activo para el ambiente SUNAT',
       );
     }
+  }
 
-    if (tipoComprobante === VentaTipoComprobante.factura) {
-      if (
-        !cliente ||
+  private validateSaleCustomerRequirements(
+    tipoComprobante: VentaTipoComprobante,
+    cliente: {
+      tipoDocumento: ClienteTipoDocumento;
+      numeroDocumento: string | null;
+      razonSocial?: string | null;
+    } | null,
+    total: Prisma.Decimal,
+  ) {
+    if (
+      tipoComprobante === VentaTipoComprobante.factura &&
+      (!cliente ||
         cliente.tipoDocumento !== ClienteTipoDocumento.ruc ||
         !cliente.numeroDocumento ||
         cliente.numeroDocumento.length !== 11 ||
-        !cliente.razonSocial?.trim()
-      ) {
-        throw new BadRequestException(
-          'Para emitir factura el cliente debe tener RUC de 11 digitos y razon social',
-        );
-      }
+        !cliente.razonSocial?.trim())
+    ) {
+      throw new BadRequestException(
+        'Para emitir factura el cliente debe tener RUC de 11 digitos y razon social',
+      );
+    }
+
+    if (
+      tipoComprobante === VentaTipoComprobante.boleta &&
+      total.gt(700) &&
+      (!cliente ||
+        cliente.tipoDocumento !== ClienteTipoDocumento.dni ||
+        !cliente.numeroDocumento ||
+        cliente.numeroDocumento.length !== 8)
+    ) {
+      throw new BadRequestException(
+        'Para emitir boleta mayor a S/700 el cliente debe tener DNI de 8 digitos',
+      );
     }
   }
 

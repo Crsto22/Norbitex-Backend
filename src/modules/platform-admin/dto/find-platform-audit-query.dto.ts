@@ -35,12 +35,15 @@ export class FindPlatformAuditQueryDto {
     'plan_changed',
     'plan_pricing_updated',
     'plan_limits_updated',
+    'plan_modules_updated',
     'platform_admin_created',
     'platform_admin_status_changed',
     'subscription_sold',
     'subscription_sale_cancelled',
     'overage_pricing_updated',
     'company_limits_updated',
+    'company_modules_updated',
+    'company_attendance_addon_updated',
     'overage_closed',
     'overage_paid',
     'company_fiscal_data_updated',
@@ -64,12 +67,15 @@ export class FindPlatformAuditQueryDto {
     | 'plan_changed'
     | 'plan_pricing_updated'
     | 'plan_limits_updated'
+    | 'plan_modules_updated'
     | 'platform_admin_created'
     | 'platform_admin_status_changed'
     | 'subscription_sold'
     | 'subscription_sale_cancelled'
     | 'overage_pricing_updated'
     | 'company_limits_updated'
+    | 'company_modules_updated'
+    | 'company_attendance_addon_updated'
     | 'overage_closed'
     | 'overage_paid'
     | 'company_fiscal_data_updated'

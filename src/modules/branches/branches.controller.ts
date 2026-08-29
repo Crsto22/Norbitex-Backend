@@ -42,6 +42,10 @@ export class BranchesController {
     'stock-movimientos',
     'stock-traspasos',
     'stock-kardex',
+    'asistencias-dashboard',
+    'asistencias-marcajes',
+    'asistencias-historial-marcaciones',
+    'asistencias-puntos-qr',
   )
   findAll(
     @CurrentUser() user: JwtPayload,

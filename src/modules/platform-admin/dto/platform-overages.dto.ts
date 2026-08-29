@@ -1,6 +1,8 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsEnum,
+  IsBoolean,
+  IsDateString,
   IsIn,
   IsInt,
   IsOptional,
@@ -35,6 +37,63 @@ export class UpdateCompanyExtraLimitsDto {
   @Min(0)
   @Max(1_000_000_000_000_000)
   storageBytes!: number;
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  attendanceEmployees!: number;
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  attendanceQrPoints!: number;
+}
+
+export class UpdateCompanyAttendanceAddonDto {
+  @IsBoolean()
+  active!: boolean;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  employeesLimit!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  qrPointsLimit!: number;
+
+  @IsOptional()
+  @IsDateString()
+  startsAt?: string;
+
+  @IsOptional()
+  @IsDateString()
+  endsAt?: string;
+}
+
+export class UpdateCompanyAttendanceCapacityDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  employeesLimit!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  qrPointsLimit!: number;
+}
+
+export class UpdateAttendancePricingDto {
+  @Matches(/^\d{1,9}(\.\d{1,2})?$/)
+  employeeUnitPrice!: string;
+
+  @Matches(/^\d{1,9}(\.\d{1,2})?$/)
+  qrPointUnitPrice!: string;
 }
 
 export class FindOveragesQueryDto {

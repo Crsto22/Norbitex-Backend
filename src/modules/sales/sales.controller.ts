@@ -26,6 +26,7 @@ import { SalesService } from './sales.service';
 import { SunatBajaService } from '../sunat-emission/sunat-baja.service';
 import { SunatEmissionService } from '../sunat-emission/sunat-emission.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import { ConvertSaleDto } from './dto/convert-sale.dto';
 import { DeliverSaleDto } from './dto/deliver-sale.dto';
 import {
   FindComprobantesQueryDto,
@@ -313,6 +314,21 @@ export class SalesController {
       this.getEmpresaId(user),
       getCommercialScope(user),
       publicId,
+    );
+  }
+
+  @Post(':publicId/convert')
+  @RequireModule('historial-ventas')
+  convert(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: ConvertSaleDto,
+  ) {
+    return this.salesService.convertSaleDocument(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+      dto,
     );
   }
 

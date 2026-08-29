@@ -19,6 +19,12 @@ export class PlansController {
   }
 
   @Public()
+  @Get('attendance-pricing')
+  getAttendancePricing() {
+    return this.plansService.getAttendancePricing();
+  }
+
+  @Public()
   @Get('affiliate-code')
   validateAffiliateCode(@Query('code') code?: string) {
     return this.platformAffiliatesService.validatePublicCode(code);

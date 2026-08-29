@@ -16,13 +16,14 @@ describe('PlatformSunatService', () => {
       estado: 'activa',
       planCodigo: PlanCodigo.empresarial,
     };
+    const findManySunatConfigs = jest.fn();
     const prisma = {
       empresa: {
         findMany: jest.fn().mockResolvedValue([company]),
         count: jest.fn().mockResolvedValue(1),
       },
       sunatEndpointConfig: {
-        findMany: jest.fn(),
+        findMany: findManySunatConfigs,
       },
     } as unknown as PrismaService;
 
@@ -48,6 +49,6 @@ describe('PlatformSunatService', () => {
       total: 1,
       totalPages: 1,
     });
-    expect(prisma.sunatEndpointConfig.findMany).not.toHaveBeenCalled();
+    expect(findManySunatConfigs).not.toHaveBeenCalled();
   });
 });

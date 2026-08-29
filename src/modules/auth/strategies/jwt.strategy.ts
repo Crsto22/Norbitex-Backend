@@ -31,6 +31,25 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<JwtPayload> {
+    if (payload.type === 'worker') {
+      const employee = await this.prisma.empleado.findFirst({
+        where: {
+          id: BigInt(payload.sub),
+          empresaId: payload.empresaId ? BigInt(payload.empresaId) : undefined,
+          estado: 'activo',
+          pinHash: { not: null },
+          empresa: { estado: EmpresaEstado.activa },
+        },
+        select: { id: true },
+      });
+
+      if (!employee) {
+        throw new UnauthorizedException('Sesion no valida');
+      }
+
+      return { ...payload, roles: [], moduleKeys: [] };
+    }
+
     if (!payload.empresaId) {
       if (payload.refreshTokenVersion === undefined) {
         if (payload.setup !== 'company') {
@@ -76,9 +95,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         usuario: { select: { refreshTokenVersion: true } },
         empresa: {
           select: {
+            id: true,
             planCodigo: true,
             planInicioAt: true,
             planFinAt: true,
+            asistenciasActiva: true,
+            asistenciasTrabajadoresLimite: true,
+            asistenciasPuntosQrLimite: true,
+            asistenciasInicioAt: true,
+            asistenciasFinAt: true,
           },
         },
         roles: { select: { rol: { select: { codigo: true } } } },
@@ -98,7 +123,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     const roles = companyUser.roles.map(({ rol }) => rol.codigo);
-    const planModuleKeys = this.plansService.getEffectiveModuleKeys(
+    const planModuleKeys = await this.plansService.getEffectiveModuleKeys(
       companyUser.empresa,
       roles,
       companyUser.modulos.map(({ moduleKey }) => moduleKey),

@@ -19,13 +19,17 @@ import { rateLimits } from '../../common/rate-limits';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { UpdatePlanPricingDto } from '../plans/dto/update-plan-pricing.dto';
 import { UpdatePlanLimitsDto } from '../plans/dto/update-plan-limits.dto';
+import { UpdatePlanModulesDto } from '../plans/dto/update-plan-modules.dto';
 import { UpdateOveragePricingDto } from '../plans/dto/update-overage-pricing.dto';
 import { PlansService } from '../plans/plans.service';
 import { FindPlatformAuditQueryDto } from './dto/find-platform-audit-query.dto';
 import { FindPlatformCompaniesQueryDto } from './dto/find-platform-companies-query.dto';
 import {
   CancelSubscriptionSaleDto,
+  CreateAttendanceSubscriptionDto,
+  CreateSubscriptionCheckoutDto,
   CreateSubscriptionSaleDto,
+  FindAttendanceSubscriptionsQueryDto,
   FindSubscriptionSalesQueryDto,
 } from './dto/platform-subscription-sales.dto';
 import {
@@ -42,8 +46,12 @@ import {
   CloseOverageDto,
   FindOveragesQueryDto,
   PayOverageDto,
+  UpdateAttendancePricingDto,
+  UpdateCompanyAttendanceCapacityDto,
+  UpdateCompanyAttendanceAddonDto,
   UpdateCompanyExtraLimitsDto,
 } from './dto/platform-overages.dto';
+import { UpdateCompanyModulesDto } from './dto/update-company-modules.dto';
 import {
   CloseAffiliateSettlementDto,
   FindAffiliateCommissionsQueryDto,
@@ -184,6 +192,64 @@ export class PlatformAdminController {
     return this.platformOveragesService.updateCompanyLimits(user, id, dto);
   }
 
+  @Get('companies/:id/attendance-addon')
+  getCompanyAttendanceAddon(@Param('id') id: string) {
+    return this.platformOveragesService.getCompanyAttendanceAddon(id);
+  }
+
+  @Patch('companies/:id/attendance-addon')
+  updateCompanyAttendanceAddon(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateCompanyAttendanceAddonDto,
+  ) {
+    return this.platformOveragesService.updateCompanyAttendanceAddon(
+      user,
+      id,
+      dto,
+    );
+  }
+
+  @Patch('companies/:id/attendance-capacity')
+  updateCompanyAttendanceCapacity(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateCompanyAttendanceCapacityDto,
+  ) {
+    return this.platformOveragesService.updateCompanyAttendanceCapacity(
+      user,
+      id,
+      dto,
+    );
+  }
+
+  @Get('attendance-pricing')
+  getAttendancePricing() {
+    return this.plansService.getAttendancePricing();
+  }
+
+  @Patch('attendance-pricing')
+  updateAttendancePricing(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateAttendancePricingDto,
+  ) {
+    return this.plansService.updateAttendancePricing(user, dto);
+  }
+
+  @Get('companies/:id/modules')
+  getCompanyModules(@Param('id') id: string) {
+    return this.platformOveragesService.getCompanyModules(id);
+  }
+
+  @Patch('companies/:id/modules')
+  updateCompanyModules(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateCompanyModulesDto,
+  ) {
+    return this.platformOveragesService.updateCompanyModules(user, id, dto);
+  }
+
   @Get('users')
   findUsers(@Query() query: FindPlatformUsersQueryDto) {
     return this.platformAdminService.findUsers(query);
@@ -227,6 +293,15 @@ export class PlatformAdminController {
     @Body() dto: UpdatePlanLimitsDto,
   ) {
     return this.plansService.updateLimits(user, code, dto);
+  }
+
+  @Patch('plans/:code/modules')
+  updatePlanModules(
+    @CurrentUser() user: JwtPayload,
+    @Param('code', new ParseEnumPipe(PlanCodigo)) code: PlanCodigo,
+    @Body() dto: UpdatePlanModulesDto,
+  ) {
+    return this.plansService.updateModules(user, code, dto);
   }
 
   @Get('plans/overage-pricing')
@@ -281,6 +356,45 @@ export class PlatformAdminController {
     @Body() dto: CancelSubscriptionSaleDto,
   ) {
     return this.platformSubscriptionsService.cancelSale(user, id, dto);
+  }
+
+  @Post('subscriptions/checkout')
+  createSubscriptionCheckout(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateSubscriptionCheckoutDto,
+  ) {
+    return this.platformSubscriptionsService.createCheckout(user, dto);
+  }
+
+  @Get('subscriptions/attendance')
+  findAttendanceSubscriptions(
+    @Query() query: FindAttendanceSubscriptionsQueryDto,
+  ) {
+    return this.platformSubscriptionsService.findAttendanceSubscriptions(query);
+  }
+
+  @Post('subscriptions/attendance')
+  createAttendanceSubscription(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateAttendanceSubscriptionDto,
+  ) {
+    return this.platformSubscriptionsService.createAttendanceSubscription(
+      user,
+      dto,
+    );
+  }
+
+  @Post('subscriptions/attendance/:id/cancel')
+  cancelAttendanceSubscription(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CancelSubscriptionSaleDto,
+  ) {
+    return this.platformSubscriptionsService.cancelAttendanceSubscription(
+      user,
+      id,
+      dto,
+    );
   }
 
   @Get('audit/plan-changes')

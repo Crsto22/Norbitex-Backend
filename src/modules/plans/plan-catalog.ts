@@ -10,6 +10,8 @@ export type PlanLimits = {
   documents: number;
   documentQueries: number;
   storageBytes: number;
+  attendanceEmployees: number;
+  attendanceQrPoints: number;
 };
 
 export type PlanDefinition = {
@@ -20,7 +22,7 @@ export type PlanDefinition = {
   highlights: readonly string[];
 };
 
-const coreModuleKeys = [
+export const coreModuleKeys = [
   'dashboard',
   'ventas-pos',
   'caja',
@@ -51,27 +53,36 @@ const coreModuleKeys = [
   'mi-cuenta',
 ] as const satisfies readonly UserModuleKey[];
 
-const attendanceModuleKeys = [
+export const attendanceModuleKeys = [
   'asistencias-dashboard',
   'asistencias-personal',
   'asistencias-marcajes',
+  'asistencias-historial-marcaciones',
   'asistencias-turnos',
   'asistencias-puntos-qr',
   'asistencias-reportes',
   'asistencias-configuracion',
 ] as const satisfies readonly UserModuleKey[];
 
-const allCoreModuleKeys = [
-  ...coreModuleKeys,
+const posBasicModuleKeys = coreModuleKeys.filter(
+  (key) => !['caja', 'usuarios', 'gre-remitente', 'conductores'].includes(key),
+) as UserModuleKey[];
+
+const attendanceBasicModuleKeys = attendanceModuleKeys;
+
+const attendanceProModuleKeys = attendanceModuleKeys;
+
+const completeStarterModuleKeys = [
+  ...posBasicModuleKeys,
   ...attendanceModuleKeys,
 ] as const satisfies readonly UserModuleKey[];
 
-const basicModuleKeys = allCoreModuleKeys.filter(
+const basicModuleKeys = coreModuleKeys.filter(
   (key) => !['caja', 'usuarios'].includes(key),
-) as Exclude<(typeof allCoreModuleKeys)[number], 'caja' | 'usuarios'>[];
+) as Exclude<(typeof coreModuleKeys)[number], 'caja' | 'usuarios'>[];
 
 const growthModuleKeys = [
-  ...allCoreModuleKeys,
+  ...coreModuleKeys,
   'reportes-clientes',
   'reportes-usuarios',
 ] as const satisfies readonly UserModuleKey[];
@@ -146,6 +157,50 @@ export const planCatalog: Record<PlanCodigo, PlanDefinition> = {
       'Almacenes ilimitados',
       '30 usuarios',
       'Todos los modulos',
+    ],
+  },
+  pos_basico: {
+    code: PlanCodigo.pos_basico,
+    name: 'POS Básico',
+    trialDays: null,
+    moduleKeys: posBasicModuleKeys,
+    highlights: [
+      'POS e inventario',
+      'Sin asistencias',
+      '1 usuario',
+      '250 comprobantes al mes',
+    ],
+  },
+  asistencias_basico: {
+    code: PlanCodigo.asistencias_basico,
+    name: 'Asistencias Básico',
+    trialDays: null,
+    moduleKeys: attendanceBasicModuleKeys,
+    highlights: ['10 trabajadores', '1 punto QR', 'Marcaciones e historial'],
+  },
+  asistencias_pro: {
+    code: PlanCodigo.asistencias_pro,
+    name: 'Asistencias Pro',
+    trialDays: null,
+    moduleKeys: attendanceProModuleKeys,
+    highlights: ['30 trabajadores', '3 puntos QR', 'Reportes de asistencias'],
+  },
+  completo_emprende: {
+    code: PlanCodigo.completo_emprende,
+    name: 'Completo Emprende',
+    trialDays: null,
+    moduleKeys: completeStarterModuleKeys,
+    highlights: ['POS + Asistencias', '15 trabajadores', '2 puntos QR'],
+  },
+  completo_empresa: {
+    code: PlanCodigo.completo_empresa,
+    name: 'Completo Empresa',
+    trialDays: null,
+    moduleKeys: enterpriseModuleKeys,
+    highlights: [
+      'POS + Asistencias completo',
+      '100 trabajadores',
+      '10 puntos QR',
     ],
   },
 };

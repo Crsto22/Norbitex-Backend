@@ -17,9 +17,16 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { UpdatePlanLimitsDto } from './dto/update-plan-limits.dto';
+import { UpdatePlanModulesDto } from './dto/update-plan-modules.dto';
 import { UpdatePlanPricingDto } from './dto/update-plan-pricing.dto';
 import { UpdateOveragePricingDto } from './dto/update-overage-pricing.dto';
-import { planCatalog, planList, type PlanLimits } from './plan-catalog';
+import {
+  attendanceModuleKeys,
+  planCatalog,
+  planList,
+  type PlanLimits,
+} from './plan-catalog';
+import { userModuleKeySet } from '../users/user-modules';
 
 export type PlanStatus = 'trial' | 'active' | 'expired';
 export type PlanResource = keyof PlanLimits;
@@ -31,9 +38,15 @@ export type DocumentAllowance = {
 };
 type PrismaClient = PrismaService | Prisma.TransactionClient;
 type CompanyPlan = {
+  id?: bigint;
   planCodigo: PlanCodigo;
   planInicioAt: Date;
   planFinAt: Date | null;
+  asistenciasActiva?: boolean;
+  asistenciasTrabajadoresLimite?: bigint;
+  asistenciasPuntosQrLimite?: bigint;
+  asistenciasInicioAt?: Date | null;
+  asistenciasFinAt?: Date | null;
 };
 type PricingClient = PrismaService | Prisma.TransactionClient;
 type PlanPricing = {
@@ -51,6 +64,8 @@ type PlanLimitRecord = {
   comprobantes: bigint;
   consultasDocumento: bigint;
   almacenamientoBytes: bigint;
+  trabajadoresAsistencia: bigint;
+  puntosQrAsistencia: bigint;
   updatedAt: Date;
 };
 type AdditionalPlanLimits = Omit<PlanLimits, 'warehouses'> & {
@@ -61,27 +76,92 @@ type AdditionalPlanLimits = Omit<PlanLimits, 'warehouses'> & {
 export class PlansService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async getAttendancePricing(tx: PricingClient = this.prisma) {
+    const pricing =
+      (await tx.tarifaAsistencia.findUnique({
+        where: { id: 1 },
+        include: {
+          actualizadoPor: {
+            select: { id: true, nombre: true, apellido: true, email: true },
+          },
+        },
+      })) ??
+      (await tx.tarifaAsistencia.create({
+        data: { id: 1, precioTrabajador: '2.00', precioPuntoQr: '10.00' },
+        include: {
+          actualizadoPor: {
+            select: { id: true, nombre: true, apellido: true, email: true },
+          },
+        },
+      }));
+
+    return this.mapAttendancePricing(pricing);
+  }
+
+  async updateAttendancePricing(
+    actor: JwtPayload,
+    dto: { employeeUnitPrice: string; qrPointUnitPrice: string },
+  ) {
+    const actorId = this.parseId(actor.sub, 'administrador');
+    const updated = await this.prisma.tarifaAsistencia.upsert({
+      where: { id: 1 },
+      create: {
+        id: 1,
+        precioTrabajador: dto.employeeUnitPrice,
+        precioPuntoQr: dto.qrPointUnitPrice,
+        actualizadoPorId: actorId,
+      },
+      update: {
+        precioTrabajador: dto.employeeUnitPrice,
+        precioPuntoQr: dto.qrPointUnitPrice,
+        actualizadoPorId: actorId,
+      },
+      include: {
+        actualizadoPor: {
+          select: { id: true, nombre: true, apellido: true, email: true },
+        },
+      },
+    });
+    await this.prisma.platformAuditLog.create({
+      data: {
+        usuarioId: actorId,
+        category: 'plan',
+        action: 'attendance_pricing_updated',
+        source: 'admin',
+        description: 'Tarifa global de asistencias actualizada',
+        metadata: this.mapAttendancePricing(updated),
+      },
+    });
+    return this.mapAttendancePricing(updated);
+  }
+
   async getCatalog() {
-    const [pricing, limits] = await Promise.all([
+    const [pricing, limits, plans, modules] = await Promise.all([
       this.prisma.tarifaPlan.findMany(),
       this.prisma.limitePlan.findMany(),
+      this.prisma.plan.findMany(),
+      this.prisma.planModulo.findMany({ where: { enabled: true } }),
     ]);
     const pricingByPlan = new Map(
       pricing.map((item) => [item.planCodigo, item]),
     );
     const limitsByPlan = new Map(limits.map((item) => [item.planCodigo, item]));
+    const planByCode = new Map(plans.map((item) => [item.planCodigo, item]));
+    const modulesByPlan = this.groupPlanModules(modules);
 
     return planList.map((plan) =>
       this.mapCommercialDefinition(
         plan.code,
         this.requirePricing(pricingByPlan.get(plan.code), plan.code),
         this.requireLimits(limitsByPlan.get(plan.code), plan.code),
+        planByCode.get(plan.code),
+        modulesByPlan.get(plan.code),
       ),
     );
   }
 
   async getAdminPricingCatalog() {
-    const [pricing, limits] = await Promise.all([
+    const [pricing, limits, plans, modules] = await Promise.all([
       this.prisma.tarifaPlan.findMany({
         include: {
           actualizadoPor: {
@@ -106,11 +186,15 @@ export class PlansService {
           },
         },
       }),
+      this.prisma.plan.findMany(),
+      this.prisma.planModulo.findMany({ where: { enabled: true } }),
     ]);
     const pricingByPlan = new Map(
       pricing.map((item) => [item.planCodigo, item]),
     );
     const limitsByPlan = new Map(limits.map((item) => [item.planCodigo, item]));
+    const planByCode = new Map(plans.map((item) => [item.planCodigo, item]));
+    const modulesByPlan = this.groupPlanModules(modules);
 
     return planList.map((plan) => {
       const item = this.requirePricing(pricingByPlan.get(plan.code), plan.code);
@@ -120,7 +204,13 @@ export class PlansService {
       );
 
       return {
-        ...this.mapCommercialDefinition(plan.code, item, limitItem),
+        ...this.mapCommercialDefinition(
+          plan.code,
+          item,
+          limitItem,
+          planByCode.get(plan.code),
+          modulesByPlan.get(plan.code),
+        ),
         updatedBy: item.actualizadoPor
           ? {
               id: item.actualizadoPor.id.toString(),
@@ -143,6 +233,9 @@ export class PlansService {
               email: limitItem.actualizadoPor.email,
             }
           : null,
+        modulesUpdatedAt:
+          planByCode.get(plan.code)?.updatedAt.toISOString() ??
+          limitItem.updatedAt.toISOString(),
       };
     });
   }
@@ -155,15 +248,19 @@ export class PlansService {
     code: PlanCodigo,
     tx: PricingClient = this.prisma,
   ) {
-    const [pricing, limits] = await Promise.all([
+    const [pricing, limits, plan, modules] = await Promise.all([
       tx.tarifaPlan.findUnique({ where: { planCodigo: code } }),
       tx.limitePlan.findUnique({ where: { planCodigo: code } }),
+      tx.plan.findUnique({ where: { planCodigo: code } }),
+      tx.planModulo.findMany({ where: { planCodigo: code, enabled: true } }),
     ]);
 
     return this.mapCommercialDefinition(
       code,
       this.requirePricing(pricing, code),
       this.requireLimits(limits, code),
+      plan,
+      modules.map((module) => module.moduleKey),
     );
   }
 
@@ -324,6 +421,8 @@ export class PlansService {
           comprobantes: BigInt(dto.documents),
           consultasDocumento: BigInt(dto.documentQueries),
           almacenamientoBytes: BigInt(dto.storageBytes),
+          trabajadoresAsistencia: BigInt(dto.attendanceEmployees),
+          puntosQrAsistencia: BigInt(dto.attendanceQrPoints),
           actualizadoPorId: actorId,
         },
         include: {
@@ -389,6 +488,67 @@ export class PlansService {
             email: updated.actualizadoPor.email,
           }
         : null,
+    };
+  }
+
+  async updateModules(
+    actor: JwtPayload,
+    code: PlanCodigo,
+    dto: UpdatePlanModulesDto,
+  ) {
+    const actorId = BigInt(actor.sub);
+    const moduleKeys = this.cleanPlanModuleKeys(dto.moduleKeys);
+    const expectedUpdatedAt = new Date(dto.expectedUpdatedAt);
+
+    const updatedAt = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "plan_codigo" FROM "plan" WHERE "plan_codigo" = CAST(${code} AS "PlanCodigo") FOR UPDATE`;
+      const current = await tx.plan.findUnique({
+        where: { planCodigo: code },
+        include: { modulos: { where: { enabled: true } } },
+      });
+      if (!current) throw new NotFoundException('Plan no encontrado');
+      if (current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+        throw new ConflictException({
+          code: 'PLAN_MODULES_CHANGED',
+          message: 'Los modulos fueron modificados por otro administrador',
+        });
+      }
+
+      await tx.planModulo.deleteMany({ where: { planCodigo: code } });
+      if (moduleKeys.length) {
+        await tx.planModulo.createMany({
+          data: moduleKeys.map((moduleKey) => ({
+            planCodigo: code,
+            moduleKey,
+            enabled: true,
+            actualizadoPorId: actorId,
+          })),
+        });
+      }
+      const plan = await tx.plan.update({
+        where: { planCodigo: code },
+        data: { actualizadoPorId: actorId },
+      });
+      await tx.platformAuditLog.create({
+        data: {
+          usuarioId: actorId,
+          category: 'plan',
+          action: 'plan_modules_updated',
+          source: 'admin',
+          description: `Modulos del plan ${current.nombre} actualizados`,
+          metadata: {
+            planCode: code,
+            previous: current.modulos.map((module) => module.moduleKey),
+            current: moduleKeys,
+          },
+        },
+      });
+      return plan.updatedAt;
+    });
+
+    return {
+      moduleKeys,
+      modulesUpdatedAt: updatedAt.toISOString(),
     };
   }
 
@@ -494,7 +654,7 @@ export class PlansService {
     return company.planCodigo === PlanCodigo.prueba ? 'trial' : 'active';
   }
 
-  getEffectiveModuleKeys(
+  async getEffectiveModuleKeys(
     company: CompanyPlan,
     roles: string[],
     assignedModuleKeys: string[],
@@ -504,8 +664,9 @@ export class PlansService {
       return [];
     }
 
-    const available = new Set<string>(
-      this.getDefinition(company.planCodigo).moduleKeys,
+    const available = await this.getCompanyAvailableModuleKeySet(
+      this.prisma,
+      company,
     );
 
     return roles.includes('OWNER')
@@ -529,6 +690,77 @@ export class PlansService {
     return Array.from(selected);
   }
 
+  private groupPlanModules(
+    modules: { planCodigo: PlanCodigo; moduleKey: string }[],
+  ) {
+    const grouped = new Map<PlanCodigo, string[]>();
+    for (const module of modules) {
+      grouped.set(module.planCodigo, [
+        ...(grouped.get(module.planCodigo) ?? []),
+        module.moduleKey,
+      ]);
+    }
+    return grouped;
+  }
+
+  private cleanPlanModuleKeys(moduleKeys: string[]) {
+    const cleaned = Array.from(
+      new Set(moduleKeys.map((moduleKey) => moduleKey.trim()).filter(Boolean)),
+    );
+    const invalid = cleaned.find(
+      (moduleKey) => !userModuleKeySet.has(moduleKey),
+    );
+    if (invalid) {
+      throw new BadRequestException(`El modulo ${invalid} no existe`);
+    }
+    return cleaned;
+  }
+
+  private async getCompanyAvailableModuleKeySet(
+    tx: PrismaClient,
+    company: CompanyPlan,
+  ) {
+    const attendanceKeys = new Set<string>(attendanceModuleKeys);
+    const planModules = await tx.planModulo.findMany({
+      where: { planCodigo: company.planCodigo, enabled: true },
+      select: { moduleKey: true },
+    });
+    const available = new Set(
+      planModules.length
+        ? planModules.map((module) => module.moduleKey)
+        : this.getDefinition(company.planCodigo).moduleKeys,
+    );
+    for (const moduleKey of attendanceKeys) available.delete(moduleKey);
+
+    if (this.isAttendanceEffective(company)) {
+      for (const moduleKey of attendanceModuleKeys) available.add(moduleKey);
+    }
+
+    if (!company.id) return available;
+
+    const overrides = await tx.empresaModuloPlan.findMany({
+      where: { empresaId: company.id },
+      select: { moduleKey: true, enabled: true },
+    });
+    for (const override of overrides) {
+      if (!userModuleKeySet.has(override.moduleKey)) continue;
+      if (
+        attendanceKeys.has(override.moduleKey) &&
+        !this.isAttendanceEffective(company)
+      ) {
+        available.delete(override.moduleKey);
+        continue;
+      }
+      if (override.enabled) {
+        available.add(override.moduleKey);
+      } else {
+        available.delete(override.moduleKey);
+      }
+    }
+
+    return available;
+  }
+
   async getCurrent(
     empresaId: bigint,
     effectiveModuleKeys: string[] = [],
@@ -546,6 +778,8 @@ export class PlansService {
       documents,
       documentQueries,
       storage,
+      attendanceEmployees,
+      attendanceQrPoints,
       extras,
       overage,
       paidSubscriptions,
@@ -595,6 +829,12 @@ export class PlansService {
         where: { empresaId },
         _sum: { sizeBytes: true },
       }),
+      this.prisma.empleado.count({
+        where: { empresaId, estado: 'activo' },
+      }),
+      this.prisma.puntoQrAsistencia.count({
+        where: { empresaId, estado: 'activo' },
+      }),
       this.prisma.empresaLimiteAdicional.findUnique({
         where: { empresaId },
       }),
@@ -623,13 +863,17 @@ export class PlansService {
       documents,
       documentQueries,
       storageBytes: storage._sum.sizeBytes ?? 0,
+      attendanceEmployees,
+      attendanceQrPoints,
     };
 
     const additionalLimits = this.mapAdditionalLimits(extras);
-    const effectiveLimits = this.buildEffectiveLimits(
+    const effectiveLimits = this.withAttendanceLimits(
       definition.limits,
       additionalLimits,
+      company,
     );
+    const attendancePricing = await this.getAttendancePricing();
 
     return {
       plan: definition,
@@ -659,6 +903,8 @@ export class PlansService {
       },
       monthlyDiscountEligible: paidSubscriptions === 0,
       effectiveModuleKeys,
+      attendancePricing,
+      attendance: this.mapAttendanceAddon(company, attendancePricing),
     };
   }
 
@@ -669,14 +915,17 @@ export class PlansService {
       return [];
     }
 
-    return [...this.getDefinition(company.planCodigo).moduleKeys];
+    return Array.from(
+      await this.getCompanyAvailableModuleKeySet(this.prisma, company),
+    );
   }
 
   async assertModulesIncluded(empresaId: bigint, moduleKeys: string[]) {
     const company = await this.findCompany(this.prisma, empresaId);
     this.assertPlanActive(company);
-    const available = new Set<string>(
-      this.getDefinition(company.planCodigo).moduleKeys,
+    const available = await this.getCompanyAvailableModuleKeySet(
+      this.prisma,
+      company,
     );
     const unavailable = moduleKeys.find(
       (moduleKey) => !available.has(moduleKey),
@@ -801,9 +1050,10 @@ export class PlansService {
       this.getBaseLimits(tx, currentCompany.planCodigo),
       tx.empresaLimiteAdicional.findUnique({ where: { empresaId } }),
     ]);
-    return this.buildEffectiveLimits(
+    return this.withAttendanceLimits(
       baseLimits,
       this.mapAdditionalLimits(extras),
+      currentCompany,
     );
   }
 
@@ -866,6 +1116,8 @@ export class PlansService {
           comprobantes: bigint;
           consultasDocumento: bigint;
           almacenamientoBytes: bigint;
+          trabajadoresAsistencia: bigint;
+          puntosQrAsistencia: bigint;
         }
       | null
       | undefined,
@@ -879,6 +1131,8 @@ export class PlansService {
       documents: Number(extras?.comprobantes ?? 0),
       documentQueries: Number(extras?.consultasDocumento ?? 0),
       storageBytes: Number(extras?.almacenamientoBytes ?? 0),
+      attendanceEmployees: Number(extras?.trabajadoresAsistencia ?? 0),
+      attendanceQrPoints: Number(extras?.puntosQrAsistencia ?? 0),
     };
   }
 
@@ -898,6 +1152,114 @@ export class PlansService {
       documents: base.documents + extras.documents,
       documentQueries: base.documentQueries + extras.documentQueries,
       storageBytes: base.storageBytes + extras.storageBytes,
+      attendanceEmployees:
+        base.attendanceEmployees + extras.attendanceEmployees,
+      attendanceQrPoints: base.attendanceQrPoints + extras.attendanceQrPoints,
+    };
+  }
+
+  withAttendanceLimits(
+    base: PlanLimits,
+    extras: AdditionalPlanLimits,
+    company: CompanyPlan,
+  ): PlanLimits {
+    const limits = this.buildEffectiveLimits(base, extras);
+    const attendance = this.getEffectiveAttendance(company);
+    return {
+      ...limits,
+      attendanceEmployees: attendance.employeesLimit,
+      attendanceQrPoints: attendance.qrPointsLimit,
+    };
+  }
+
+  mapAttendanceAddon(
+    company: CompanyPlan,
+    pricing?: { employeeUnitPrice: string; qrPointUnitPrice: string },
+  ) {
+    const effective = this.getEffectiveAttendance(company);
+    const employeePrice = new Prisma.Decimal(pricing?.employeeUnitPrice ?? 0);
+    const qrPrice = new Prisma.Decimal(pricing?.qrPointUnitPrice ?? 0);
+    const monthlyPrice =
+      effective.trial || !effective.active
+        ? new Prisma.Decimal(0)
+        : employeePrice
+            .mul(effective.employeesLimit)
+            .plus(qrPrice.mul(effective.qrPointsLimit))
+            .toDecimalPlaces(2);
+    return {
+      active: Boolean(company.asistenciasActiva),
+      effectiveActive: effective.active,
+      trial: effective.trial,
+      employeesLimit: Number(company.asistenciasTrabajadoresLimite ?? 0),
+      qrPointsLimit: Number(company.asistenciasPuntosQrLimite ?? 0),
+      effectiveEmployeesLimit: effective.employeesLimit,
+      effectiveQrPointsLimit: effective.qrPointsLimit,
+      startsAt: company.asistenciasInicioAt?.toISOString() ?? null,
+      endsAt: company.asistenciasFinAt?.toISOString() ?? null,
+      monthlyPrice: monthlyPrice.toFixed(2),
+      currency: 'PEN' as const,
+      includesIgv: true as const,
+    };
+  }
+
+  private getEffectiveAttendance(company: CompanyPlan, now = new Date()) {
+    if (this.getStatus(company, now) === 'trial') {
+      return {
+        active: true,
+        trial: true,
+        employeesLimit: 3,
+        qrPointsLimit: 1,
+      };
+    }
+    const active =
+      Boolean(company.asistenciasActiva) &&
+      Boolean(company.asistenciasFinAt) &&
+      company.asistenciasFinAt! >= now;
+    return {
+      active,
+      trial: false,
+      employeesLimit: active
+        ? Number(company.asistenciasTrabajadoresLimite ?? 0)
+        : 0,
+      qrPointsLimit: active
+        ? Number(company.asistenciasPuntosQrLimite ?? 0)
+        : 0,
+    };
+  }
+
+  private isAttendanceEffective(company: CompanyPlan, now = new Date()) {
+    return this.getEffectiveAttendance(company, now).active;
+  }
+
+  private mapAttendancePricing(pricing: {
+    precioTrabajador: Prisma.Decimal;
+    precioPuntoQr: Prisma.Decimal;
+    updatedAt: Date;
+    actualizadoPor?: {
+      id: bigint;
+      nombre: string;
+      apellido: string | null;
+      email: string;
+    } | null;
+  }) {
+    return {
+      employeeUnitPrice: pricing.precioTrabajador.toFixed(2),
+      qrPointUnitPrice: pricing.precioPuntoQr.toFixed(2),
+      currency: 'PEN' as const,
+      includesIgv: true as const,
+      updatedAt: pricing.updatedAt.toISOString(),
+      updatedBy: pricing.actualizadoPor
+        ? {
+            id: pricing.actualizadoPor.id.toString(),
+            name: [
+              pricing.actualizadoPor.nombre,
+              pricing.actualizadoPor.apellido,
+            ]
+              .filter(Boolean)
+              .join(' '),
+            email: pricing.actualizadoPor.email,
+          }
+        : null,
     };
   }
 
@@ -966,6 +1328,14 @@ export class PlansService {
         });
         return storage._sum.sizeBytes ?? 0;
       }
+      case 'attendanceEmployees':
+        return tx.empleado.count({
+          where: { empresaId, estado: 'activo' },
+        });
+      case 'attendanceQrPoints':
+        return tx.puntoQrAsistencia.count({
+          where: { empresaId, estado: 'activo' },
+        });
     }
   }
 
@@ -992,9 +1362,15 @@ export class PlansService {
     const company = await tx.empresa.findUnique({
       where: { id: empresaId },
       select: {
+        id: true,
         planCodigo: true,
         planInicioAt: true,
         planFinAt: true,
+        asistenciasActiva: true,
+        asistenciasTrabajadoresLimite: true,
+        asistenciasPuntosQrLimite: true,
+        asistenciasInicioAt: true,
+        asistenciasFinAt: true,
       },
     });
 
@@ -1025,6 +1401,18 @@ export class PlansService {
     ) as PlanLimits;
   }
 
+  private parseId(value: string, label: string) {
+    try {
+      const id = BigInt(value);
+      if (id <= 0n) throw new Error();
+      return id;
+    } catch {
+      throw new BadRequestException(
+        `El identificador de ${label} no es valido`,
+      );
+    }
+  }
+
   private getResourceLabel(resource: PlanResource) {
     return {
       users: 'usuarios',
@@ -1035,6 +1423,8 @@ export class PlansService {
       documents: 'comprobantes',
       documentQueries: 'consultas DNI/RUC',
       storageBytes: 'almacenamiento de imagenes',
+      attendanceEmployees: 'trabajadores activos',
+      attendanceQrPoints: 'puntos QR activos',
     }[resource];
   }
 
@@ -1042,6 +1432,14 @@ export class PlansService {
     code: PlanCodigo,
     pricing: PlanPricing,
     limits: PlanLimitRecord,
+    planRecord?: {
+      nombre: string;
+      descripcion: string | null;
+      estado: 'activo' | 'inactivo';
+      trialDays: number | null;
+      updatedAt: Date;
+    } | null,
+    moduleKeys?: string[],
   ) {
     const annual = calculatePlanSalePricing(
       pricing.precioMensual,
@@ -1058,13 +1456,22 @@ export class PlansService {
 
     const definition = this.getDefinition(code);
     const mappedLimits = this.mapPlanLimits(limits);
+    const effectiveModuleKeys = moduleKeys?.length
+      ? moduleKeys
+      : [...definition.moduleKeys];
     return {
       ...definition,
+      name: planRecord?.nombre ?? definition.name,
+      description: planRecord?.descripcion ?? null,
+      status: planRecord?.estado ?? 'activo',
+      trialDays: planRecord?.trialDays ?? definition.trialDays,
+      moduleKeys: effectiveModuleKeys,
       limits: mappedLimits,
       highlights: this.buildHighlights(
         code,
-        definition.trialDays,
+        planRecord?.trialDays ?? definition.trialDays,
         mappedLimits,
+        effectiveModuleKeys,
       ),
       priceMonthly: pricing.precioMensual.toFixed(2),
       monthlyDiscountPercent: pricing.descuentoMensualPorcentaje.toFixed(2),
@@ -1087,6 +1494,8 @@ export class PlansService {
       documents: Number(limits.comprobantes),
       documentQueries: Number(limits.consultasDocumento),
       storageBytes: Number(limits.almacenamientoBytes),
+      attendanceEmployees: Number(limits.trabajadoresAsistencia),
+      attendanceQrPoints: Number(limits.puntosQrAsistencia),
     };
   }
 
@@ -1094,6 +1503,7 @@ export class PlansService {
     code: PlanCodigo,
     trialDays: number | null,
     limits: PlanLimits,
+    moduleKeys: string[] = [],
   ) {
     if (code === PlanCodigo.prueba) {
       return [
@@ -1117,6 +1527,34 @@ export class PlansService {
         `${limits.products.toLocaleString('es-PE')} productos`,
         `${limits.documents.toLocaleString('es-PE')} comprobantes al mes`,
         'Reportes de ventas y productos',
+      ];
+    }
+    if (code === PlanCodigo.pos_basico) {
+      return [
+        `${limits.users.toLocaleString('es-PE')} usuario`,
+        `${limits.products.toLocaleString('es-PE')} productos`,
+        `${limits.documents.toLocaleString('es-PE')} comprobantes al mes`,
+        'Sin asistencias',
+      ];
+    }
+    if (
+      code === PlanCodigo.asistencias_basico ||
+      code === PlanCodigo.asistencias_pro
+    ) {
+      return [
+        `${limits.attendanceEmployees.toLocaleString('es-PE')} trabajadores`,
+        `${limits.attendanceQrPoints.toLocaleString('es-PE')} puntos QR`,
+        `${moduleKeys.length.toLocaleString('es-PE')} modulos incluidos`,
+      ];
+    }
+    if (
+      code === PlanCodigo.completo_emprende ||
+      code === PlanCodigo.completo_empresa
+    ) {
+      return [
+        'POS + Asistencias',
+        `${limits.attendanceEmployees.toLocaleString('es-PE')} trabajadores`,
+        `${limits.attendanceQrPoints.toLocaleString('es-PE')} puntos QR`,
       ];
     }
     if (code === PlanCodigo.crecimiento) {

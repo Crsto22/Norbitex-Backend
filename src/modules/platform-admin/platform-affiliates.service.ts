@@ -216,7 +216,7 @@ export class PlatformAffiliatesService {
     const companyId = this.parseId(query.companyId, 'empresa');
     const company = await this.prisma.empresa.findUnique({
       where: { id: companyId },
-      select: { id: true, planFinAt: true },
+      select: { id: true, planFinAt: true, asistenciasFinAt: true },
     });
     if (!company) throw new NotFoundException('Empresa no encontrada');
     const context = await this.resolveSaleContext(
@@ -282,13 +282,17 @@ export class PlatformAffiliatesService {
 
   async resolveSaleContext(
     tx: Prisma.TransactionClient | PrismaService,
-    company: { id: bigint; planFinAt: Date | null },
+    company: {
+      id: bigint;
+      planFinAt: Date | null;
+      asistenciasFinAt?: Date | null;
+    },
     requestedCode: string | undefined,
     now: Date,
     persistInterruption = true,
     actorId?: bigint,
   ): Promise<AffiliateSaleContext | null> {
-    const [affiliation, paidSales] = await Promise.all([
+    const [affiliation, paidSales, paidAttendance] = await Promise.all([
       tx.empresaAfiliacion.findUnique({
         where: { empresaId: company.id },
         include: { afiliado: true },
@@ -296,10 +300,20 @@ export class PlatformAffiliatesService {
       tx.pagoSuscripcion.count({
         where: { empresaId: company.id, estado: 'pagado' },
       }),
+      tx.suscripcionAsistencia.count({
+        where: { empresaId: company.id, estado: 'activa' },
+      }),
     ]);
 
     if (affiliation?.estado === EmpresaAfiliacionEstado.activa) {
-      if (company.planFinAt && company.planFinAt.getTime() <= now.getTime()) {
+      const planExpired = Boolean(
+        company.planFinAt && company.planFinAt.getTime() <= now.getTime(),
+      );
+      const hasActiveAttendance = Boolean(
+        company.asistenciasFinAt &&
+        company.asistenciasFinAt.getTime() > now.getTime(),
+      );
+      if (planExpired && !hasActiveAttendance) {
         if (persistInterruption) {
           await tx.empresaAfiliacion.update({
             where: { empresaId: company.id },
@@ -351,7 +365,7 @@ export class PlatformAffiliatesService {
     }
 
     if (
-      paidSales > 0 ||
+      paidSales + paidAttendance > 0 ||
       affiliation?.estado === EmpresaAfiliacionEstado.interrumpida
     ) {
       if (requestedCode) {
@@ -390,7 +404,8 @@ export class PlatformAffiliatesService {
     tx: Prisma.TransactionClient,
     params: {
       companyId: bigint;
-      paymentId: bigint;
+      paymentId?: bigint;
+      attendanceSubscriptionId?: bigint;
       context: AffiliateSaleContext;
       base: Prisma.Decimal;
       commission: Prisma.Decimal;
@@ -426,7 +441,9 @@ export class PlatformAffiliatesService {
           description: `Empresa afiliada con el codigo ${params.context.code}`,
           metadata: {
             affiliateId: params.context.id.toString(),
-            paymentId: params.paymentId.toString(),
+            paymentId: params.paymentId?.toString() ?? null,
+            attendanceSubscriptionId:
+              params.attendanceSubscriptionId?.toString() ?? null,
             code: params.context.code,
           },
         },
@@ -437,6 +454,7 @@ export class PlatformAffiliatesService {
         afiliadoId: params.context.id,
         empresaId: params.companyId,
         pagoSuscripcionId: params.paymentId,
+        suscripcionAsistenciaId: params.attendanceSubscriptionId,
         periodo: getLimaPeriod(params.now),
         baseCalculo: params.base,
         porcentaje: params.context.commissionPercent,
@@ -517,6 +535,60 @@ export class PlatformAffiliatesService {
           },
         });
       }
+    }
+  }
+
+  async cancelAttendanceCommission(
+    tx: Prisma.TransactionClient,
+    attendanceSubscriptionId: bigint,
+    companyId: bigint,
+    now: Date,
+  ) {
+    const commission = await tx.comisionAfiliado.findUnique({
+      where: {
+        suscripcionAsistenciaId_tipo: {
+          suscripcionAsistenciaId: attendanceSubscriptionId,
+          tipo: ComisionAfiliadoTipo.venta,
+        },
+      },
+      include: { liquidacion: true },
+    });
+    if (!commission) return;
+
+    if (commission.estado === ComisionAfiliadoEstado.pendiente) {
+      await tx.comisionAfiliado.update({
+        where: { id: commission.id },
+        data: { estado: ComisionAfiliadoEstado.anulada },
+      });
+    } else if (
+      commission.liquidacion?.estado === LiquidacionAfiliadoEstado.pendiente
+    ) {
+      await tx.comisionAfiliado.update({
+        where: { id: commission.id },
+        data: { estado: ComisionAfiliadoEstado.anulada },
+      });
+      await tx.liquidacionAfiliado.update({
+        where: { id: commission.liquidacion.id },
+        data: {
+          cantidad: { decrement: 1 },
+          montoTotal: { decrement: commission.monto },
+        },
+      });
+    } else if (
+      commission.liquidacion?.estado === LiquidacionAfiliadoEstado.pagada
+    ) {
+      await tx.comisionAfiliado.create({
+        data: {
+          afiliadoId: commission.afiliadoId,
+          empresaId: companyId,
+          suscripcionAsistenciaId: attendanceSubscriptionId,
+          tipo: ComisionAfiliadoTipo.ajuste_anulacion,
+          periodo: getLimaPeriod(now),
+          baseCalculo: commission.baseCalculo,
+          porcentaje: commission.porcentaje,
+          monto: commission.monto.negated(),
+        },
+      });
     }
   }
 
@@ -861,6 +933,14 @@ export class PlatformAffiliatesService {
                 createdAt: true,
               },
             },
+            suscripcionAsistencia: {
+              select: {
+                periodo: true,
+                vigenciaInicioAt: true,
+                vigenciaFinAt: true,
+                createdAt: true,
+              },
+            },
           },
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         },
@@ -990,10 +1070,15 @@ export class PlatformAffiliatesService {
           item.empresa.razonSocial || item.empresa.nombreComercial;
         const document =
           item.empresa.ruc || item.empresa.dni || 'Sin documento';
-        const date = item.pagoSuscripcion.createdAt.toLocaleDateString(
+        const sourceDate = (item.pagoSuscripcion ?? item.suscripcionAsistencia)
+          ?.createdAt;
+        const date = (sourceDate ?? item.createdAt).toLocaleDateString(
           'es-PE',
           { timeZone: 'America/Lima' },
         );
+        const sourceLabel = item.pagoSuscripcion
+          ? `${item.pagoSuscripcion.planCodigo} (${item.pagoSuscripcion.meses} mes${item.pagoSuscripcion.meses === 1 ? '' : 'es'})`
+          : `Asistencias (${item.suscripcionAsistencia?.periodo ?? 'mensual'})`;
         doc
           .fillColor('#111827')
           .font(fonts.bold)
@@ -1014,12 +1099,7 @@ export class PlatformAffiliatesService {
           .fillColor('#111827')
           .font(fonts.regular)
           .fontSize(8)
-          .text(
-            `${item.pagoSuscripcion.planCodigo} (${item.pagoSuscripcion.meses} mes${item.pagoSuscripcion.meses === 1 ? '' : 'es'})`,
-            left + 190,
-            y + 13,
-            { width: 75 },
-          );
+          .text(sourceLabel, left + 190, y + 13, { width: 75 });
         doc.text(money(item.baseCalculo), left + 270, y + 13, {
           width: 75,
           align: 'right',

@@ -444,7 +444,7 @@ export class AuthService {
     return this.buildAuthSession(
       result,
       ['OWNER'],
-      this.getSessionModuleKeys(result, ['OWNER'], []),
+      await this.getSessionModuleKeys(result, ['OWNER'], []),
       result.refreshTokenVersion,
     );
   }
@@ -556,7 +556,7 @@ export class AuthService {
         visibilidadOperaciones: empresaUsuario.visibilidadOperaciones,
       },
       empresaUsuario.roles.map(({ rol }) => rol.codigo),
-      this.getSessionModuleKeys(
+      await this.getSessionModuleKeys(
         empresaUsuario.empresa,
         empresaUsuario.roles.map(({ rol }) => rol.codigo),
         empresaUsuario.modulos,
@@ -592,7 +592,7 @@ export class AuthService {
       email: current.usuario.email,
       telefono: current.usuario.telefono,
       roles,
-      moduleKeys: this.plansService.getEffectiveModuleKeys(
+      moduleKeys: await this.plansService.getEffectiveModuleKeys(
         current.empresa,
         roles,
         user.moduleKeys ?? current.modulos.map((module) => module.moduleKey),
@@ -641,7 +641,7 @@ export class AuthService {
     });
 
     return companyUser
-      ? this.buildAuthSessionFromCompanyUser(companyUser, updatedUser)
+      ? await this.buildAuthSessionFromCompanyUser(companyUser, updatedUser)
       : this.buildPlatformAdminSession(
           updatedUser,
           updatedUser.refreshTokenVersion,
@@ -681,7 +681,7 @@ export class AuthService {
     });
 
     return companyUser
-      ? this.buildAuthSessionFromCompanyUser(companyUser, updatedUser)
+      ? await this.buildAuthSessionFromCompanyUser(companyUser, updatedUser)
       : this.buildPlatformAdminSession(
           updatedUser,
           updatedUser.refreshTokenVersion,
@@ -865,7 +865,7 @@ export class AuthService {
         visibilidadOperaciones: empresaUsuario.visibilidadOperaciones,
       },
       empresaUsuario.roles.map(({ rol }) => rol.codigo),
-      this.getSessionModuleKeys(
+      await this.getSessionModuleKeys(
         empresaUsuario.empresa,
         empresaUsuario.roles.map(({ rol }) => rol.codigo),
         empresaUsuario.modulos,
@@ -1111,7 +1111,7 @@ export class AuthService {
     };
   }
 
-  private getSessionModuleKeys(
+  private async getSessionModuleKeys(
     company: {
       planCodigo: PlanCodigo;
       planInicioAt: Date;
@@ -1171,7 +1171,7 @@ export class AuthService {
     return current;
   }
 
-  private buildAuthSessionFromCompanyUser(
+  private async buildAuthSessionFromCompanyUser(
     companyUser: Awaited<ReturnType<AuthService['findActiveCompanyUser']>>,
     usuario: {
       id: bigint;
@@ -1202,7 +1202,7 @@ export class AuthService {
         visibilidadOperaciones: companyUser.visibilidadOperaciones,
       },
       roles,
-      this.getSessionModuleKeys(
+      await this.getSessionModuleKeys(
         companyUser.empresa,
         roles,
         companyUser.modulos,

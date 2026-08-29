@@ -10,13 +10,18 @@ import {
   PagoSuscripcionMetodo,
   Prisma,
   PlataformaComprobanteTipo,
+  SuscripcionAsistenciaEstado,
+  SuscripcionAsistenciaPeriodo,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { calculatePlanSalePricing, PlansService } from '../plans/plans.service';
 import {
   CancelSubscriptionSaleDto,
+  CreateAttendanceSubscriptionDto,
+  CreateSubscriptionCheckoutDto,
   CreateSubscriptionSaleDto,
+  FindAttendanceSubscriptionsQueryDto,
   FindSubscriptionSalesQueryDto,
 } from './dto/platform-subscription-sales.dto';
 import { PlatformBillingService } from '../platform-billing/platform-billing.service';
@@ -58,6 +63,43 @@ const saleInclude = {
 
 type SubscriptionSale = Prisma.PagoSuscripcionGetPayload<{
   include: typeof saleInclude;
+}>;
+
+const attendanceSubscriptionInclude = {
+  empresa: {
+    select: {
+      id: true,
+      nombreComercial: true,
+      ruc: true,
+      dni: true,
+      _count: {
+        select: {
+          empleados: { where: { estado: 'activo' } },
+          puntosQrAsistencia: { where: { estado: 'activo' } },
+        },
+      },
+    },
+  },
+  registradoPor: {
+    select: {
+      id: true,
+      nombre: true,
+      apellido: true,
+      email: true,
+    },
+  },
+  anuladoPor: {
+    select: {
+      id: true,
+      nombre: true,
+      apellido: true,
+      email: true,
+    },
+  },
+} satisfies Prisma.SuscripcionAsistenciaInclude;
+
+type AttendanceSubscription = Prisma.SuscripcionAsistenciaGetPayload<{
+  include: typeof attendanceSubscriptionInclude;
 }>;
 
 @Injectable()
@@ -152,6 +194,7 @@ export class PlatformSubscriptionsService {
             planCodigo: true,
             planInicioAt: true,
             planFinAt: true,
+            asistenciasFinAt: true,
           },
         });
 
@@ -340,6 +383,749 @@ export class PlatformSubscriptionsService {
     }
   }
 
+  async createCheckout(
+    actor: JwtPayload,
+    dto: CreateSubscriptionCheckoutDto,
+    now = new Date(),
+  ) {
+    if (!dto.pos && !dto.attendance) {
+      throw new BadRequestException('Selecciona POS, Asistencias o ambos');
+    }
+    const actorId = this.parseId(actor.sub, 'administrador');
+    const empresaId = this.parseId(dto.empresaId, 'empresa');
+
+    try {
+      const result = await this.runSerializable(async (tx) => {
+        const [duplicateSale, duplicateAttendance] = await Promise.all([
+          tx.pagoSuscripcion.findUnique({
+            where: { requestId: dto.requestId },
+            include: saleInclude,
+          }),
+          tx.suscripcionAsistencia.findUnique({
+            where: { requestId: dto.requestId },
+            include: attendanceSubscriptionInclude,
+          }),
+        ]);
+        if (duplicateSale || duplicateAttendance) {
+          return {
+            sale: duplicateSale,
+            attendance: duplicateAttendance,
+            receipt: null,
+            idempotent: true,
+          };
+        }
+
+        await tx.$queryRaw`SELECT "id" FROM "empresa" WHERE "id" = ${empresaId} FOR UPDATE`;
+        const company = await tx.empresa.findUnique({
+          where: { id: empresaId },
+          select: {
+            id: true,
+            nombreComercial: true,
+            estado: true,
+            planCodigo: true,
+            planInicioAt: true,
+            planFinAt: true,
+            asistenciasActiva: true,
+            asistenciasTrabajadoresLimite: true,
+            asistenciasPuntosQrLimite: true,
+            asistenciasInicioAt: true,
+            asistenciasFinAt: true,
+          },
+        });
+        if (!company) throw new NotFoundException('Empresa no encontrada');
+        if (company.estado !== EmpresaEstado.activa) {
+          throw new ConflictException({
+            code: 'COMPANY_NOT_ACTIVE',
+            message:
+              'La empresa debe estar activa para venderle una suscripcion',
+          });
+        }
+
+        let sale: SubscriptionSale | null = null;
+        let attendance: AttendanceSubscription | null = null;
+        const items: Array<{
+          description: string;
+          quantity: Prisma.Decimal;
+          total: Prisma.Decimal;
+        }> = [];
+        const posItems: typeof items = [];
+        const attendanceItems: typeof items = [];
+        let total = new Prisma.Decimal(0);
+        const affiliate = await this.affiliatesService.resolveSaleContext(
+          tx,
+          company,
+          dto.affiliateCode ?? dto.pos?.affiliateCode,
+          now,
+          true,
+          actorId,
+        );
+        const affiliateDiscountPercent =
+          affiliate?.discountPercent ?? new Prisma.Decimal(0);
+        const commissionPercent =
+          affiliate?.commissionPercent ?? new Prisma.Decimal(0);
+
+        if (dto.pos) {
+          await tx.$queryRaw`SELECT "plan_codigo" FROM "tarifa_plan" WHERE "plan_codigo" = CAST(${dto.pos.planCode} AS "PlanCodigo") FOR UPDATE`;
+          const definition = await this.plansService.getCommercialDefinition(
+            dto.pos.planCode,
+            tx,
+          );
+          if (definition.pricingUpdatedAt !== dto.pos.pricingUpdatedAt) {
+            throw new ConflictException({
+              code: 'PLAN_PRICING_CHANGED',
+              message:
+                'La tarifa del plan cambio. Revisa el importe nuevamente',
+            });
+          }
+          const price = new Prisma.Decimal(definition.priceMonthly);
+          const paidSubscriptions = await tx.pagoSuscripcion.count({
+            where: {
+              empresaId: company.id,
+              estado: PagoSuscripcionEstado.pagado,
+            },
+          });
+          const amounts = calculatePlanSalePricing(
+            price,
+            paidSubscriptions === 0
+              ? new Prisma.Decimal(definition.monthlyDiscountPercent)
+              : new Prisma.Decimal(0),
+            new Prisma.Decimal(definition.annualDiscountPercent),
+            dto.pos.months,
+          );
+          const extendsCurrentPlan =
+            company.planCodigo === dto.pos.planCode &&
+            Boolean(company.planFinAt && company.planFinAt > now);
+          const coverageStartsAt = extendsCurrentPlan
+            ? company.planFinAt!
+            : now;
+          const resultingStartsAt = extendsCurrentPlan
+            ? company.planInicioAt
+            : now;
+          const resultingEndsAt = addCalendarMonthsClamped(
+            coverageStartsAt,
+            dto.pos.months,
+          );
+
+          await tx.empresa.update({
+            where: { id: company.id },
+            data: {
+              planCodigo: dto.pos.planCode,
+              planInicioAt: resultingStartsAt,
+              planFinAt: resultingEndsAt,
+            },
+          });
+          sale = await tx.pagoSuscripcion.create({
+            data: {
+              requestId: dto.requestId,
+              empresaId: company.id,
+              registradoPorId: actorId,
+              planCodigo: dto.pos.planCode,
+              meses: dto.pos.months,
+              precioMensual: price,
+              montoLista: amounts.listAmount,
+              descuentoPorcentaje: amounts.discountPercent,
+              montoDescuento: amounts.discountAmount,
+              afiliadoId: affiliate?.id,
+              afiliadoCodigo: affiliate?.code,
+              descuentoAfiliadoPorcentaje: affiliateDiscountPercent,
+              montoDescuentoAfiliado: 0,
+              baseComisionAfiliado: 0,
+              comisionAfiliadoPorcentaje: commissionPercent,
+              montoComisionAfiliado: 0,
+              montoTotal: amounts.total,
+              metodoPago: dto.paymentMethod,
+              metodoPagoOtro:
+                dto.paymentMethod === PagoSuscripcionMetodo.otro
+                  ? dto.paymentMethodOther
+                  : null,
+              planAnteriorCodigo: company.planCodigo,
+              planAnteriorInicioAt: company.planInicioAt,
+              planAnteriorFinAt: company.planFinAt,
+              vigenciaInicioAt: coverageStartsAt,
+              vigenciaFinAt: resultingEndsAt,
+              planResultanteInicioAt: resultingStartsAt,
+              planResultanteFinAt: resultingEndsAt,
+            },
+            include: saleInclude,
+          });
+          const item = {
+            description: `Plan POS ${definition.name} por ${dto.pos.months} mes(es)`,
+            quantity: new Prisma.Decimal(1),
+            total: amounts.total,
+          };
+          items.push(item);
+          posItems.push(item);
+          total = total.plus(amounts.total);
+        }
+
+        if (dto.attendance) {
+          const [pricing, activeEmployees, activeQrPoints] = await Promise.all([
+            tx.tarifaAsistencia.findUnique({ where: { id: 1 } }),
+            tx.empleado.count({ where: { empresaId, estado: 'activo' } }),
+            tx.puntoQrAsistencia.count({
+              where: { empresaId, estado: 'activo' },
+            }),
+          ]);
+          if (!pricing) {
+            throw new NotFoundException('Tarifa de Asistencias no configurada');
+          }
+          this.assertAttendanceCapacity(
+            activeEmployees,
+            activeQrPoints,
+            dto.attendance.employeesLimit,
+            dto.attendance.qrPointsLimit,
+          );
+          const coverageStartsAt = dto.attendance.startsAt
+            ? new Date(dto.attendance.startsAt)
+            : now;
+          const months =
+            dto.attendance.months ??
+            (dto.attendance.period === SuscripcionAsistenciaPeriodo.anual
+              ? 12
+              : 1);
+          const period =
+            months === 12
+              ? SuscripcionAsistenciaPeriodo.anual
+              : SuscripcionAsistenciaPeriodo.mensual;
+          const coverageEndsAt = addCalendarMonthsClamped(
+            coverageStartsAt,
+            months,
+          );
+          const employeesTotal = pricing.precioTrabajador
+            .mul(dto.attendance.employeesLimit)
+            .mul(months)
+            .toDecimalPlaces(2);
+          const qrTotal = pricing.precioPuntoQr
+            .mul(dto.attendance.qrPointsLimit)
+            .mul(months)
+            .toDecimalPlaces(2);
+          const monthlyAmount = pricing.precioTrabajador
+            .mul(dto.attendance.employeesLimit)
+            .plus(pricing.precioPuntoQr.mul(dto.attendance.qrPointsLimit))
+            .toDecimalPlaces(2);
+          const totalAmount = employeesTotal.plus(qrTotal).toDecimalPlaces(2);
+
+          await tx.empresa.update({
+            where: { id: empresaId },
+            data: {
+              asistenciasActiva: true,
+              asistenciasTrabajadoresLimite: BigInt(
+                dto.attendance.employeesLimit,
+              ),
+              asistenciasPuntosQrLimite: BigInt(dto.attendance.qrPointsLimit),
+              asistenciasInicioAt: coverageStartsAt,
+              asistenciasFinAt: coverageEndsAt,
+            },
+          });
+          attendance = await tx.suscripcionAsistencia.create({
+            data: {
+              requestId: dto.requestId,
+              empresaId,
+              registradoPorId: actorId,
+              trabajadoresLimite: BigInt(dto.attendance.employeesLimit),
+              puntosQrLimite: BigInt(dto.attendance.qrPointsLimit),
+              precioTrabajadorSnapshot: pricing.precioTrabajador,
+              precioPuntoQrSnapshot: pricing.precioPuntoQr,
+              periodo: period,
+              montoMensual: monthlyAmount,
+              montoTotal: totalAmount,
+              afiliadoId: affiliate?.id,
+              afiliadoCodigo: affiliate?.code,
+              descuentoAfiliadoPorcentaje: affiliateDiscountPercent,
+              montoDescuentoAfiliado: 0,
+              baseComisionAfiliado: 0,
+              comisionAfiliadoPorcentaje: commissionPercent,
+              montoComisionAfiliado: 0,
+              metodoPago: dto.paymentMethod,
+              metodoPagoOtro:
+                dto.paymentMethod === PagoSuscripcionMetodo.otro
+                  ? dto.paymentMethodOther
+                  : null,
+              vigenciaInicioAt: coverageStartsAt,
+              vigenciaFinAt: coverageEndsAt,
+              limiteAnteriorTrabajadores: company.asistenciasTrabajadoresLimite,
+              limiteAnteriorPuntosQr: company.asistenciasPuntosQrLimite,
+              asistenciaAnteriorActiva: company.asistenciasActiva,
+              asistenciaAnteriorInicioAt: company.asistenciasInicioAt,
+              asistenciaAnteriorFinAt: company.asistenciasFinAt,
+            },
+            include: attendanceSubscriptionInclude,
+          });
+          const employeeItem = {
+            description: `Asistencias - ${dto.attendance.employeesLimit} trabajador(es)`,
+            quantity: new Prisma.Decimal(dto.attendance.employeesLimit),
+            total: employeesTotal,
+          };
+          const qrItem = {
+            description: `Asistencias - ${dto.attendance.qrPointsLimit} punto(s) QR`,
+            quantity: new Prisma.Decimal(dto.attendance.qrPointsLimit),
+            total: qrTotal,
+          };
+          items.push(employeeItem, qrItem);
+          attendanceItems.push(employeeItem, qrItem);
+          total = total.plus(totalAmount);
+        }
+
+        const affiliateAmounts = calculateAffiliatePricing(
+          total,
+          affiliateDiscountPercent,
+          commissionPercent,
+        );
+        const posBase = sumItems(posItems);
+        const attendanceBase = sumItems(attendanceItems);
+        const posDiscount =
+          sale && attendance
+            ? proportionalAmount(
+                affiliateAmounts.discountAmount,
+                posBase,
+                total,
+              )
+            : sale
+              ? affiliateAmounts.discountAmount
+              : new Prisma.Decimal(0);
+        const attendanceDiscount = affiliateAmounts.discountAmount
+          .minus(posDiscount)
+          .toDecimalPlaces(2);
+        const posTotal = posBase.minus(posDiscount).toDecimalPlaces(2);
+        const attendanceTotal = attendanceBase
+          .minus(attendanceDiscount)
+          .toDecimalPlaces(2);
+        applyDiscount(posItems, posDiscount);
+        applyDiscount(attendanceItems, attendanceDiscount);
+
+        const posCommission =
+          sale && attendance
+            ? proportionalAmount(
+                affiliateAmounts.commissionAmount,
+                posTotal,
+                affiliateAmounts.total,
+              )
+            : sale
+              ? affiliateAmounts.commissionAmount
+              : new Prisma.Decimal(0);
+        const attendanceCommission = affiliateAmounts.commissionAmount
+          .minus(posCommission)
+          .toDecimalPlaces(2);
+
+        if (sale) {
+          sale = await tx.pagoSuscripcion.update({
+            where: { id: sale.id },
+            data: {
+              montoDescuentoAfiliado: posDiscount,
+              baseComisionAfiliado: affiliate ? posTotal : 0,
+              montoComisionAfiliado: posCommission,
+              montoTotal: posTotal,
+            },
+            include: saleInclude,
+          });
+        }
+        if (attendance) {
+          attendance = await tx.suscripcionAsistencia.update({
+            where: { id: attendance.id },
+            data: {
+              montoDescuentoAfiliado: attendanceDiscount,
+              baseComisionAfiliado: affiliate ? attendanceTotal : 0,
+              montoComisionAfiliado: attendanceCommission,
+              montoTotal: attendanceTotal,
+            },
+            include: attendanceSubscriptionInclude,
+          });
+        }
+        if (affiliate) {
+          await this.affiliatesService.recordSale(tx, {
+            companyId: company.id,
+            paymentId: sale?.id,
+            attendanceSubscriptionId: attendance?.id,
+            context: affiliate,
+            base: affiliateAmounts.total,
+            commission: affiliateAmounts.commissionAmount,
+            now,
+            actorId,
+          });
+        }
+
+        const receipt = await this.billingService.createReceiptForCheckout(tx, {
+          requestId: dto.requestId,
+          actorId,
+          empresaId,
+          type: dto.receiptType,
+          total: affiliateAmounts.total,
+          pagoSuscripcionId: sale?.id,
+          suscripcionAsistenciaId: attendance?.id,
+          items,
+        });
+
+        await tx.platformAuditLog.create({
+          data: {
+            empresaId,
+            usuarioId: actorId,
+            category: 'subscription',
+            action: 'subscription_checkout_sold',
+            source: 'admin',
+            description: `Suscripcion registrada para ${company.nombreComercial}`,
+            metadata: {
+              posPaymentId: sale?.id.toString() ?? null,
+              attendanceSubscriptionId: attendance?.id.toString() ?? null,
+              affiliateDiscountAmount:
+                affiliateAmounts.discountAmount.toFixed(2),
+              affiliateCommissionAmount:
+                affiliateAmounts.commissionAmount.toFixed(2),
+              total: affiliateAmounts.total.toFixed(2),
+              receiptId: receipt.id.toString(),
+            },
+          },
+        });
+
+        return { sale, attendance, receipt, idempotent: false };
+      });
+
+      return {
+        sale: result.sale ? this.mapSale(result.sale) : null,
+        attendance: result.attendance
+          ? this.mapAttendanceSubscription(result.attendance, now)
+          : null,
+        receipt: result.receipt
+          ? {
+              id: result.receipt.id.toString(),
+              type: result.receipt.tipo,
+              correlativo: `${result.receipt.serie}-${String(result.receipt.numero).padStart(8, '0')}`,
+              status: result.receipt.estado,
+            }
+          : null,
+        idempotent: result.idempotent,
+      };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const [existingSale, existingAttendance] = await Promise.all([
+          this.prisma.pagoSuscripcion.findUnique({
+            where: { requestId: dto.requestId },
+            include: saleInclude,
+          }),
+          this.prisma.suscripcionAsistencia.findUnique({
+            where: { requestId: dto.requestId },
+            include: attendanceSubscriptionInclude,
+          }),
+        ]);
+        if (existingSale || existingAttendance) {
+          return {
+            sale: existingSale ? this.mapSale(existingSale) : null,
+            attendance: existingAttendance
+              ? this.mapAttendanceSubscription(existingAttendance, now)
+              : null,
+            receipt: null,
+            idempotent: true,
+          };
+        }
+      }
+      throw error;
+    }
+  }
+
+  async findAttendanceSubscriptions(
+    query: FindAttendanceSubscriptionsQueryDto,
+    now = new Date(),
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 12;
+    const where = this.buildAttendanceWhere(query);
+    const monthStart = getLimaMonthStart(now);
+    const [subscriptions, total, active, cancelledThisMonth, collected] =
+      await Promise.all([
+        this.prisma.suscripcionAsistencia.findMany({
+          where,
+          include: attendanceSubscriptionInclude,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.prisma.suscripcionAsistencia.count({ where }),
+        this.prisma.suscripcionAsistencia.count({
+          where: {
+            estado: SuscripcionAsistenciaEstado.activa,
+            vigenciaFinAt: { gte: now },
+          },
+        }),
+        this.prisma.suscripcionAsistencia.count({
+          where: {
+            estado: SuscripcionAsistenciaEstado.cancelada,
+            anuladoAt: { gte: monthStart },
+          },
+        }),
+        this.prisma.suscripcionAsistencia.aggregate({
+          where: {
+            estado: SuscripcionAsistenciaEstado.activa,
+            createdAt: { gte: monthStart },
+          },
+          _sum: { montoTotal: true },
+        }),
+      ]);
+
+    return {
+      data: subscriptions.map((subscription) =>
+        this.mapAttendanceSubscription(subscription, now),
+      ),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      summary: {
+        active,
+        cancelledThisMonth,
+        collectedThisMonth: (
+          collected._sum.montoTotal ?? new Prisma.Decimal(0)
+        ).toFixed(2),
+      },
+    };
+  }
+
+  async createAttendanceSubscription(
+    actor: JwtPayload,
+    dto: CreateAttendanceSubscriptionDto,
+    now = new Date(),
+  ) {
+    const actorId = this.parseId(actor.sub, 'administrador');
+    const empresaId = this.parseId(dto.empresaId, 'empresa');
+
+    try {
+      const result = await this.runSerializable(async (tx) => {
+        const duplicate = await tx.suscripcionAsistencia.findUnique({
+          where: { requestId: dto.requestId },
+          include: attendanceSubscriptionInclude,
+        });
+        if (duplicate) return { subscription: duplicate, idempotent: true };
+
+        await tx.$queryRaw`SELECT "id" FROM "empresa" WHERE "id" = ${empresaId} FOR UPDATE`;
+        const company = await tx.empresa.findUnique({
+          where: { id: empresaId },
+          select: {
+            id: true,
+            nombreComercial: true,
+            estado: true,
+            asistenciasActiva: true,
+            asistenciasTrabajadoresLimite: true,
+            asistenciasPuntosQrLimite: true,
+            asistenciasInicioAt: true,
+            asistenciasFinAt: true,
+          },
+        });
+        if (!company) throw new NotFoundException('Empresa no encontrada');
+        if (company.estado !== EmpresaEstado.activa) {
+          throw new ConflictException({
+            code: 'COMPANY_NOT_ACTIVE',
+            message: 'La empresa debe estar activa para venderle Asistencias',
+          });
+        }
+
+        const [pricing, activeEmployees, activeQrPoints] = await Promise.all([
+          tx.tarifaAsistencia.findUnique({ where: { id: 1 } }),
+          tx.empleado.count({ where: { empresaId, estado: 'activo' } }),
+          tx.puntoQrAsistencia.count({
+            where: { empresaId, estado: 'activo' },
+          }),
+        ]);
+        if (!pricing) {
+          throw new NotFoundException('Tarifa de Asistencias no configurada');
+        }
+        this.assertAttendanceCapacity(
+          activeEmployees,
+          activeQrPoints,
+          dto.employeesLimit,
+          dto.qrPointsLimit,
+        );
+
+        const coverageStartsAt = dto.startsAt ? new Date(dto.startsAt) : now;
+        const months =
+          dto.period === SuscripcionAsistenciaPeriodo.anual ? 12 : 1;
+        const coverageEndsAt = addCalendarMonthsClamped(
+          coverageStartsAt,
+          months,
+        );
+        const monthlyAmount = pricing.precioTrabajador
+          .mul(dto.employeesLimit)
+          .plus(pricing.precioPuntoQr.mul(dto.qrPointsLimit))
+          .toDecimalPlaces(2);
+        const totalAmount = monthlyAmount.mul(months).toDecimalPlaces(2);
+
+        await tx.empresa.update({
+          where: { id: empresaId },
+          data: {
+            asistenciasActiva: true,
+            asistenciasTrabajadoresLimite: BigInt(dto.employeesLimit),
+            asistenciasPuntosQrLimite: BigInt(dto.qrPointsLimit),
+            asistenciasInicioAt: coverageStartsAt,
+            asistenciasFinAt: coverageEndsAt,
+          },
+        });
+
+        const subscription = await tx.suscripcionAsistencia.create({
+          data: {
+            requestId: dto.requestId,
+            empresaId,
+            registradoPorId: actorId,
+            trabajadoresLimite: BigInt(dto.employeesLimit),
+            puntosQrLimite: BigInt(dto.qrPointsLimit),
+            precioTrabajadorSnapshot: pricing.precioTrabajador,
+            precioPuntoQrSnapshot: pricing.precioPuntoQr,
+            periodo: dto.period,
+            montoMensual: monthlyAmount,
+            montoTotal: totalAmount,
+            metodoPago: dto.paymentMethod,
+            metodoPagoOtro:
+              dto.paymentMethod === PagoSuscripcionMetodo.otro
+                ? dto.paymentMethodOther
+                : null,
+            vigenciaInicioAt: coverageStartsAt,
+            vigenciaFinAt: coverageEndsAt,
+            limiteAnteriorTrabajadores: company.asistenciasTrabajadoresLimite,
+            limiteAnteriorPuntosQr: company.asistenciasPuntosQrLimite,
+            asistenciaAnteriorActiva: company.asistenciasActiva,
+            asistenciaAnteriorInicioAt: company.asistenciasInicioAt,
+            asistenciaAnteriorFinAt: company.asistenciasFinAt,
+          },
+          include: attendanceSubscriptionInclude,
+        });
+
+        await tx.platformAuditLog.create({
+          data: {
+            empresaId,
+            usuarioId: actorId,
+            category: 'subscription',
+            action: 'attendance_subscription_sold',
+            source: 'admin',
+            description: `Suscripcion de Asistencias vendida a ${company.nombreComercial}`,
+            metadata: {
+              subscriptionId: subscription.id.toString(),
+              period: dto.period,
+              employeesLimit: dto.employeesLimit,
+              qrPointsLimit: dto.qrPointsLimit,
+              monthlyAmount: monthlyAmount.toFixed(2),
+              totalAmount: totalAmount.toFixed(2),
+              startsAt: coverageStartsAt.toISOString(),
+              endsAt: coverageEndsAt.toISOString(),
+            },
+          },
+        });
+
+        return { subscription, idempotent: false };
+      });
+
+      return {
+        subscription: this.mapAttendanceSubscription(result.subscription, now),
+        idempotent: result.idempotent,
+      };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const existing = await this.prisma.suscripcionAsistencia.findUnique({
+          where: { requestId: dto.requestId },
+          include: attendanceSubscriptionInclude,
+        });
+        if (existing) {
+          return {
+            subscription: this.mapAttendanceSubscription(existing, now),
+            idempotent: true,
+          };
+        }
+      }
+      throw error;
+    }
+  }
+
+  async cancelAttendanceSubscription(
+    actor: JwtPayload,
+    id: string,
+    dto: CancelSubscriptionSaleDto,
+    now = new Date(),
+  ) {
+    const actorId = this.parseId(actor.sub, 'administrador');
+    const subscriptionId = this.parseId(id, 'suscripcion');
+
+    const subscription = await this.runSerializable(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "suscripcion_asistencia" WHERE "id" = ${subscriptionId} FOR UPDATE`;
+      const current = await tx.suscripcionAsistencia.findUnique({
+        where: { id: subscriptionId },
+        include: attendanceSubscriptionInclude,
+      });
+      if (!current) {
+        throw new NotFoundException('Suscripcion de Asistencias no encontrada');
+      }
+      if (current.estado === SuscripcionAsistenciaEstado.cancelada) {
+        throw new ConflictException({
+          code: 'ATTENDANCE_SUBSCRIPTION_ALREADY_CANCELLED',
+          message: 'La suscripcion ya fue anulada',
+        });
+      }
+
+      await tx.$queryRaw`SELECT "id" FROM "empresa" WHERE "id" = ${current.empresaId} FOR UPDATE`;
+      const latest = await tx.suscripcionAsistencia.findFirst({
+        where: {
+          empresaId: current.empresaId,
+          estado: SuscripcionAsistenciaEstado.activa,
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { id: true },
+      });
+      if (latest?.id !== current.id) {
+        throw new ConflictException({
+          code: 'ATTENDANCE_SUBSCRIPTION_NOT_CURRENT',
+          message:
+            'La suscripcion no puede revertirse porque existe un cambio posterior',
+        });
+      }
+
+      await tx.empresa.update({
+        where: { id: current.empresaId },
+        data: {
+          asistenciasActiva: current.asistenciaAnteriorActiva,
+          asistenciasTrabajadoresLimite: current.limiteAnteriorTrabajadores,
+          asistenciasPuntosQrLimite: current.limiteAnteriorPuntosQr,
+          asistenciasInicioAt: current.asistenciaAnteriorInicioAt,
+          asistenciasFinAt: current.asistenciaAnteriorFinAt,
+        },
+      });
+      const updated = await tx.suscripcionAsistencia.update({
+        where: { id: current.id },
+        data: {
+          estado: SuscripcionAsistenciaEstado.cancelada,
+          motivoAnulacion: dto.reason,
+          anuladoAt: now,
+          anuladoPorId: actorId,
+        },
+        include: attendanceSubscriptionInclude,
+      });
+      await this.affiliatesService.cancelAttendanceCommission(
+        tx,
+        current.id,
+        current.empresaId,
+        now,
+      );
+      await tx.platformAuditLog.create({
+        data: {
+          empresaId: current.empresaId,
+          usuarioId: actorId,
+          category: 'subscription',
+          action: 'attendance_subscription_cancelled',
+          source: 'admin',
+          description: `Suscripcion de Asistencias anulada para ${current.empresa.nombreComercial}`,
+          metadata: {
+            subscriptionId: current.id.toString(),
+            reason: dto.reason,
+          },
+        },
+      });
+      return updated;
+    });
+
+    return this.mapAttendanceSubscription(subscription, now);
+  }
+
   async cancelSale(
     actor: JwtPayload,
     id: string,
@@ -520,6 +1306,142 @@ export class PlatformSubscriptionsService {
     };
   }
 
+  private buildAttendanceWhere(
+    query: FindAttendanceSubscriptionsQueryDto,
+  ): Prisma.SuscripcionAsistenciaWhereInput {
+    const search = query.search?.trim();
+    const from = query.dateFrom
+      ? new Date(`${query.dateFrom}T00:00:00-05:00`)
+      : undefined;
+    const to = query.dateTo
+      ? new Date(`${query.dateTo}T00:00:00-05:00`)
+      : undefined;
+
+    if (from && to && from > to) {
+      throw new BadRequestException(
+        'La fecha inicial no puede ser posterior a la fecha final',
+      );
+    }
+    if (to) to.setUTCDate(to.getUTCDate() + 1);
+
+    return {
+      ...(query.method ? { metodoPago: query.method } : {}),
+      ...(query.status ? { estado: query.status } : {}),
+      ...(from || to
+        ? {
+            createdAt: {
+              ...(from ? { gte: from } : {}),
+              ...(to ? { lt: to } : {}),
+            },
+          }
+        : {}),
+      ...(search
+        ? {
+            OR: [
+              {
+                empresa: {
+                  nombreComercial: {
+                    contains: search,
+                    mode: 'insensitive',
+                  },
+                },
+              },
+              { empresa: { ruc: { contains: search } } },
+              { empresa: { dni: { contains: search } } },
+              {
+                registradoPor: {
+                  email: { contains: search, mode: 'insensitive' },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+  }
+
+  private mapAttendanceSubscription(
+    subscription: AttendanceSubscription,
+    now = new Date(),
+  ) {
+    const mapUser = (user: AttendanceSubscription['registradoPor'] | null) =>
+      user
+        ? {
+            id: user.id.toString(),
+            name: [user.nombre, user.apellido].filter(Boolean).join(' '),
+            email: user.email,
+          }
+        : null;
+    const expired =
+      subscription.estado === SuscripcionAsistenciaEstado.activa &&
+      subscription.vigenciaFinAt < now;
+
+    return {
+      id: subscription.id.toString(),
+      requestId: subscription.requestId,
+      company: {
+        id: subscription.empresa.id.toString(),
+        name: subscription.empresa.nombreComercial,
+        document: subscription.empresa.ruc ?? subscription.empresa.dni,
+      },
+      employeesLimit: Number(subscription.trabajadoresLimite),
+      qrPointsLimit: Number(subscription.puntosQrLimite),
+      employeeUnitPrice: subscription.precioTrabajadorSnapshot.toFixed(2),
+      qrPointUnitPrice: subscription.precioPuntoQrSnapshot.toFixed(2),
+      period: subscription.periodo,
+      monthlyAmount: subscription.montoMensual.toFixed(2),
+      totalAmount: subscription.montoTotal.toFixed(2),
+      affiliateCode: subscription.afiliadoCodigo,
+      affiliateDiscountPercent:
+        subscription.descuentoAfiliadoPorcentaje.toFixed(2),
+      affiliateDiscountAmount: subscription.montoDescuentoAfiliado.toFixed(2),
+      affiliateCommissionBase: subscription.baseComisionAfiliado.toFixed(2),
+      affiliateCommissionPercent:
+        subscription.comisionAfiliadoPorcentaje.toFixed(2),
+      affiliateCommissionAmount: subscription.montoComisionAfiliado.toFixed(2),
+      currency: subscription.moneda,
+      includesIgv: subscription.incluyeIgv,
+      paymentMethod: subscription.metodoPago,
+      paymentMethodOther: subscription.metodoPagoOtro,
+      status: expired ? 'vencida' : subscription.estado,
+      coverageStartsAt: subscription.vigenciaInicioAt.toISOString(),
+      coverageEndsAt: subscription.vigenciaFinAt.toISOString(),
+      usage: {
+        employees: subscription.empresa._count.empleados,
+        qrPoints: subscription.empresa._count.puntosQrAsistencia,
+      },
+      registeredBy: mapUser(subscription.registradoPor),
+      cancelledBy: mapUser(subscription.anuladoPor),
+      cancellationReason: subscription.motivoAnulacion,
+      cancelledAt: subscription.anuladoAt?.toISOString() ?? null,
+      createdAt: subscription.createdAt.toISOString(),
+    };
+  }
+
+  private assertAttendanceCapacity(
+    activeEmployees: number,
+    activeQrPoints: number,
+    employeesLimit: number,
+    qrPointsLimit: number,
+  ) {
+    if (activeEmployees > employeesLimit) {
+      throw new ConflictException({
+        code: 'ATTENDANCE_EMPLOYEE_LIMIT_BELOW_USAGE',
+        message:
+          'El limite de trabajadores no puede ser menor al consumo actual',
+        used: activeEmployees,
+        limit: employeesLimit,
+      });
+    }
+    if (activeQrPoints > qrPointsLimit) {
+      throw new ConflictException({
+        code: 'ATTENDANCE_QR_LIMIT_BELOW_USAGE',
+        message: 'El limite de puntos QR no puede ser menor al consumo actual',
+        used: activeQrPoints,
+        limit: qrPointsLimit,
+      });
+    }
+  }
+
   private mapSale(sale: SubscriptionSale) {
     const mapUser = (user: SubscriptionSale['registradoPor'] | null) =>
       user
@@ -630,6 +1552,41 @@ function getLimaMonthStart(value: Date) {
 
 function sameDate(left: Date | null, right: Date | null) {
   return left?.getTime() === right?.getTime();
+}
+
+function sumItems(items: Array<{ total: Prisma.Decimal }>) {
+  return items.reduce(
+    (sum, item) => sum.plus(item.total),
+    new Prisma.Decimal(0),
+  );
+}
+
+function proportionalAmount(
+  amount: Prisma.Decimal,
+  part: Prisma.Decimal,
+  total: Prisma.Decimal,
+) {
+  if (amount.lte(0) || part.lte(0) || total.lte(0)) {
+    return new Prisma.Decimal(0);
+  }
+  return amount.mul(part).div(total).toDecimalPlaces(2);
+}
+
+function applyDiscount(
+  items: Array<{ total: Prisma.Decimal }>,
+  discount: Prisma.Decimal,
+) {
+  if (!items.length || discount.lte(0)) return;
+  const base = sumItems(items);
+  let assigned = new Prisma.Decimal(0);
+  items.forEach((item, index) => {
+    const share =
+      index === items.length - 1
+        ? discount.minus(assigned).toDecimalPlaces(2)
+        : proportionalAmount(discount, item.total, base);
+    assigned = assigned.plus(share);
+    item.total = item.total.minus(share).toDecimalPlaces(2);
+  });
 }
 
 export function isSerializationConflict(error: unknown) {

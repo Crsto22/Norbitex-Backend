@@ -10,6 +10,9 @@ import { AppService } from './app.service';
 import { ResponseCacheModule } from './common/cache/response-cache.module';
 import { RequestMetricsModule } from './common/metrics/request-metrics.module';
 import { PdfConcurrencyModule } from './common/pdf/pdf-concurrency.module';
+import { AttendanceDashboardModule } from './modules/attendance-dashboard/attendance-dashboard.module';
+import { AttendanceQrPointsModule } from './modules/attendance-qr-points/attendance-qr-points.module';
+import { AttendanceTimeEntriesModule } from './modules/attendance-time-entries/attendance-time-entries.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BrandsModule } from './modules/brands/brands.module';
 import { BranchesModule } from './modules/branches/branches.module';
@@ -19,6 +22,7 @@ import { ClientsModule } from './modules/clients/clients.module';
 import { CreditNotesModule } from './modules/credit-notes/credit-notes.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { DocumentoConsultaModule } from './modules/documento-consulta/documento-consulta.module';
+import { EmployeesModule } from './modules/employees/employees.module';
 import { GuiaRemisionModule } from './modules/guia-remision/guia-remision.module';
 import { ColorsModule } from './modules/colors/colors.module';
 import { PaymentMethodsModule } from './modules/payment-methods/payment-methods.module';
@@ -30,11 +34,14 @@ import { PurchasesModule } from './modules/purchases/purchases.module';
 import { QuotationsModule } from './modules/quotations/quotations.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SalesModule } from './modules/sales/sales.module';
+import { ShiftsModule } from './modules/shifts/shifts.module';
 import { SizesModule } from './modules/sizes/sizes.module';
 import { SunatConfigModule } from './modules/sunat-config/sunat-config.module';
 import { SunatEmissionModule } from './modules/sunat-emission/sunat-emission.module';
 import { CompanyModule } from './modules/company/company.module';
 import { UsersModule } from './modules/users/users.module';
+import { WorkerAuthModule } from './modules/worker-auth/worker-auth.module';
+import { WorkerModule } from './modules/worker/worker.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { StockModule } from './modules/stock/stock.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -64,6 +71,9 @@ import { validateEnvironment } from './config/environment';
     ResponseCacheModule,
     RequestMetricsModule,
     PdfConcurrencyModule,
+    AttendanceDashboardModule,
+    AttendanceQrPointsModule,
+    AttendanceTimeEntriesModule,
     PrismaModule,
     PlansModule,
     AuthModule,
@@ -77,10 +87,12 @@ import { validateEnvironment } from './config/environment';
     CreditNotesModule,
     DashboardModule,
     DocumentoConsultaModule,
+    EmployeesModule,
     GuiaRemisionModule,
     ProductsModule,
     PurchasesModule,
     SalesModule,
+    ShiftsModule,
     QuotationsModule,
     ReportsModule,
     PlatformAdminModule,
@@ -90,6 +102,8 @@ import { validateEnvironment } from './config/environment';
     SunatConfigModule,
     SunatEmissionModule,
     UsersModule,
+    WorkerAuthModule,
+    WorkerModule,
     NotificationsModule,
     StockModule,
   ],

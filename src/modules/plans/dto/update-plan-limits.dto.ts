@@ -23,6 +23,16 @@ export class UpdatePlanLimitsDto {
   @Min(0)
   @Max(1_000_000_000_000_000)
   storageBytes!: number;
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  attendanceEmployees!: number;
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  attendanceQrPoints!: number;
 
   @IsDateString()
   expectedUpdatedAt!: string;
