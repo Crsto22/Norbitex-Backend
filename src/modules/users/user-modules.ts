@@ -124,6 +124,11 @@ export const userModules = [
     route: '/asistencias/reportes',
   },
   {
+    key: 'asistencias-plan',
+    label: 'Plan y facturacion de asistencias',
+    route: '/asistencias/plan',
+  },
+  {
     key: 'asistencias-configuracion',
     label: 'Configuracion de asistencias',
     route: '/asistencias/configuracion',
