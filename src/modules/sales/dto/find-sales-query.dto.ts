@@ -4,6 +4,30 @@ import { IsInt, Max, Min } from 'class-validator';
 import { SunatEstado, VentaEstado, VentaTipoComprobante } from '@prisma/client';
 import { HistoryDateQueryDto } from '../../../common/dto/history-date-query.dto';
 
+export class FindDeliveriesQueryDto {
+  @IsOptional()
+  @Type(() => String)
+  @IsIn(['pendiente', 'entregada'])
+  estado?: 'pendiente' | 'entregada';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+}
+
 export class FindSalesQueryDto extends HistoryDateQueryDto {
   @IsOptional()
   @Type(() => Number)

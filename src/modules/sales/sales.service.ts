@@ -31,6 +31,7 @@ import { CreateSaleDto } from './dto/create-sale.dto';
 import { ConvertSaleDto } from './dto/convert-sale.dto';
 import { DeliverSaleDto } from './dto/deliver-sale.dto';
 import {
+  FindDeliveriesQueryDto,
   FindComprobantesQueryDto,
   FindSalesQueryDto,
 } from './dto/find-sales-query.dto';
@@ -1172,8 +1173,13 @@ export class SalesService {
   async findDeliveries(
     empresaId: bigint,
     scope: CommercialScope,
-    estado: 'pendiente' | 'entregada' = 'pendiente',
+    query: FindDeliveriesQueryDto,
   ) {
+    const estado = query.estado === 'entregada' ? 'entregada' : 'pendiente';
+    const page = query.page ?? 1;
+    const limit = query.limit ?? this.getDefaultPaginationLimit();
+    const search = query.search?.trim();
+
     const where: Prisma.VentaWhereInput = {
       empresaId,
       recojoPosterior: true,
@@ -1186,16 +1192,43 @@ export class SalesService {
       ...(scopedCreatorId(scope)
         ? { creadoPorId: scopedCreatorId(scope)! }
         : {}),
+      ...(search
+        ? {
+            OR: [
+              { codigoInterno: { contains: search, mode: 'insensitive' } },
+              { correlativo: { contains: search, mode: 'insensitive' } },
+              {
+                cliente: {
+                  nombre: { contains: search, mode: 'insensitive' },
+                },
+              },
+              {
+                cliente: {
+                  razonSocial: { contains: search, mode: 'insensitive' },
+                },
+              },
+              { cliente: { numeroDocumento: { contains: search } } },
+            ],
+          }
+        : {}),
     };
 
-    const ventas = await this.prisma.venta.findMany({
-      where,
-      include: ventaInclude,
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
+    const [ventas, total] = await this.prisma.$transaction([
+      this.prisma.venta.findMany({
+        where,
+        include: ventaInclude,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.venta.count({ where }),
+    ]);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
 
-    return { data: ventas.map((v) => this.toVentaResponse(v)) };
+    return {
+      data: ventas.map((v) => this.toVentaResponse(v)),
+      meta: { page, limit, total, totalPages },
+    };
   }
 
   async deliverSale(

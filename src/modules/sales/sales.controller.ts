@@ -29,6 +29,7 @@ import { CreateSaleDto } from './dto/create-sale.dto';
 import { ConvertSaleDto } from './dto/convert-sale.dto';
 import { DeliverSaleDto } from './dto/deliver-sale.dto';
 import {
+  FindDeliveriesQueryDto,
   FindComprobantesQueryDto,
   FindSalesQueryDto,
 } from './dto/find-sales-query.dto';
@@ -149,12 +150,12 @@ export class SalesController {
   @RequireModule('entregas-pendientes')
   findDeliveries(
     @CurrentUser() user: JwtPayload,
-    @Query('estado') estado?: 'pendiente' | 'entregada',
+    @Query() query: FindDeliveriesQueryDto,
   ) {
     return this.salesService.findDeliveries(
       this.getEmpresaId(user),
       getCommercialScope(user),
-      estado === 'entregada' ? 'entregada' : 'pendiente',
+      query,
     );
   }
 

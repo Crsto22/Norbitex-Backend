@@ -66,7 +66,11 @@ export class AttendanceDashboardService {
     const sucursalId = resolveScopedBranchId(scope, query.sucursalId);
     await this.validateSucursalId(empresaId, sucursalId);
 
-    const selectedRange = this.getDateFilterRange(query.dateFilter ?? 'today');
+    const selectedRange = this.getDateFilterRange(
+      query.dateFilter ?? 'today',
+      query.desde,
+      query.hasta,
+    );
     const qrWhere = {
       empresaId,
       ...(sucursalId ? { sucursalId } : {}),
@@ -525,13 +529,35 @@ export class AttendanceDashboardService {
     return typeof group._count === 'object' ? (group._count._all ?? 0) : 0;
   }
 
-  private getDateFilterRange(filter: AttendanceDashboardDateFilter) {
+  private getDateFilterRange(
+    filter: AttendanceDashboardDateFilter,
+    desde?: string,
+    hasta?: string,
+  ) {
     const now = new Date();
+    if (filter === 'custom') {
+      const start = desde ? new Date(desde) : new Date(now);
+      const end = hasta ? new Date(hasta) : new Date(start);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    }
+
     const start = new Date(now);
     start.setHours(0, 0, 0, 0);
 
-    if (filter !== 'today') {
-      const days = filter === '7days' ? 7 : filter === '14days' ? 14 : 30;
+    if (filter === 'week') {
+      const day = start.getDay();
+      start.setDate(start.getDate() + (day === 0 ? -6 : 1 - day));
+    } else if (filter === 'month') {
+      start.setDate(1);
+    } else if (filter !== 'today') {
+      const days =
+        filter === '7days'
+          ? 7
+          : filter === '14days' || filter === 'fortnight'
+            ? 14
+            : 30;
       start.setDate(start.getDate() - (days - 1));
     }
 
