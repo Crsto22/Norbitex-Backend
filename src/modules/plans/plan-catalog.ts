@@ -207,7 +207,6 @@ export const planCatalog: Record<PlanCodigo, PlanDefinition> = {
 };
 
 export const planList = [
-  planCatalog.pos_basico,
   planCatalog.prueba,
   planCatalog.basico,
   planCatalog.emprendedor,
