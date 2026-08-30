@@ -415,13 +415,13 @@ export class PlatformOveragesService {
           limit: dto.qrPointsLimit,
         });
       }
-      if (activeBranches > dto.branchesLimit) {
+      if (activeBranches > dto.qrPointsLimit) {
         throw new ConflictException({
           code: 'ATTENDANCE_BRANCH_LIMIT_BELOW_USAGE',
           message:
-            'El limite de sucursales no puede ser menor al consumo actual',
+            'El limite de puntos QR no puede ser menor a las sedes actuales',
           used: activeBranches,
-          limit: dto.branchesLimit,
+          limit: dto.qrPointsLimit,
         });
       }
 
@@ -439,7 +439,7 @@ export class PlatformOveragesService {
       );
       const additionalBranches = Math.max(
         0,
-        dto.branchesLimit - baseLimits.branches,
+        dto.qrPointsLimit - baseLimits.branches,
       );
       const additionalDocumentQueries = Math.max(
         0,
@@ -499,7 +499,7 @@ export class PlatformOveragesService {
             current: {
               employeesLimit: dto.employeesLimit,
               qrPointsLimit: dto.qrPointsLimit,
-              branchesLimit: dto.branchesLimit,
+              branchesLimit: dto.qrPointsLimit,
               documentQueriesLimit,
             },
             additionalLimits: this.plansService.mapAdditionalLimits(
