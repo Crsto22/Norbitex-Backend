@@ -8,6 +8,7 @@ import {
   GuiaRemisionEstado,
   GuiaRemisionParticipanteTipo,
   Prisma,
+  SucursalTipo,
   SunatEstado,
   VentaEstado,
   VentaTipoComprobante,
@@ -677,8 +678,9 @@ export class GuiaRemisionService {
           id: this.parseId(sucursalId, 'sucursalId'),
           empresaId,
           estado: 'activo' as const,
+          tipo: { in: [SucursalTipo.tienda, SucursalTipo.almacen] },
         }
-      : { empresaId, esPrincipal: true };
+      : { empresaId, esPrincipal: true, tipo: SucursalTipo.tienda };
     const sucursal = await this.prisma.sucursal.findFirst({ where });
     if (!sucursal) {
       throw new NotFoundException('Sucursal no encontrada');
@@ -698,6 +700,7 @@ export class GuiaRemisionService {
         where: {
           id: this.parseId(sucursalId, `sucursal${label}Id`),
           empresaId,
+          tipo: { in: [SucursalTipo.tienda, SucursalTipo.almacen] },
         },
       });
       if (!sucursal) {

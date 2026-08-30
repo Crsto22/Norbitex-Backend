@@ -314,7 +314,10 @@ describe('PlansService', () => {
       response: { code: 'PLAN_LIMIT_REACHED', used: 1, limit: 1 },
     });
     expect(branchCount).toHaveBeenCalledWith({
-      where: { empresaId: 1n, tipo: 'tienda' },
+      where: {
+        empresaId: 1n,
+        tipo: { in: ['tienda', 'asistencia'] },
+      },
     });
   });
 

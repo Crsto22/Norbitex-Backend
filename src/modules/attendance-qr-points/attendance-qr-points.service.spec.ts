@@ -38,7 +38,7 @@ describe('AttendanceQrPointsService', () => {
   const branch = {
     id: 3n,
     nombre: 'Principal',
-    tipo: SucursalTipo.tienda,
+    tipo: SucursalTipo.asistencia,
     direccion: 'Av. Lima 123',
     distrito: 'Lima',
   };
@@ -118,7 +118,12 @@ describe('AttendanceQrPointsService', () => {
       radioMetros: 150,
     });
     expect(prisma.sucursal.findFirst).toHaveBeenCalledWith({
-      where: { id: 3n, empresaId, estado: SucursalEstado.activo },
+      where: {
+        id: 3n,
+        empresaId,
+        estado: SucursalEstado.activo,
+        tipo: SucursalTipo.asistencia,
+      },
       select: { id: true },
     });
     expect(prisma.puntoQrAsistencia.create).toHaveBeenCalledWith({
@@ -179,7 +184,7 @@ describe('AttendanceQrPointsService', () => {
         longitud: -77,
       }),
     ).rejects.toThrow(
-      new BadRequestException('Selecciona una sucursal activa'),
+      new BadRequestException('Selecciona una sede de asistencia activa'),
     );
   });
 

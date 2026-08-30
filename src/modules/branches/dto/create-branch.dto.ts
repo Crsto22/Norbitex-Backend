@@ -13,8 +13,8 @@ export class CreateBranchDto {
   @MaxLength(120)
   nombre: string;
 
-  @IsIn(['tienda', 'almacen'])
-  tipo: 'tienda' | 'almacen';
+  @IsIn(['tienda', 'almacen', 'asistencia'])
+  tipo: 'tienda' | 'almacen' | 'asistencia';
 
   @IsString()
   @Length(6, 6)

@@ -230,7 +230,7 @@ export class PlatformOveragesService {
           select: {
             empleados: { where: { estado: 'activo' } },
             puntosQrAsistencia: { where: { estado: 'activo' } },
-            sucursales: { where: { tipo: SucursalTipo.tienda } },
+            sucursales: { where: { tipo: SucursalTipo.asistencia } },
           },
         },
       },
@@ -328,7 +328,7 @@ export class PlatformOveragesService {
             select: {
               empleados: { where: { estado: 'activo' } },
               puntosQrAsistencia: { where: { estado: 'activo' } },
-              sucursales: { where: { tipo: SucursalTipo.tienda } },
+              sucursales: { where: { tipo: SucursalTipo.asistencia } },
             },
           },
         },
@@ -394,7 +394,7 @@ export class PlatformOveragesService {
             where: { empresaId, estado: 'activo' },
           }),
           tx.sucursal.count({
-            where: { empresaId, tipo: SucursalTipo.tienda },
+            where: { empresaId, tipo: SucursalTipo.asistencia },
           }),
         ]);
       if (activeEmployees > dto.employeesLimit) {
@@ -477,7 +477,7 @@ export class PlatformOveragesService {
             select: {
               empleados: { where: { estado: 'activo' } },
               puntosQrAsistencia: { where: { estado: 'activo' } },
-              sucursales: { where: { tipo: SucursalTipo.tienda } },
+              sucursales: { where: { tipo: SucursalTipo.asistencia } },
             },
           },
         },

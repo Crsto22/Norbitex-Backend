@@ -20,8 +20,8 @@ export class FindBranchesQueryDto {
   search?: string;
 
   @IsOptional()
-  @IsIn(['tienda', 'almacen'])
-  tipo?: 'tienda' | 'almacen';
+  @IsIn(['tienda', 'almacen', 'asistencia'])
+  tipo?: 'tienda' | 'almacen' | 'asistencia';
 
   @IsOptional()
   @IsIn(['activo', 'inactivo'])

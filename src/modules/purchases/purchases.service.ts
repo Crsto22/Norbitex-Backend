@@ -4,7 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, StockMovimientoTipo, SucursalEstado } from '@prisma/client';
+import {
+  Prisma,
+  StockMovimientoTipo,
+  SucursalEstado,
+  SucursalTipo,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   resolveScopedBranchId,
@@ -234,6 +239,7 @@ export class PurchasesService {
               id: destinoSucursalId,
               empresaId,
               estado: SucursalEstado.activo,
+              tipo: { in: [SucursalTipo.tienda, SucursalTipo.almacen] },
             },
           }),
           tx.productoVariante.count({

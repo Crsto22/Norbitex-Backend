@@ -11,6 +11,7 @@ import {
   PuntoQrAsistenciaEstado,
   PuntoQrAsistenciaTipo,
   SucursalEstado,
+  SucursalTipo,
 } from '@prisma/client';
 import { createHmac, randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
@@ -335,12 +336,17 @@ export class AttendanceQrPointsService {
 
   private async assertActiveBranch(empresaId: bigint, sucursalId: bigint) {
     const branch = await this.prisma.sucursal.findFirst({
-      where: { id: sucursalId, empresaId, estado: SucursalEstado.activo },
+      where: {
+        id: sucursalId,
+        empresaId,
+        estado: SucursalEstado.activo,
+        tipo: SucursalTipo.asistencia,
+      },
       select: { id: true },
     });
 
     if (!branch) {
-      throw new BadRequestException('Selecciona una sucursal activa');
+      throw new BadRequestException('Selecciona una sede de asistencia activa');
     }
   }
 

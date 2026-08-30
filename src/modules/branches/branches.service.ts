@@ -74,6 +74,7 @@ export class BranchesService {
       inactiveTotal,
       storeTotal,
       warehouseTotal,
+      attendanceTotal,
     ] = await this.prisma.$transaction([
       this.prisma.sucursal.findMany({
         where,
@@ -90,6 +91,7 @@ export class BranchesService {
         where: {
           empresaId,
           ...(scope.branchId ? { id: scope.branchId } : {}),
+          ...(query.tipo ? { tipo: query.tipo } : {}),
           estado: SucursalEstado.activo,
         },
       }),
@@ -97,6 +99,7 @@ export class BranchesService {
         where: {
           empresaId,
           ...(scope.branchId ? { id: scope.branchId } : {}),
+          ...(query.tipo ? { tipo: query.tipo } : {}),
           estado: SucursalEstado.inactivo,
         },
       }),
@@ -114,6 +117,13 @@ export class BranchesService {
           tipo: SucursalTipo.almacen,
         },
       }),
+      this.prisma.sucursal.count({
+        where: {
+          empresaId,
+          ...(scope.branchId ? { id: scope.branchId } : {}),
+          tipo: SucursalTipo.asistencia,
+        },
+      }),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
@@ -128,6 +138,7 @@ export class BranchesService {
         inactiveTotal,
         storeTotal,
         warehouseTotal,
+        attendanceTotal,
       },
     };
   }
@@ -160,7 +171,7 @@ export class BranchesService {
       const branch = await this.prisma.$transaction(
         async (tx) => {
           await this.plansService.assertResourceLimits(tx, empresaId, {
-            [dto.tipo === SucursalTipo.tienda ? 'branches' : 'warehouses']: 1,
+            [dto.tipo === SucursalTipo.almacen ? 'warehouses' : 'branches']: 1,
           });
 
           if (esPrincipal) {
@@ -180,7 +191,9 @@ export class BranchesService {
               distrito: this.cleanText(dto.distrito),
               direccion: this.cleanText(dto.direccion),
               codigoEstablecimientoSunat: this.cleanOptionalText(
-                dto.codigoEstablecimientoSunat,
+                dto.tipo === SucursalTipo.asistencia
+                  ? undefined
+                  : dto.codigoEstablecimientoSunat,
               ),
               estado: dto.estado ?? SucursalEstado.activo,
               esPrincipal,
@@ -212,9 +225,13 @@ export class BranchesService {
     const nextModoCajaHabilitado =
       dto.modoCajaHabilitado ?? current.modoCajaHabilitado;
     const nextEsPrincipal = dto.esPrincipal ?? current.esPrincipal;
+    const safeModoCajaHabilitado =
+      nextTipo === SucursalTipo.tienda ? nextModoCajaHabilitado : false;
+    const safeEsPrincipal =
+      nextTipo === SucursalTipo.tienda ? nextEsPrincipal : false;
 
-    this.ensureCashRegisterModeIsAllowed(nextTipo, nextModoCajaHabilitado);
-    this.ensurePrimaryIsAllowed(nextTipo, nextEsPrincipal);
+    this.ensureCashRegisterModeIsAllowed(nextTipo, safeModoCajaHabilitado);
+    this.ensurePrimaryIsAllowed(nextTipo, safeEsPrincipal);
 
     if (dto.nombre !== undefined) {
       const nombre = this.cleanText(dto.nombre);
@@ -224,6 +241,13 @@ export class BranchesService {
 
     if (dto.tipo !== undefined) {
       data.tipo = dto.tipo;
+      if (dto.tipo !== SucursalTipo.tienda) {
+        data.esPrincipal = false;
+        data.modoCajaHabilitado = false;
+      }
+      if (dto.tipo === SucursalTipo.asistencia) {
+        data.codigoEstablecimientoSunat = null;
+      }
     }
 
     if (dto.ubigeo !== undefined) {
@@ -240,7 +264,9 @@ export class BranchesService {
 
     if (dto.codigoEstablecimientoSunat !== undefined) {
       data.codigoEstablecimientoSunat = this.cleanOptionalText(
-        dto.codigoEstablecimientoSunat,
+        nextTipo === SucursalTipo.asistencia
+          ? undefined
+          : dto.codigoEstablecimientoSunat,
       );
     }
 
@@ -249,11 +275,11 @@ export class BranchesService {
     }
 
     if (dto.esPrincipal !== undefined) {
-      data.esPrincipal = dto.esPrincipal;
+      data.esPrincipal = safeEsPrincipal;
     }
 
     if (dto.modoCajaHabilitado !== undefined) {
-      data.modoCajaHabilitado = dto.modoCajaHabilitado;
+      data.modoCajaHabilitado = safeModoCajaHabilitado;
     }
 
     try {
@@ -261,7 +287,8 @@ export class BranchesService {
         async (tx) => {
           if (dto.tipo !== undefined && dto.tipo !== current.tipo) {
             await this.plansService.assertResourceLimits(tx, empresaId, {
-              [dto.tipo === SucursalTipo.tienda ? 'branches' : 'warehouses']: 1,
+              [dto.tipo === SucursalTipo.almacen ? 'warehouses' : 'branches']:
+                1,
             });
           }
 
@@ -333,10 +360,10 @@ export class BranchesService {
   }
 
   private ensureCashRegisterModeIsAllowed(
-    tipo: SucursalTipo | 'tienda' | 'almacen',
+    tipo: SucursalTipo | 'tienda' | 'almacen' | 'asistencia',
     modoCajaHabilitado: boolean,
   ) {
-    if (tipo === SucursalTipo.almacen && modoCajaHabilitado) {
+    if (tipo !== SucursalTipo.tienda && modoCajaHabilitado) {
       throw new BadRequestException(
         'Solo las sucursales tipo tienda pueden habilitar caja',
       );
@@ -344,10 +371,10 @@ export class BranchesService {
   }
 
   private ensurePrimaryIsAllowed(
-    tipo: SucursalTipo | 'tienda' | 'almacen',
+    tipo: SucursalTipo | 'tienda' | 'almacen' | 'asistencia',
     esPrincipal: boolean,
   ) {
-    if (tipo === SucursalTipo.almacen && esPrincipal) {
+    if (tipo !== SucursalTipo.tienda && esPrincipal) {
       throw new BadRequestException(
         'Solo una sucursal tipo tienda puede ser principal',
       );

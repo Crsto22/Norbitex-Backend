@@ -235,6 +235,7 @@ enum CanalConocimiento {
 enum SucursalTipo {
   tienda
   almacen
+  asistencia
 }
 
 enum SucursalEstado {

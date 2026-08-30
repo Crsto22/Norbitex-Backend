@@ -43,9 +43,11 @@ export class BranchesController {
     'stock-traspasos',
     'stock-kardex',
     'asistencias-dashboard',
+    'asistencias-configuracion',
     'asistencias-marcajes',
     'asistencias-historial-marcaciones',
     'asistencias-puntos-qr',
+    'asistencias-reportes',
   )
   findAll(
     @CurrentUser() user: JwtPayload,
@@ -113,9 +115,10 @@ export class BranchesController {
     }
     return {
       ...dto,
-      tipo: 'tienda',
+      tipo: 'asistencia',
       esPrincipal: false,
       modoCajaHabilitado: false,
+      codigoEstablecimientoSunat: null,
     };
   }
 }

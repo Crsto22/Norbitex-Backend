@@ -10,6 +10,7 @@ import {
   StockMovimientoDireccion,
   StockMovimientoTipo,
   SucursalEstado,
+  SucursalTipo,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -114,7 +115,11 @@ export class StockService {
 
   async findLocations(empresaId: bigint, scope: CommercialScope) {
     const rows = await this.prisma.sucursal.findMany({
-      where: { empresaId, estado: SucursalEstado.activo },
+      where: {
+        empresaId,
+        estado: SucursalEstado.activo,
+        tipo: { in: [SucursalTipo.tienda, SucursalTipo.almacen] },
+      },
       select: { id: true, nombre: true, tipo: true },
       orderBy: [{ esPrincipal: 'desc' }, { nombre: 'asc' }],
     });
@@ -827,6 +832,7 @@ export class StockService {
         id: { in: uniqueIds },
         empresaId,
         estado: SucursalEstado.activo,
+        tipo: { in: [SucursalTipo.tienda, SucursalTipo.almacen] },
       },
     });
     if (count !== uniqueIds.length) {

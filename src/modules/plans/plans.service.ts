@@ -792,7 +792,10 @@ export class PlansService {
         },
       }),
       this.prisma.sucursal.count({
-        where: { empresaId, tipo: SucursalTipo.tienda },
+        where: {
+          empresaId,
+          tipo: { in: [SucursalTipo.tienda, SucursalTipo.asistencia] },
+        },
       }),
       this.prisma.sucursal.count({
         where: { empresaId, tipo: SucursalTipo.almacen },
@@ -1286,7 +1289,10 @@ export class PlansService {
         });
       case 'branches':
         return tx.sucursal.count({
-          where: { empresaId, tipo: SucursalTipo.tienda },
+          where: {
+            empresaId,
+            tipo: { in: [SucursalTipo.tienda, SucursalTipo.asistencia] },
+          },
         });
       case 'warehouses':
         return tx.sucursal.count({
