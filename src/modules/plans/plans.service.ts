@@ -1182,13 +1182,12 @@ export class PlansService {
     const effective = this.getEffectiveAttendance(company);
     const employeePrice = new Prisma.Decimal(pricing?.employeeUnitPrice ?? 0);
     const qrPrice = new Prisma.Decimal(pricing?.qrPointUnitPrice ?? 0);
-    const monthlyPrice =
-      effective.trial || !effective.active
-        ? new Prisma.Decimal(0)
-        : employeePrice
-            .mul(effective.employeesLimit)
-            .plus(qrPrice.mul(effective.qrPointsLimit))
-            .toDecimalPlaces(2);
+    const monthlyPrice = !effective.active
+      ? new Prisma.Decimal(0)
+      : employeePrice
+          .mul(effective.employeesLimit)
+          .plus(qrPrice.mul(effective.qrPointsLimit))
+          .toDecimalPlaces(2);
     return {
       active: Boolean(company.asistenciasActiva),
       effectiveActive: effective.active,
