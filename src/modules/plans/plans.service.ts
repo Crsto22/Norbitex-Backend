@@ -1204,11 +1204,16 @@ export class PlansService {
 
   private getEffectiveAttendance(company: CompanyPlan, now = new Date()) {
     if (this.getStatus(company, now) === 'trial') {
+      const active = Boolean(company.asistenciasActiva);
       return {
-        active: true,
+        active,
         trial: true,
-        employeesLimit: 3,
-        qrPointsLimit: 1,
+        employeesLimit: active
+          ? Number(company.asistenciasTrabajadoresLimite ?? 5)
+          : 0,
+        qrPointsLimit: active
+          ? Number(company.asistenciasPuntosQrLimite ?? 1)
+          : 0,
       };
     }
     const active =

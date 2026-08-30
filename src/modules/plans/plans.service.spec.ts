@@ -125,6 +125,21 @@ describe('PlansService', () => {
         ['OWNER'],
         [],
       ),
+    ).resolves.not.toContain('asistencias-dashboard');
+    await expect(
+      service.getEffectiveModuleKeys(
+        {
+          ...company,
+          planCodigo: PlanCodigo.prueba,
+          planFinAt: new Date('2099-01-31T05:00:00.000Z'),
+          asistenciasActiva: true,
+          asistenciasTrabajadoresLimite: 5n,
+          asistenciasPuntosQrLimite: 1n,
+          asistenciasFinAt: new Date('2099-01-31T05:00:00.000Z'),
+        },
+        ['OWNER'],
+        [],
+      ),
     ).resolves.toContain('asistencias-dashboard');
   });
 

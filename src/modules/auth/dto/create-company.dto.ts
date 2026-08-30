@@ -15,7 +15,13 @@ import {
   type CompanyCatalogProfile,
 } from '../default-company-catalogs';
 
+export const companyProductModes = ['pos', 'attendance', 'both'] as const;
+export type CompanyProductMode = (typeof companyProductModes)[number];
+
 export class CreateCompanyDto {
+  @IsIn(companyProductModes)
+  productMode: CompanyProductMode;
+
   @IsIn(companyCatalogProfiles)
   catalogProfile: CompanyCatalogProfile;
 

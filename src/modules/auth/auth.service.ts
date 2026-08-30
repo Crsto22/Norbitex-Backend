@@ -18,6 +18,8 @@ import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { PlansService } from '../plans/plans.service';
+import { attendanceModuleKeys } from '../plans/plan-catalog';
+import { userModuleKeys } from '../users/user-modules';
 import { ChangeMyPasswordDto } from './dto/change-my-password.dto';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { getDefaultCompanyCatalogs } from './default-company-catalogs';
@@ -46,6 +48,11 @@ type AuthCompany = {
   planCodigo: PlanCodigo;
   planInicioAt: Date;
   planFinAt: Date | null;
+  asistenciasActiva?: boolean;
+  asistenciasTrabajadoresLimite?: bigint;
+  asistenciasPuntosQrLimite?: bigint;
+  asistenciasInicioAt?: Date | null;
+  asistenciasFinAt?: Date | null;
   sucursalId?: bigint | null;
   visibilidadOperaciones?: 'propias' | 'todas';
 };
@@ -250,6 +257,8 @@ export class AuthService {
     const planFinAt = new Date(
       planInicioAt.getTime() + 7 * 24 * 60 * 60 * 1000,
     );
+    const usesAttendance =
+      dto.productMode === 'attendance' || dto.productMode === 'both';
 
     if (Boolean(ruc) === Boolean(dni)) {
       throw new BadRequestException('Ingresa RUC o DNI, solo uno de ellos');
@@ -310,6 +319,11 @@ export class AuthService {
           comoConocioOtro: dto.comoConocioOtro ?? null,
           planInicioAt,
           planFinAt,
+          asistenciasActiva: usesAttendance,
+          asistenciasTrabajadoresLimite: BigInt(usesAttendance ? 5 : 0),
+          asistenciasPuntosQrLimite: BigInt(usesAttendance ? 1 : 0),
+          asistenciasInicioAt: usesAttendance ? planInicioAt : null,
+          asistenciasFinAt: usesAttendance ? planFinAt : null,
         },
       });
 
@@ -324,6 +338,18 @@ export class AuthService {
           },
         },
       });
+
+      const moduleOverrides = this.buildRegistrationModuleOverrides(
+        empresa.id,
+        usuario.id,
+        dto.productMode,
+      );
+      if (moduleOverrides.length) {
+        await tx.empresaModuloPlan.createMany({
+          data: moduleOverrides,
+          skipDuplicates: true,
+        });
+      }
 
       await tx.serieComprobante.createMany({
         data: [
@@ -415,7 +441,7 @@ export class AuthService {
           action: 'company_created',
           source: 'registration',
           description: 'Empresa registrada con plan Prueba',
-          metadata: { planCode: empresa.planCodigo },
+          metadata: { planCode: empresa.planCodigo, productMode: dto.productMode },
         },
       });
 
@@ -433,6 +459,11 @@ export class AuthService {
         planCodigo: empresa.planCodigo,
         planInicioAt: empresa.planInicioAt,
         planFinAt: empresa.planFinAt,
+        asistenciasActiva: empresa.asistenciasActiva,
+        asistenciasTrabajadoresLimite: empresa.asistenciasTrabajadoresLimite,
+        asistenciasPuntosQrLimite: empresa.asistenciasPuntosQrLimite,
+        asistenciasInicioAt: empresa.asistenciasInicioAt,
+        asistenciasFinAt: empresa.asistenciasFinAt,
       };
     });
 
@@ -1113,18 +1144,47 @@ export class AuthService {
 
   private async getSessionModuleKeys(
     company: {
+      id?: bigint;
+      empresaId?: bigint;
       planCodigo: PlanCodigo;
       planInicioAt: Date;
       planFinAt: Date | null;
+      asistenciasActiva?: boolean;
+      asistenciasTrabajadoresLimite?: bigint;
+      asistenciasPuntosQrLimite?: bigint;
+      asistenciasInicioAt?: Date | null;
+      asistenciasFinAt?: Date | null;
     },
     roles: string[],
     modules: { moduleKey: string }[],
   ) {
     return this.plansService.getEffectiveModuleKeys(
-      company,
+      { ...company, id: company.id ?? company.empresaId },
       roles,
       modules.map((module) => module.moduleKey),
     );
+  }
+
+  private buildRegistrationModuleOverrides(
+    empresaId: bigint,
+    usuarioId: bigint,
+    productMode: CreateCompanyDto['productMode'],
+  ) {
+    if (productMode === 'both') return [];
+    const attendanceKeys = new Set<string>(attendanceModuleKeys);
+    const allowedAttendanceOnly = new Set<string>([
+      ...attendanceModuleKeys,
+      'mi-cuenta',
+    ]);
+    return userModuleKeys.flatMap((moduleKey) => {
+      const shouldDisable =
+        productMode === 'pos'
+          ? attendanceKeys.has(moduleKey)
+          : !allowedAttendanceOnly.has(moduleKey);
+      return shouldDisable
+        ? [{ empresaId, moduleKey, enabled: false, actualizadoPorId: usuarioId }]
+        : [];
+    });
   }
 
   private async findActiveCompanyUser(user: JwtPayload) {

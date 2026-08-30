@@ -41,6 +41,7 @@ describe('default company catalogs', () => {
 
   it.each([undefined, 'manipulado'])('rejects profile %s', async (profile) => {
     const dto = Object.assign(new CreateCompanyDto(), {
+      productMode: 'pos',
       catalogProfile: profile,
     });
     const errors = await validate(dto);

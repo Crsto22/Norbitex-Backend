@@ -11,6 +11,7 @@ import {
   PagoSuscripcionMetodo,
   PlanCodigo,
   Prisma,
+  SucursalTipo,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
@@ -224,10 +225,12 @@ export class PlatformOveragesService {
         asistenciasPuntosQrLimite: true,
         asistenciasInicioAt: true,
         asistenciasFinAt: true,
+        limitesAdicionales: true,
         _count: {
           select: {
             empleados: { where: { estado: 'activo' } },
             puntosQrAsistencia: { where: { estado: 'activo' } },
+            sucursales: { where: { tipo: SucursalTipo.tienda } },
           },
         },
       },
@@ -320,10 +323,12 @@ export class PlatformOveragesService {
           asistenciasPuntosQrLimite: true,
           asistenciasInicioAt: true,
           asistenciasFinAt: true,
+          limitesAdicionales: true,
           _count: {
             select: {
               empleados: { where: { estado: 'activo' } },
               puntosQrAsistencia: { where: { estado: 'activo' } },
+              sucursales: { where: { tipo: SucursalTipo.tienda } },
             },
           },
         },
@@ -371,6 +376,7 @@ export class PlatformOveragesService {
           asistenciasPuntosQrLimite: true,
           asistenciasInicioAt: true,
           asistenciasFinAt: true,
+          limitesAdicionales: true,
         },
       });
       if (!current) throw new NotFoundException('Empresa no encontrada');
@@ -381,10 +387,16 @@ export class PlatformOveragesService {
         });
       }
 
-      const [activeEmployees, activeQrPoints] = await Promise.all([
-        tx.empleado.count({ where: { empresaId, estado: 'activo' } }),
-        tx.puntoQrAsistencia.count({ where: { empresaId, estado: 'activo' } }),
-      ]);
+      const [activeEmployees, activeQrPoints, activeBranches] =
+        await Promise.all([
+          tx.empleado.count({ where: { empresaId, estado: 'activo' } }),
+          tx.puntoQrAsistencia.count({
+            where: { empresaId, estado: 'activo' },
+          }),
+          tx.sucursal.count({
+            where: { empresaId, tipo: SucursalTipo.tienda },
+          }),
+        ]);
       if (activeEmployees > dto.employeesLimit) {
         throw new ConflictException({
           code: 'ATTENDANCE_EMPLOYEE_LIMIT_BELOW_USAGE',
@@ -403,7 +415,46 @@ export class PlatformOveragesService {
           limit: dto.qrPointsLimit,
         });
       }
+      if (activeBranches > dto.branchesLimit) {
+        throw new ConflictException({
+          code: 'ATTENDANCE_BRANCH_LIMIT_BELOW_USAGE',
+          message:
+            'El limite de sucursales no puede ser menor al consumo actual',
+          used: activeBranches,
+          limit: dto.branchesLimit,
+        });
+      }
 
+      const pricing = await this.plansService.getAttendancePricing(tx);
+      const monthlyTotal = new Prisma.Decimal(pricing.employeeUnitPrice)
+        .mul(dto.employeesLimit)
+        .plus(
+          new Prisma.Decimal(pricing.qrPointUnitPrice).mul(dto.qrPointsLimit),
+        );
+      const documentQueriesLimit =
+        getIncludedAttendanceDocumentQueries(monthlyTotal);
+      const baseLimits = await this.plansService.getBaseLimits(
+        tx,
+        current.planCodigo,
+      );
+      const additionalBranches = Math.max(
+        0,
+        dto.branchesLimit - baseLimits.branches,
+      );
+      const additionalDocumentQueries = Math.max(
+        0,
+        documentQueriesLimit - baseLimits.documentQueries,
+      );
+      const limitsData = {
+        sucursales: BigInt(additionalBranches),
+        consultasDocumento: BigInt(additionalDocumentQueries),
+        actualizadoPorId: actorId,
+      };
+      const additionalLimits = await tx.empresaLimiteAdicional.upsert({
+        where: { empresaId },
+        create: { empresaId, ...limitsData },
+        update: limitsData,
+      });
       const updated = await tx.empresa.update({
         where: { id: empresaId },
         data: {
@@ -421,10 +472,12 @@ export class PlatformOveragesService {
           asistenciasPuntosQrLimite: true,
           asistenciasInicioAt: true,
           asistenciasFinAt: true,
+          limitesAdicionales: true,
           _count: {
             select: {
               empleados: { where: { estado: 'activo' } },
               puntosQrAsistencia: { where: { estado: 'activo' } },
+              sucursales: { where: { tipo: SucursalTipo.tienda } },
             },
           },
         },
@@ -446,7 +499,12 @@ export class PlatformOveragesService {
             current: {
               employeesLimit: dto.employeesLimit,
               qrPointsLimit: dto.qrPointsLimit,
+              branchesLimit: dto.branchesLimit,
+              documentQueriesLimit,
             },
+            additionalLimits: this.plansService.mapAdditionalLimits(
+              additionalLimits,
+            ),
           },
         },
       });
@@ -822,10 +880,14 @@ export class PlatformOveragesService {
       baseLimits,
       additionalLimits,
       effectiveLimits,
-      attendance: this.plansService.mapAttendanceAddon(
-        company,
-        await this.plansService.getAttendancePricing(),
-      ),
+      attendance: {
+        ...this.plansService.mapAttendanceAddon(
+          company,
+          await this.plansService.getAttendancePricing(),
+        ),
+        branchesLimit: effectiveLimits.branches,
+        documentQueriesLimit: effectiveLimits.documentQueries,
+      },
       updatedAt: company.limitesAdicionales?.updatedAt?.toISOString() ?? null,
     };
   }
@@ -926,16 +988,47 @@ export class PlatformOveragesService {
     asistenciasPuntosQrLimite: bigint;
     asistenciasInicioAt: Date | null;
     asistenciasFinAt: Date | null;
-    _count?: { empleados: number; puntosQrAsistencia: number };
+    limitesAdicionales?: CompanyWithLimits['limitesAdicionales'];
+    _count?: {
+      empleados: number;
+      puntosQrAsistencia: number;
+      sucursales?: number;
+    };
   }) {
     const pricing = await this.plansService.getAttendancePricing();
+    const baseLimits = await this.plansService.getBaseLimits(
+      this.prisma,
+      company.planCodigo,
+    );
+    const effectiveLimits = this.plansService.withAttendanceLimits(
+      baseLimits,
+      this.plansService.mapAdditionalLimits(company.limitesAdicionales),
+      company,
+    );
+    const documentRange = this.plansService.getDocumentRange(
+      company,
+      new Date(),
+    );
+    const documentQueries = await this.prisma.consultaDocumento.count({
+      where: {
+        empresaId: company.id,
+        createdAt: {
+          gte: documentRange.start,
+          ...(documentRange.end ? { lt: documentRange.end } : {}),
+        },
+      },
+    });
     return {
       company: { id: company.id.toString(), name: company.nombreComercial },
       pricing,
       ...this.plansService.mapAttendanceAddon(company, pricing),
+      branchesLimit: effectiveLimits.branches,
+      documentQueriesLimit: effectiveLimits.documentQueries,
       usage: {
         employees: company._count?.empleados ?? 0,
         qrPoints: company._count?.puntosQrAsistencia ?? 0,
+        branches: company._count?.sucursales ?? 0,
+        documentQueries,
       },
     };
   }
@@ -1041,6 +1134,15 @@ export class PlatformOveragesService {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     });
   }
+}
+
+export function getIncludedAttendanceDocumentQueries(
+  monthlyTotal: Prisma.Decimal,
+) {
+  if (monthlyTotal.greaterThanOrEqualTo(100)) return 800;
+  if (monthlyTotal.greaterThanOrEqualTo(60)) return 300;
+  if (monthlyTotal.greaterThanOrEqualTo(30)) return 100;
+  return 20;
 }
 
 type ExtraLimits = {

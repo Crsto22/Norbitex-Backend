@@ -86,6 +86,12 @@ export class UpdateCompanyAttendanceCapacityDto {
   @Min(0)
   @Max(1_000_000)
   qrPointsLimit!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  branchesLimit!: number;
 }
 
 export class UpdateAttendancePricingDto {

@@ -59,17 +59,17 @@ export class BranchesController {
   }
 
   @Post()
-  @RequireModule('sucursales')
+  @RequireModule('sucursales', 'asistencias-configuracion')
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateBranchDto) {
     return this.branchesService.create(
       this.getEmpresaId(user),
       getCommercialScope(user),
-      dto,
+      this.prepareAttendanceBranchDto(user, dto),
     );
   }
 
   @Patch(':id')
-  @RequireModule('sucursales')
+  @RequireModule('sucursales', 'asistencias-configuracion')
   update(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseIntPipe) id: number,
@@ -79,12 +79,12 @@ export class BranchesController {
       this.getEmpresaId(user),
       getCommercialScope(user),
       BigInt(id),
-      dto,
+      this.prepareAttendanceBranchDto(user, dto),
     );
   }
 
   @Delete(':id')
-  @RequireModule('sucursales')
+  @RequireModule('sucursales', 'asistencias-configuracion')
   remove(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseIntPipe) id: number,
@@ -102,5 +102,20 @@ export class BranchesController {
     }
 
     return BigInt(user.empresaId);
+  }
+
+  private prepareAttendanceBranchDto<T extends CreateBranchDto | UpdateBranchDto>(
+    user: JwtPayload,
+    dto: T,
+  ): T {
+    if (user.moduleKeys?.includes('sucursales')) {
+      return dto;
+    }
+    return {
+      ...dto,
+      tipo: 'tienda',
+      esPrincipal: false,
+      modoCajaHabilitado: false,
+    };
   }
 }
