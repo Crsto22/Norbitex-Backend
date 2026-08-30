@@ -130,8 +130,18 @@ export const userModules = [
   },
   {
     key: 'asistencias-configuracion',
-    label: 'Configuracion de asistencias',
+    label: 'Sucursales de asistencias',
     route: '/asistencias/configuracion',
+  },
+  {
+    key: 'asistencias-empresa',
+    label: 'Empresa de asistencias',
+    route: '/asistencias/empresa',
+  },
+  {
+    key: 'asistencias-mi-cuenta',
+    label: 'Mi cuenta de asistencias',
+    route: '/asistencias/mi-cuenta',
   },
   { key: 'empresa', label: 'Empresa', route: '/configuracion/empresa' },
   {

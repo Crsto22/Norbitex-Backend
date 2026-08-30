@@ -63,6 +63,8 @@ export const attendanceModuleKeys = [
   'asistencias-reportes',
   'asistencias-plan',
   'asistencias-configuracion',
+  'asistencias-empresa',
+  'asistencias-mi-cuenta',
 ] as const satisfies readonly UserModuleKey[];
 
 const posBasicModuleKeys = coreModuleKeys.filter(

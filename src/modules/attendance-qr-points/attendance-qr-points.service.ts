@@ -11,7 +11,6 @@ import {
   PuntoQrAsistenciaEstado,
   PuntoQrAsistenciaTipo,
   SucursalEstado,
-  SucursalTipo,
 } from '@prisma/client';
 import { createHmac, randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
@@ -340,13 +339,12 @@ export class AttendanceQrPointsService {
         id: sucursalId,
         empresaId,
         estado: SucursalEstado.activo,
-        tipo: SucursalTipo.asistencia,
       },
       select: { id: true },
     });
 
     if (!branch) {
-      throw new BadRequestException('Selecciona una sede de asistencia activa');
+      throw new BadRequestException('Selecciona una sucursal activa');
     }
   }
 

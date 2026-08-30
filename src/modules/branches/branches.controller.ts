@@ -66,7 +66,7 @@ export class BranchesController {
     return this.branchesService.create(
       this.getEmpresaId(user),
       getCommercialScope(user),
-      this.prepareAttendanceBranchDto(user, dto),
+      this.prepareAttendanceBranchDto(user, dto, 'create'),
     );
   }
 
@@ -81,7 +81,7 @@ export class BranchesController {
       this.getEmpresaId(user),
       getCommercialScope(user),
       BigInt(id),
-      this.prepareAttendanceBranchDto(user, dto),
+      this.prepareAttendanceBranchDto(user, dto, 'update'),
     );
   }
 
@@ -109,13 +109,14 @@ export class BranchesController {
   private prepareAttendanceBranchDto<T extends CreateBranchDto | UpdateBranchDto>(
     user: JwtPayload,
     dto: T,
+    action: 'create' | 'update',
   ): T {
     if (user.moduleKeys?.includes('sucursales')) {
       return dto;
     }
     return {
       ...dto,
-      tipo: 'asistencia',
+      ...(action === 'create' ? { tipo: 'asistencia' } : {}),
       esPrincipal: false,
       modoCajaHabilitado: false,
       codigoEstablecimientoSunat: null,

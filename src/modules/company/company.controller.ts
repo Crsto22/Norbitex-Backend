@@ -35,13 +35,13 @@ export class CompanyController {
   }
 
   @Patch()
-  @RequireModule('empresa')
+  @RequireModule('empresa', 'asistencias-empresa')
   update(@CurrentUser() user: JwtPayload, @Body() dto: UpdateCompanyDto) {
     return this.companyService.update(this.getEmpresaId(user), dto);
   }
 
   @Post('logo')
-  @RequireModule('empresa')
+  @RequireModule('empresa', 'asistencias-empresa')
   @UseInterceptors(
     FileInterceptor('logo', {
       storage: memoryStorage(),
