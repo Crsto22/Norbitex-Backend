@@ -1,6 +1,6 @@
-# Norbitex Backend
+# Nuvex Backend
 
-API multiempresa para ventas, inventario, facturacion electronica, planes y administracion de Norbitex.
+API multiempresa para ventas, inventario, facturacion electronica, planes y administracion de Nuvex.
 
 ## Desarrollo
 

@@ -36,7 +36,7 @@ async function bootstrap() {
   await app.listen(process.env.PORT ?? 3000);
 }
 void bootstrap().catch((error: unknown) => {
-  Logger.error(error, 'No se pudo iniciar Norbitex API');
+  Logger.error(error, 'No se pudo iniciar Nuvex API');
   process.exitCode = 1;
 });
 

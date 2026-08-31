@@ -114,7 +114,7 @@ export class PlatformBillingSunatService {
         !config.certificadoR2Key ||
         !config.certificadoPasswordEncrypted
       ) {
-        throw new Error('La configuracion fiscal de Norbitex esta incompleta');
+        throw new Error('La configuracion fiscal de Nuvex esta incompleta');
       }
       const endpoint = await this.endpointConfig.resolveEndpointUrl(
         config.ambiente,

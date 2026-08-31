@@ -35,7 +35,7 @@ async function main() {
 function buildDatabaseUrl() {
   const host = process.env.DB_HOST ?? 'localhost';
   const port = process.env.DB_PORT ?? '5432';
-  const database = process.env.DB_NAME ?? 'Nobitex';
+  const database = process.env.DB_NAME ?? 'Nuvex';
   const user = process.env.DB_USER ?? 'postgres';
   const password = encodeURIComponent(process.env.DB_PASSWORD ?? '');
   const urlHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;

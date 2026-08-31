@@ -32,7 +32,7 @@ export function getDatabaseUrl(env: NodeJS.ProcessEnv = process.env) {
 
   const host = env.DB_HOST ?? 'localhost';
   const port = env.DB_PORT ?? '5432';
-  const database = env.DB_NAME ?? 'Nobitex';
+  const database = env.DB_NAME ?? 'Nuvex';
   const user = env.DB_USER ?? 'postgres';
   const password = encodeURIComponent(env.DB_PASSWORD ?? '');
 

@@ -14,9 +14,9 @@ describe('MailService', () => {
       new ConfigService({
         BREVO_ENABLED: 'true',
         BREVO_API_KEY: 'test-key',
-        BREVO_SENDER_EMAIL: 'no-reply@norbitex.pe',
-        BREVO_SENDER_NAME: 'Norbitex',
-        FRONTEND_URL: 'https://app.norbitex.pe',
+        BREVO_SENDER_EMAIL: 'no-reply@nuvex.pe',
+        BREVO_SENDER_NAME: 'Nuvex',
+        FRONTEND_URL: 'https://app.nuvex.pe',
       }),
     );
 
@@ -33,7 +33,7 @@ describe('MailService', () => {
     expect(verification).toContain('email-verification');
     expect(verification).toContain('123456');
     expect(passwordReset).toContain(
-      'https://app.norbitex.pe/forgot-password?token=token-test',
+      'https://app.nuvex.pe/forgot-password?token=token-test',
     );
   });
 });

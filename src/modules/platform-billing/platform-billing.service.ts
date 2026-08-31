@@ -148,7 +148,7 @@ export class PlatformBillingService {
       actorId,
       null,
       'platform_billing_config_updated',
-      'Configuracion fiscal de Norbitex actualizada',
+      'Configuracion fiscal de Nuvex actualizada',
       {
         previousActive: before?.activo ?? false,
         currentActive: updated.activo,
@@ -887,7 +887,7 @@ export class PlatformBillingService {
     ) {
       throw new ConflictException({
         code: 'PLATFORM_ISSUER_NOT_CONFIGURED',
-        message: 'Completa y activa la configuracion fiscal de Norbitex',
+        message: 'Completa y activa la configuracion fiscal de Nuvex',
       });
     }
     return config;
@@ -1132,8 +1132,8 @@ export class PlatformBillingService {
 
     return this.salesPdf.generateCommercialDocumentPdf({
       issuer: {
-        name: issuer?.razonSocial || issuer?.nombreComercial || 'Norbitex',
-        tradeName: issuer?.nombreComercial || 'Norbitex',
+        name: issuer?.razonSocial || issuer?.nombreComercial || 'Nuvex',
+        tradeName: issuer?.nombreComercial || 'Nuvex',
         ruc: issuer?.ruc ?? null,
         address: issuer?.direccion ?? null,
         environment: issuer?.ambiente ?? 'BETA',

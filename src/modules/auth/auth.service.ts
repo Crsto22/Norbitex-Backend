@@ -733,7 +733,7 @@ export class AuthService {
     });
 
     if (!usuario) {
-      throw new NotFoundException('Este correo no esta registrado en Nobitex.');
+      throw new NotFoundException('Este correo no esta registrado en Nuvex.');
     }
 
     const token = randomBytes(32).toString('base64url');

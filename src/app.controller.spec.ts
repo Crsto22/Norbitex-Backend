@@ -41,7 +41,7 @@ describe('AppController', () => {
 
   describe('root', () => {
     it('should identify the API', () => {
-      expect(appController.getHello()).toBe('Norbitex API');
+      expect(appController.getHello()).toBe('Nuvex API');
     });
   });
 

@@ -6,8 +6,8 @@ const decimal = (value: number) => new Prisma.Decimal(value);
 const sale = {
   empresa: {
     id: 1n,
-    nombreComercial: 'Nobitex',
-    razonSocial: 'Nobitex S.A.C.',
+    nombreComercial: 'Nuvex',
+    razonSocial: 'Nuvex S.A.C.',
     ruc: '20123456789',
     direccion: 'Av. Principal 123',
     logoUrl: null,

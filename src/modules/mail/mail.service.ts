@@ -16,7 +16,7 @@ export class MailService {
   async sendVerificationCode(email: string, code: string) {
     await this.sendEmail(
       email,
-      'Verifica tu correo en Norbitex',
+      'Verifica tu correo en Nuvex',
       this.layout(
         'Verifica tu correo',
         `Usa este codigo para continuar con tu registro:<div style="margin:24px 0;padding:16px;border-radius:8px;background:#f3f4f6;color:#17206f;font-size:30px;font-weight:800;letter-spacing:6px;text-align:center">${escapeHtml(code)}</div><p style="margin:0;color:#667085">El codigo vence en 10 minutos. Si no solicitaste el registro, ignora este mensaje.</p>`,
@@ -32,7 +32,7 @@ export class MailService {
 
     await this.sendEmail(
       email,
-      'Restablece tu contrasena de Norbitex',
+      'Restablece tu contrasena de Nuvex',
       this.layout(
         'Restablece tu contrasena',
         `<p>Recibimos una solicitud para cambiar tu contrasena.</p><p style="margin:24px 0"><a href="${escapeHtml(resetUrl)}" style="display:inline-block;padding:13px 20px;border-radius:8px;background:#17206f;color:#ffffff;text-decoration:none;font-weight:700">Crear nueva contrasena</a></p><p style="margin:0;color:#667085">Este enlace vence en 30 minutos. Si no hiciste esta solicitud, puedes ignorar el mensaje.</p>`,
@@ -43,7 +43,7 @@ export class MailService {
 
   sendPlatformReceipt(email: string, correlativo: string) {
     this.logger.log(
-      `Comprobante Nobitex ${correlativo} disponible para ${email}`,
+      `Comprobante Nuvex ${correlativo} disponible para ${email}`,
     );
   }
 
@@ -86,7 +86,7 @@ export class MailService {
           email: senderEmail,
           name:
             this.configService.get<string>('BREVO_SENDER_NAME')?.trim() ||
-            'Norbitex',
+            'Nuvex',
         },
         to: [{ email: recipient }],
         subject,
@@ -113,7 +113,7 @@ export class MailService {
   }
 
   private layout(title: string, content: string) {
-    return `<!doctype html><html><body style="margin:0;background:#f5f6f8;font-family:Arial,sans-serif;color:#101828"><div style="max-width:560px;margin:0 auto;padding:32px 16px"><div style="padding:28px;border-radius:10px;background:#ffffff;border:1px solid #e5e7eb"><div style="margin-bottom:24px;color:#17206f;font-size:22px;font-weight:800">NORBITEX</div><h1 style="margin:0 0 16px;font-size:22px">${title}</h1><div style="font-size:15px;line-height:1.6">${content}</div></div><p style="margin:16px 0 0;text-align:center;color:#98a2b3;font-size:12px">Mensaje automatico de Norbitex</p></div></body></html>`;
+    return `<!doctype html><html><body style="margin:0;background:#f5f6f8;font-family:Arial,sans-serif;color:#101828"><div style="max-width:560px;margin:0 auto;padding:32px 16px"><div style="padding:28px;border-radius:10px;background:#ffffff;border:1px solid #e5e7eb"><div style="margin-bottom:24px;color:#17206f;font-size:22px;font-weight:800">NUVEX</div><h1 style="margin:0 0 16px;font-size:22px">${title}</h1><div style="font-size:15px;line-height:1.6">${content}</div></div><p style="margin:16px 0 0;text-align:center;color:#98a2b3;font-size:12px">Mensaje automatico de Nuvex</p></div></body></html>`;
   }
 }
 

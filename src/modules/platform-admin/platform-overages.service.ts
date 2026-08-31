@@ -200,7 +200,7 @@ export class PlatformOveragesService {
         category: NotificacionCategoria.limite,
         level: NotificacionNivel.exito,
         title: 'Recibiste una bonificación',
-        message: `Tu empresa recibió una bonificación adicional: ${outcome.increases.join(', ')}. Gracias por seguir usando Norbitex.`,
+        message: `Tu empresa recibió una bonificación adicional: ${outcome.increases.join(', ')}. Gracias por seguir usando Nuvex.`,
         link: '/configuracion/plan',
         companyId: empresaId,
         recipientIds: owners,

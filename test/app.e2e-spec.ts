@@ -20,7 +20,7 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer())
       .get('/')
       .expect(200)
-      .expect('Norbitex API');
+      .expect('Nuvex API');
   });
 
   it('/health (GET) is public and checks the database', () => {

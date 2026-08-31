@@ -10,7 +10,7 @@ export class AppService {
   ) {}
 
   getHello(): string {
-    return 'Norbitex API';
+    return 'Nuvex API';
   }
 
   async health() {

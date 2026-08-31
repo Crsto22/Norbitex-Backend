@@ -974,7 +974,7 @@ export class PlatformAffiliatesService {
           .fillColor('#ffffff')
           .font(fonts.bold)
           .fontSize(18)
-          .text('NORBITEX', 92, 25)
+          .text('NUVEX', 92, 25)
           .font(fonts.regular)
           .fontSize(9)
           .fillColor('#d8defc')
@@ -1161,7 +1161,7 @@ export class PlatformAffiliatesService {
         .font(fonts.regular)
         .fontSize(7)
         .text(
-          'Documento administrativo generado por Norbitex. Los importes se calculan desde la liquidacion mensual cerrada.',
+          'Documento administrativo generado por Nuvex. Los importes se calculan desde la liquidacion mensual cerrada.',
           left,
           doc.page.height - 40,
           { width, align: 'center' },
