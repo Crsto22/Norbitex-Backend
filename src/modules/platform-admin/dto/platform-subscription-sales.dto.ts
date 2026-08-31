@@ -277,6 +277,16 @@ export class CreateSubscriptionCheckoutDto {
   affiliateCode?: string;
 
   @IsOptional()
+  @IsIn(['percent', 'fixed'])
+  manualDiscountType?: 'percent' | 'fixed';
+
+  @ValidateIf((dto: CreateSubscriptionCheckoutDto) =>
+    Boolean(dto.manualDiscountType),
+  )
+  @Matches(/^\d{1,9}(\.\d{1,2})?$/)
+  manualDiscountValue?: string;
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => CheckoutPosDto)
   pos?: CheckoutPosDto;

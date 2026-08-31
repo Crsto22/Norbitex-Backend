@@ -70,6 +70,19 @@ describe('PlatformSubscriptionsService', () => {
           updatedAt: new Date('2026-01-10T15:30:00.000Z'),
         }),
       },
+      plan: {
+        findUnique: jest.fn().mockResolvedValue({
+          planCodigo: PlanCodigo.emprendedor,
+          nombre: 'Emprendedor',
+          descripcion: null,
+          destacado: false,
+          orden: 2,
+          color: null,
+        }),
+      },
+      planModulo: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       empresa: {
         findUnique: jest.fn().mockResolvedValue(company),
         update: jest.fn().mockResolvedValue({}),
@@ -89,6 +102,9 @@ describe('PlatformSubscriptionsService', () => {
               motivoAnulacion: null,
               anuladoAt: null,
               anuladoPor: null,
+              descuentoManualTipo: null,
+              descuentoManualValor: null,
+              montoDescuentoManual: new Prisma.Decimal(0),
               empresa: {
                 id: company.id,
                 nombreComercial: company.nombreComercial,

@@ -100,6 +100,9 @@ export class UpdateAttendancePricingDto {
 
   @Matches(/^\d{1,9}(\.\d{1,2})?$/)
   qrPointUnitPrice!: string;
+
+  @Matches(/^\d{1,3}(\.\d{1,2})?$/)
+  annualDiscountPercent!: string;
 }
 
 export class FindOveragesQueryDto {

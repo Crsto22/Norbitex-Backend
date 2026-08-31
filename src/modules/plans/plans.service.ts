@@ -87,7 +87,12 @@ export class PlansService {
         },
       })) ??
       (await tx.tarifaAsistencia.create({
-        data: { id: 1, precioTrabajador: '2.00', precioPuntoQr: '10.00' },
+        data: {
+          id: 1,
+          precioTrabajador: '2.00',
+          precioPuntoQr: '10.00',
+          descuentoAnualPorcentaje: '0.00',
+        },
         include: {
           actualizadoPor: {
             select: { id: true, nombre: true, apellido: true, email: true },
@@ -100,20 +105,32 @@ export class PlansService {
 
   async updateAttendancePricing(
     actor: JwtPayload,
-    dto: { employeeUnitPrice: string; qrPointUnitPrice: string },
+    dto: {
+      employeeUnitPrice: string;
+      qrPointUnitPrice: string;
+      annualDiscountPercent: string;
+    },
   ) {
     const actorId = this.parseId(actor.sub, 'administrador');
+    const annualDiscountPercent = new Prisma.Decimal(dto.annualDiscountPercent);
+    if (annualDiscountPercent.gt(100)) {
+      throw new BadRequestException(
+        'La oferta anual de asistencias no puede superar 100%',
+      );
+    }
     const updated = await this.prisma.tarifaAsistencia.upsert({
       where: { id: 1 },
       create: {
         id: 1,
         precioTrabajador: dto.employeeUnitPrice,
         precioPuntoQr: dto.qrPointUnitPrice,
+        descuentoAnualPorcentaje: annualDiscountPercent,
         actualizadoPorId: actorId,
       },
       update: {
         precioTrabajador: dto.employeeUnitPrice,
         precioPuntoQr: dto.qrPointUnitPrice,
+        descuentoAnualPorcentaje: annualDiscountPercent,
         actualizadoPorId: actorId,
       },
       include: {
@@ -1241,6 +1258,7 @@ export class PlansService {
   private mapAttendancePricing(pricing: {
     precioTrabajador: Prisma.Decimal;
     precioPuntoQr: Prisma.Decimal;
+    descuentoAnualPorcentaje: Prisma.Decimal;
     updatedAt: Date;
     actualizadoPor?: {
       id: bigint;
@@ -1252,6 +1270,7 @@ export class PlansService {
     return {
       employeeUnitPrice: pricing.precioTrabajador.toFixed(2),
       qrPointUnitPrice: pricing.precioPuntoQr.toFixed(2),
+      annualDiscountPercent: pricing.descuentoAnualPorcentaje.toFixed(2),
       currency: 'PEN' as const,
       includesIgv: true as const,
       updatedAt: pricing.updatedAt.toISOString(),

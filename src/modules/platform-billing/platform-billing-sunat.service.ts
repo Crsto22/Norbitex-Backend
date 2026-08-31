@@ -669,18 +669,24 @@ export class PlatformBillingSunatService {
   }
 
   private details(receipt: EmissionReceipt) {
-    return receipt.detalles.map((line) => ({
-      cantidad: line.cantidad.toNumber(),
-      descripcion: line.descripcion,
-      precioUnitario: line.precioUnitario,
-      valorUnitario: line.baseImponible.div(line.cantidad),
-      valorVenta: line.baseImponible,
-      total: line.total,
-      igvMonto: line.igv,
-      unidadMedidaCodigo: 'ZZ',
-      tipoAfectacionIgvCodigo: '10',
-      productoVariante: { sku: null, producto: { nombre: line.descripcion } },
-    }));
+    return receipt.detalles.map((line) => {
+      const listTotal = line.precioUnitario.mul(line.cantidad);
+      const listBase = line.total.gt(0)
+        ? line.baseImponible.mul(listTotal).div(line.total).toDecimalPlaces(2)
+        : line.baseImponible;
+      return {
+        cantidad: line.cantidad.toNumber(),
+        descripcion: line.descripcion,
+        precioUnitario: line.precioUnitario,
+        valorUnitario: listBase.div(line.cantidad),
+        valorVenta: line.baseImponible,
+        total: line.total,
+        igvMonto: line.igv,
+        unidadMedidaCodigo: 'ZZ',
+        tipoAfectacionIgvCodigo: '10',
+        productoVariante: { sku: null, producto: { nombre: line.descripcion } },
+      };
+    });
   }
 
   private customerType(code: string | null) {

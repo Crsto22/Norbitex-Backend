@@ -82,6 +82,12 @@ type Receipt = Prisma.ComprobantePlataformaGetPayload<{
   include: typeof receiptInclude;
 }>;
 type Tx = Prisma.TransactionClient;
+type ReceiptItem = {
+  description: string;
+  quantity: Prisma.Decimal;
+  total: Prisma.Decimal;
+  listTotal?: Prisma.Decimal;
+};
 
 @Injectable()
 export class PlatformBillingService {
@@ -705,6 +711,7 @@ export class PlatformBillingService {
       type: PlataformaComprobanteTipo;
       description: string;
       total: Prisma.Decimal;
+      listTotal?: Prisma.Decimal;
     },
   ) {
     return this.createReceipt(tx, {
@@ -713,6 +720,7 @@ export class PlatformBillingService {
         {
           description: params.description,
           quantity: new Prisma.Decimal(1),
+          listTotal: params.listTotal,
           total: params.total,
         },
       ],
@@ -730,11 +738,7 @@ export class PlatformBillingService {
       total: Prisma.Decimal;
       pagoSuscripcionId?: bigint;
       suscripcionAsistenciaId?: bigint;
-      items: Array<{
-        description: string;
-        quantity: Prisma.Decimal;
-        total: Prisma.Decimal;
-      }>;
+      items: ReceiptItem[];
     },
   ) {
     return this.createReceipt(tx, params);
@@ -774,11 +778,7 @@ export class PlatformBillingService {
       empresaId: bigint;
       type: PlataformaComprobanteTipo;
       total: Prisma.Decimal;
-      items: Array<{
-        description: string;
-        quantity: Prisma.Decimal;
-        total: Prisma.Decimal;
-      }>;
+      items: ReceiptItem[];
       pagoSuscripcionId?: bigint;
       suscripcionAsistenciaId?: bigint;
       liquidacionExcedenteId?: bigint;
@@ -811,10 +811,11 @@ export class PlatformBillingService {
     const { base, igv } = calculateIncludedTax(params.total, igvPercent);
     const details = params.items.map((item) => {
       const taxes = calculateIncludedTax(item.total, igvPercent);
+      const listTotal = item.listTotal ?? item.total;
       return {
         descripcion: item.description,
         cantidad: item.quantity,
-        precioUnitario: item.total.div(item.quantity).toDecimalPlaces(2),
+        precioUnitario: listTotal.div(item.quantity).toDecimalPlaces(2),
         baseImponible: taxes.base,
         igv: taxes.igv,
         total: item.total,

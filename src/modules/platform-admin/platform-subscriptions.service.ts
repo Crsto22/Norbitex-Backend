@@ -64,6 +64,12 @@ const saleInclude = {
 type SubscriptionSale = Prisma.PagoSuscripcionGetPayload<{
   include: typeof saleInclude;
 }>;
+type CheckoutItem = {
+  description: string;
+  quantity: Prisma.Decimal;
+  total: Prisma.Decimal;
+  listTotal?: Prisma.Decimal;
+};
 
 const attendanceSubscriptionInclude = {
   empresa: {
@@ -328,6 +334,7 @@ export class PlatformSubscriptionsService {
           empresaId: company.id,
           type: dto.receiptType,
           description: `Suscripcion ${definition.name} por ${dto.months} mes(es)`,
+          listTotal: amounts.listAmount,
           total: finalTotal,
         });
 
@@ -443,11 +450,7 @@ export class PlatformSubscriptionsService {
 
         let sale: SubscriptionSale | null = null;
         let attendance: AttendanceSubscription | null = null;
-        const items: Array<{
-          description: string;
-          quantity: Prisma.Decimal;
-          total: Prisma.Decimal;
-        }> = [];
+        const items: CheckoutItem[] = [];
         const posItems: typeof items = [];
         const attendanceItems: typeof items = [];
         let total = new Prisma.Decimal(0);
@@ -551,6 +554,7 @@ export class PlatformSubscriptionsService {
           const item = {
             description: `Plan POS ${definition.name} por ${dto.pos.months} mes(es)`,
             quantity: new Prisma.Decimal(1),
+            listTotal: amounts.listAmount,
             total: amounts.total,
           };
           items.push(item);
@@ -595,7 +599,18 @@ export class PlatformSubscriptionsService {
             .mul(dto.attendance.employeesLimit)
             .plus(pricing.precioPuntoQr.mul(dto.attendance.qrPointsLimit))
             .toDecimalPlaces(2);
-          const totalAmount = monthlyAmount.mul(months).toDecimalPlaces(2);
+          const listAmount = monthlyAmount.mul(months).toDecimalPlaces(2);
+          const annualDiscountPercent =
+            period === SuscripcionAsistenciaPeriodo.anual
+              ? pricing.descuentoAnualPorcentaje
+              : new Prisma.Decimal(0);
+          const annualDiscountAmount = listAmount
+            .mul(annualDiscountPercent)
+            .div(100)
+            .toDecimalPlaces(2);
+          const totalAmount = listAmount
+            .minus(annualDiscountAmount)
+            .toDecimalPlaces(2);
 
           await tx.empresa.update({
             where: { id: empresaId },
@@ -620,6 +635,8 @@ export class PlatformSubscriptionsService {
               precioPuntoQrSnapshot: pricing.precioPuntoQr,
               periodo: period,
               montoMensual: monthlyAmount,
+              descuentoPorcentaje: annualDiscountPercent,
+              montoDescuento: annualDiscountAmount,
               montoTotal: totalAmount,
               afiliadoId: affiliate?.id,
               afiliadoCodigo: affiliate?.code,
@@ -646,12 +663,37 @@ export class PlatformSubscriptionsService {
           const attendanceItem = {
             description: `Servicio de asistencia - ${months} mes(es) - ${dto.attendance.employeesLimit} trabajador(es) - ${dto.attendance.qrPointsLimit} punto(s) QR`,
             quantity: new Prisma.Decimal(1),
+            listTotal: listAmount,
             total: totalAmount,
           };
           items.push(attendanceItem);
           attendanceItems.push(attendanceItem);
           total = total.plus(totalAmount);
         }
+
+        const subtotalBeforeManual = total;
+        const manualDiscount = resolveManualDiscount(
+          subtotalBeforeManual,
+          dto.manualDiscountType,
+          dto.manualDiscountValue,
+        );
+        const posSubtotalBeforeManual = sumItems(posItems);
+        const posManualDiscount =
+          sale && attendance
+            ? proportionalAmount(
+                manualDiscount.amount,
+                posSubtotalBeforeManual,
+                subtotalBeforeManual,
+              )
+            : sale
+              ? manualDiscount.amount
+              : new Prisma.Decimal(0);
+        const attendanceManualDiscount = manualDiscount.amount
+          .minus(posManualDiscount)
+          .toDecimalPlaces(2);
+        applyDiscount(posItems, posManualDiscount);
+        applyDiscount(attendanceItems, attendanceManualDiscount);
+        total = total.minus(manualDiscount.amount).toDecimalPlaces(2);
 
         const affiliateAmounts = calculateAffiliatePricing(
           total,
@@ -660,7 +702,7 @@ export class PlatformSubscriptionsService {
         );
         const posBase = sumItems(posItems);
         const attendanceBase = sumItems(attendanceItems);
-        const posDiscount =
+        const posAffiliateDiscount =
           sale && attendance
             ? proportionalAmount(
                 affiliateAmounts.discountAmount,
@@ -670,15 +712,15 @@ export class PlatformSubscriptionsService {
             : sale
               ? affiliateAmounts.discountAmount
               : new Prisma.Decimal(0);
-        const attendanceDiscount = affiliateAmounts.discountAmount
-          .minus(posDiscount)
+        const attendanceAffiliateDiscount = affiliateAmounts.discountAmount
+          .minus(posAffiliateDiscount)
           .toDecimalPlaces(2);
-        const posTotal = posBase.minus(posDiscount).toDecimalPlaces(2);
+        const posTotal = posBase.minus(posAffiliateDiscount).toDecimalPlaces(2);
         const attendanceTotal = attendanceBase
-          .minus(attendanceDiscount)
+          .minus(attendanceAffiliateDiscount)
           .toDecimalPlaces(2);
-        applyDiscount(posItems, posDiscount);
-        applyDiscount(attendanceItems, attendanceDiscount);
+        applyDiscount(posItems, posAffiliateDiscount);
+        applyDiscount(attendanceItems, attendanceAffiliateDiscount);
 
         const posCommission =
           sale && attendance
@@ -698,7 +740,10 @@ export class PlatformSubscriptionsService {
           sale = await tx.pagoSuscripcion.update({
             where: { id: sale.id },
             data: {
-              montoDescuentoAfiliado: posDiscount,
+              descuentoManualTipo: manualDiscount.type,
+              descuentoManualValor: manualDiscount.value,
+              montoDescuentoManual: posManualDiscount,
+              montoDescuentoAfiliado: posAffiliateDiscount,
               baseComisionAfiliado: affiliate ? posTotal : 0,
               montoComisionAfiliado: posCommission,
               montoTotal: posTotal,
@@ -710,7 +755,10 @@ export class PlatformSubscriptionsService {
           attendance = await tx.suscripcionAsistencia.update({
             where: { id: attendance.id },
             data: {
-              montoDescuentoAfiliado: attendanceDiscount,
+              descuentoManualTipo: manualDiscount.type,
+              descuentoManualValor: manualDiscount.value,
+              montoDescuentoManual: attendanceManualDiscount,
+              montoDescuentoAfiliado: attendanceAffiliateDiscount,
               baseComisionAfiliado: affiliate ? attendanceTotal : 0,
               montoComisionAfiliado: attendanceCommission,
               montoTotal: attendanceTotal,
@@ -753,6 +801,9 @@ export class PlatformSubscriptionsService {
             metadata: {
               posPaymentId: sale?.id.toString() ?? null,
               attendanceSubscriptionId: attendance?.id.toString() ?? null,
+              manualDiscountType: manualDiscount.type,
+              manualDiscountValue: manualDiscount.value?.toFixed(2) ?? null,
+              manualDiscountAmount: manualDiscount.amount.toFixed(2),
               affiliateDiscountAmount:
                 affiliateAmounts.discountAmount.toFixed(2),
               affiliateCommissionAmount:
@@ -936,7 +987,18 @@ export class PlatformSubscriptionsService {
           .mul(dto.employeesLimit)
           .plus(pricing.precioPuntoQr.mul(dto.qrPointsLimit))
           .toDecimalPlaces(2);
-        const totalAmount = monthlyAmount.mul(months).toDecimalPlaces(2);
+        const listAmount = monthlyAmount.mul(months).toDecimalPlaces(2);
+        const annualDiscountPercent =
+          dto.period === SuscripcionAsistenciaPeriodo.anual
+            ? pricing.descuentoAnualPorcentaje
+            : new Prisma.Decimal(0);
+        const annualDiscountAmount = listAmount
+          .mul(annualDiscountPercent)
+          .div(100)
+          .toDecimalPlaces(2);
+        const totalAmount = listAmount
+          .minus(annualDiscountAmount)
+          .toDecimalPlaces(2);
 
         await tx.empresa.update({
           where: { id: empresaId },
@@ -960,6 +1022,8 @@ export class PlatformSubscriptionsService {
             precioPuntoQrSnapshot: pricing.precioPuntoQr,
             periodo: dto.period,
             montoMensual: monthlyAmount,
+            descuentoPorcentaje: annualDiscountPercent,
+            montoDescuento: annualDiscountAmount,
             montoTotal: totalAmount,
             metodoPago: dto.paymentMethod,
             metodoPagoOtro:
@@ -991,6 +1055,8 @@ export class PlatformSubscriptionsService {
               employeesLimit: dto.employeesLimit,
               qrPointsLimit: dto.qrPointsLimit,
               monthlyAmount: monthlyAmount.toFixed(2),
+              annualDiscountPercent: annualDiscountPercent.toFixed(2),
+              annualDiscountAmount: annualDiscountAmount.toFixed(2),
               totalAmount: totalAmount.toFixed(2),
               startsAt: coverageStartsAt.toISOString(),
               endsAt: coverageEndsAt.toISOString(),
@@ -1376,6 +1442,12 @@ export class PlatformSubscriptionsService {
       qrPointUnitPrice: subscription.precioPuntoQrSnapshot.toFixed(2),
       period: subscription.periodo,
       monthlyAmount: subscription.montoMensual.toFixed(2),
+      discountPercent: subscription.descuentoPorcentaje.toFixed(2),
+      discountAmount: subscription.montoDescuento.toFixed(2),
+      manualDiscountType: subscription.descuentoManualTipo,
+      manualDiscountValue:
+        subscription.descuentoManualValor?.toFixed(2) ?? null,
+      manualDiscountAmount: subscription.montoDescuentoManual.toFixed(2),
       totalAmount: subscription.montoTotal.toFixed(2),
       affiliateCode: subscription.afiliadoCodigo,
       affiliateDiscountPercent:
@@ -1454,6 +1526,9 @@ export class PlatformSubscriptionsService {
       listAmount: sale.montoLista.toFixed(2),
       discountPercent: sale.descuentoPorcentaje.toFixed(2),
       discountAmount: sale.montoDescuento.toFixed(2),
+      manualDiscountType: sale.descuentoManualTipo,
+      manualDiscountValue: sale.descuentoManualValor?.toFixed(2) ?? null,
+      manualDiscountAmount: sale.montoDescuentoManual.toFixed(2),
       affiliateCode: sale.afiliadoCodigo,
       affiliateDiscountPercent: sale.descuentoAfiliadoPorcentaje.toFixed(2),
       affiliateDiscountAmount: sale.montoDescuentoAfiliado.toFixed(2),
@@ -1557,6 +1632,37 @@ function proportionalAmount(
     return new Prisma.Decimal(0);
   }
   return amount.mul(part).div(total).toDecimalPlaces(2);
+}
+
+function resolveManualDiscount(
+  subtotal: Prisma.Decimal,
+  type?: 'percent' | 'fixed',
+  rawValue?: string,
+) {
+  if (!type) {
+    return {
+      type: null,
+      value: null,
+      amount: new Prisma.Decimal(0),
+    };
+  }
+  if (!rawValue) {
+    throw new BadRequestException('Ingresa el descuento manual');
+  }
+  const value = new Prisma.Decimal(rawValue);
+  if (type === 'percent' && value.gt(100)) {
+    throw new BadRequestException(
+      'El descuento porcentual no puede superar 100%',
+    );
+  }
+  const amount =
+    type === 'percent'
+      ? subtotal.mul(value).div(100).toDecimalPlaces(2)
+      : value.toDecimalPlaces(2);
+  if (amount.gt(subtotal)) {
+    throw new BadRequestException('El descuento manual supera el subtotal');
+  }
+  return { type, value, amount };
 }
 
 function applyDiscount(
