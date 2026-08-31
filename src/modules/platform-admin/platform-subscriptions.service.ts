@@ -591,19 +591,11 @@ export class PlatformSubscriptionsService {
             coverageStartsAt,
             months,
           );
-          const employeesTotal = pricing.precioTrabajador
-            .mul(dto.attendance.employeesLimit)
-            .mul(months)
-            .toDecimalPlaces(2);
-          const qrTotal = pricing.precioPuntoQr
-            .mul(dto.attendance.qrPointsLimit)
-            .mul(months)
-            .toDecimalPlaces(2);
           const monthlyAmount = pricing.precioTrabajador
             .mul(dto.attendance.employeesLimit)
             .plus(pricing.precioPuntoQr.mul(dto.attendance.qrPointsLimit))
             .toDecimalPlaces(2);
-          const totalAmount = employeesTotal.plus(qrTotal).toDecimalPlaces(2);
+          const totalAmount = monthlyAmount.mul(months).toDecimalPlaces(2);
 
           await tx.empresa.update({
             where: { id: empresaId },
@@ -651,18 +643,13 @@ export class PlatformSubscriptionsService {
             },
             include: attendanceSubscriptionInclude,
           });
-          const employeeItem = {
-            description: `Asistencias - ${dto.attendance.employeesLimit} trabajador(es)`,
-            quantity: new Prisma.Decimal(dto.attendance.employeesLimit),
-            total: employeesTotal,
+          const attendanceItem = {
+            description: `Servicio de asistencia - ${months} mes(es) - ${dto.attendance.employeesLimit} trabajador(es) - ${dto.attendance.qrPointsLimit} punto(s) QR`,
+            quantity: new Prisma.Decimal(1),
+            total: totalAmount,
           };
-          const qrItem = {
-            description: `Asistencias - ${dto.attendance.qrPointsLimit} punto(s) QR`,
-            quantity: new Prisma.Decimal(dto.attendance.qrPointsLimit),
-            total: qrTotal,
-          };
-          items.push(employeeItem, qrItem);
-          attendanceItems.push(employeeItem, qrItem);
+          items.push(attendanceItem);
+          attendanceItems.push(attendanceItem);
           total = total.plus(totalAmount);
         }
 
