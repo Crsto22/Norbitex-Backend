@@ -75,16 +75,26 @@ describe('CompanyService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('requires onboarding only when there are no active branches', async () => {
+  it('tracks POS and attendance branches separately for onboarding', async () => {
     const { service, prisma } = createService();
-    prisma.sucursal.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    prisma.sucursal.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1);
 
     await expect(service.getSetupStatus(1n)).resolves.toEqual({
       hasActiveBranch: false,
+      hasActiveAttendanceBranch: true,
+      hasAnyActiveBranch: true,
       requiresBranch: true,
     });
     await expect(service.getSetupStatus(1n)).resolves.toEqual({
       hasActiveBranch: true,
+      hasActiveAttendanceBranch: false,
+      hasAnyActiveBranch: true,
       requiresBranch: false,
     });
   });

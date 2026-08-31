@@ -63,17 +63,35 @@ export class CompanyService {
   }
 
   async getSetupStatus(empresaId: bigint) {
-    const activeBranches = await this.prisma.sucursal.count({
-      where: {
-        empresaId,
-        estado: 'activo',
-        tipo: SucursalTipo.tienda,
-      },
-    });
+    const [activeStoreBranches, activeAttendanceBranches, activeBranches] =
+      await Promise.all([
+        this.prisma.sucursal.count({
+          where: {
+            empresaId,
+            estado: 'activo',
+            tipo: SucursalTipo.tienda,
+          },
+        }),
+        this.prisma.sucursal.count({
+          where: {
+            empresaId,
+            estado: 'activo',
+            tipo: SucursalTipo.asistencia,
+          },
+        }),
+        this.prisma.sucursal.count({
+          where: {
+            empresaId,
+            estado: 'activo',
+          },
+        }),
+      ]);
 
     return {
-      hasActiveBranch: activeBranches > 0,
-      requiresBranch: activeBranches === 0,
+      hasActiveBranch: activeStoreBranches > 0,
+      hasActiveAttendanceBranch: activeAttendanceBranches > 0,
+      hasAnyActiveBranch: activeBranches > 0,
+      requiresBranch: activeStoreBranches === 0,
     };
   }
 
