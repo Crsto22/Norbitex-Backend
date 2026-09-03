@@ -525,7 +525,7 @@ export class EmployeesService {
   private buildActivationUrl(token: string) {
     const baseUrl =
       this.configService.get<string>('WORKER_FRONTEND_URL') ??
-      'http://localhost:3002';
+      'https://asistencia.nuvex.pe';
     return `${baseUrl.replace(/\/$/, '')}/login?token=${encodeURIComponent(token)}`;
   }
 
