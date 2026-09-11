@@ -25,6 +25,7 @@ import {
   FindPlatformUsersQueryDto,
   UpdatePlatformUserStatusDto,
 } from './dto/platform-admin-users.dto';
+import { UpdateCompanyTrialDto } from './dto/update-company-trial.dto';
 import { PlansService } from '../plans/plans.service';
 import type { PlatformDashboardDateFilter } from './dto/platform-dashboard.dto';
 
@@ -308,13 +309,7 @@ export class PlatformAdminService {
   }
 
   async findCompany(id: string, now = new Date()) {
-    let companyId: bigint;
-    try {
-      companyId = BigInt(id);
-      if (companyId <= 0n) throw new Error();
-    } catch {
-      throw new BadRequestException('Identificador de empresa invalido');
-    }
+    const companyId = this.parseCompanyId(id);
 
     const company = await this.prisma.empresa.findUnique({
       where: { id: companyId },
@@ -414,6 +409,60 @@ export class PlatformAdminService {
           }
         : null,
     };
+  }
+
+  async updateCompanyTrial(
+    actor: JwtPayload,
+    id: string,
+    dto: UpdateCompanyTrialDto,
+    now = new Date(),
+  ) {
+    const companyId = this.parseCompanyId(id);
+    const endsAt = this.parseTrialEndsAt(dto.endsAt);
+    const actorId = BigInt(actor.sub);
+
+    const company = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "empresa" WHERE "id" = ${companyId} FOR UPDATE`;
+      const current = await tx.empresa.findUnique({
+        where: { id: companyId },
+        select: {
+          id: true,
+          nombreComercial: true,
+          planCodigo: true,
+          planFinAt: true,
+        },
+      });
+      if (!current) throw new NotFoundException('Empresa no encontrada');
+      if (current.planCodigo !== PlanCodigo.prueba) {
+        throw new BadRequestException(
+          'Solo puedes editar la prueba de empresas en plan Prueba',
+        );
+      }
+
+      const updated = await tx.empresa.update({
+        where: { id: companyId },
+        data: { planFinAt: endsAt },
+      });
+
+      await tx.platformAuditLog.create({
+        data: {
+          empresaId: companyId,
+          usuarioId: actorId,
+          category: 'company',
+          action: 'company_trial_updated',
+          source: 'admin',
+          description: `Prueba de ${current.nombreComercial} actualizada`,
+          metadata: {
+            previousEndsAt: current.planFinAt?.toISOString() ?? null,
+            endsAt: updated.planFinAt?.toISOString() ?? null,
+          },
+        },
+      });
+
+      return updated;
+    });
+
+    return this.findCompany(company.id.toString(), now);
   }
 
   async findCompanyUsage(
@@ -995,6 +1044,26 @@ export class PlatformAdminService {
     } catch {
       throw new BadRequestException('Identificador de usuario inválido');
     }
+  }
+
+  private parseCompanyId(id: string) {
+    try {
+      const value = BigInt(id);
+      if (value <= 0n) throw new Error();
+      return value;
+    } catch {
+      throw new BadRequestException('Identificador de empresa invalido');
+    }
+  }
+
+  private parseTrialEndsAt(value: string) {
+    const date = value.includes('T')
+      ? new Date(value)
+      : new Date(`${value}T23:59:59.999-05:00`);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Fecha de fin de prueba invalida');
+    }
+    return date;
   }
 
   private buildPlanStatusWhere(

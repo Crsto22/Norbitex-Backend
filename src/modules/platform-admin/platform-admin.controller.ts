@@ -18,6 +18,7 @@ import { PdfConcurrencyService } from '../../common/pdf/pdf-concurrency.service'
 import { rateLimits } from '../../common/rate-limits';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { UpdatePlanPricingDto } from '../plans/dto/update-plan-pricing.dto';
+import { UpdatePlanTrialDto } from '../plans/dto/update-plan-trial.dto';
 import { UpdatePlanLimitsDto } from '../plans/dto/update-plan-limits.dto';
 import { UpdatePlanModulesDto } from '../plans/dto/update-plan-modules.dto';
 import { UpdateOveragePricingDto } from '../plans/dto/update-overage-pricing.dto';
@@ -52,6 +53,7 @@ import {
   UpdateCompanyExtraLimitsDto,
 } from './dto/platform-overages.dto';
 import { UpdateCompanyModulesDto } from './dto/update-company-modules.dto';
+import { UpdateCompanyTrialDto } from './dto/update-company-trial.dto';
 import {
   CloseAffiliateSettlementDto,
   FindAffiliateCommissionsQueryDto,
@@ -178,6 +180,15 @@ export class PlatformAdminController {
     return this.platformAdminService.findCompany(id);
   }
 
+  @Patch('companies/:id/trial')
+  updateCompanyTrial(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateCompanyTrialDto,
+  ) {
+    return this.platformAdminService.updateCompanyTrial(user, id, dto);
+  }
+
   @Get('companies/:id/limits')
   getCompanyLimits(@Param('id') id: string) {
     return this.platformOveragesService.getCompanyLimits(id);
@@ -293,6 +304,15 @@ export class PlatformAdminController {
     @Body() dto: UpdatePlanLimitsDto,
   ) {
     return this.plansService.updateLimits(user, code, dto);
+  }
+
+  @Patch('plans/:code/trial')
+  updatePlanTrial(
+    @CurrentUser() user: JwtPayload,
+    @Param('code', new ParseEnumPipe(PlanCodigo)) code: PlanCodigo,
+    @Body() dto: UpdatePlanTrialDto,
+  ) {
+    return this.plansService.updateTrial(user, code, dto);
   }
 
   @Patch('plans/:code/modules')

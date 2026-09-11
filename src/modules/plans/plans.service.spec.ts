@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConsultaDocumentoTipo, PlanCodigo, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { calculatePlanSalePricing, PlansService } from './plans.service';
@@ -251,6 +251,92 @@ describe('PlansService', () => {
       response: { code: 'PLAN_PRICING_CHANGED' },
     });
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it('reads trial days from the editable plan table', async () => {
+    const trialDays = await new PlansService({
+      plan: {
+        findUnique: jest.fn().mockResolvedValue({ trialDays: 30 }),
+      },
+    } as never as PrismaService).getTrialDays();
+
+    expect(trialDays).toBe(30);
+  });
+
+  it('updates the trial days for the free plan', async () => {
+    const updatedAt = new Date('2026-07-30T15:00:00.000Z');
+    const update = jest.fn().mockResolvedValue({
+      planCodigo: PlanCodigo.prueba,
+      trialDays: 20,
+      updatedAt,
+    });
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ plan_codigo: 'prueba' }]),
+      plan: {
+        findUnique: jest.fn().mockResolvedValue({
+          planCodigo: PlanCodigo.prueba,
+          nombre: 'Prueba',
+          trialDays: 7,
+          updatedAt,
+        }),
+        update,
+      },
+      platformAuditLog: { create: jest.fn() },
+    };
+    const prisma = {
+      $transaction: jest
+        .fn()
+        .mockImplementation(
+          (operation: (client: typeof tx) => Promise<unknown>) => operation(tx),
+        ),
+    } as unknown as PrismaService;
+    const trialService = new PlansService(prisma);
+    jest
+      .spyOn(trialService, 'getAdminPricingCatalog')
+      .mockResolvedValue([{ code: PlanCodigo.prueba, trialDays: 20 } as never]);
+
+    await trialService.updateTrial(
+      { sub: '21', roles: ['SUPERADMIN'] },
+      PlanCodigo.prueba,
+      { trialDays: 20, expectedUpdatedAt: updatedAt.toISOString() },
+    );
+
+    expect(update).toHaveBeenCalledWith({
+      where: { planCodigo: PlanCodigo.prueba },
+      data: { trialDays: 20, actualizadoPorId: 21n },
+    });
+    const auditCalls = tx.platformAuditLog.create.mock.calls as unknown as [
+      [
+        {
+          data: {
+            action: string;
+            metadata: {
+              previousTrialDays: number | null;
+              trialDays: number | null;
+            };
+          };
+        },
+      ],
+    ];
+    const auditArg = auditCalls[0][0];
+    expect(auditArg.data.action).toBe('plan_trial_updated');
+    expect(auditArg.data.metadata).toMatchObject({
+      previousTrialDays: 7,
+      trialDays: 20,
+    });
+  });
+
+  it('rejects trial days updates outside the free plan', async () => {
+    await expect(
+      new PlansService({} as PrismaService).updateTrial(
+        { sub: '21', roles: ['SUPERADMIN'] },
+        PlanCodigo.emprendedor,
+        {
+          trialDays: 20,
+          expectedUpdatedAt: '2026-07-30T15:00:00.000Z',
+        },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('returns structured quota details when a limit is reached', async () => {

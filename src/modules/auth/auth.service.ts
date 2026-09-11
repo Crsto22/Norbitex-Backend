@@ -254,9 +254,6 @@ export class AuthService {
     const ruc = dto.ruc?.trim() || undefined;
     const dni = dto.dni?.trim() || undefined;
     const planInicioAt = new Date();
-    const planFinAt = new Date(
-      planInicioAt.getTime() + 7 * 24 * 60 * 60 * 1000,
-    );
     const usesAttendance =
       dto.productMode === 'attendance' || dto.productMode === 'both';
 
@@ -265,6 +262,10 @@ export class AuthService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      const trialDays = await this.plansService.getTrialDays(tx);
+      const planFinAt = new Date(
+        planInicioAt.getTime() + trialDays * 24 * 60 * 60 * 1000,
+      );
       const usuario = await tx.usuario.findFirst({
         where: {
           id: usuarioId,
@@ -441,7 +442,10 @@ export class AuthService {
           action: 'company_created',
           source: 'registration',
           description: 'Empresa registrada con plan Prueba',
-          metadata: { planCode: empresa.planCodigo, productMode: dto.productMode },
+          metadata: {
+            planCode: empresa.planCodigo,
+            productMode: dto.productMode,
+          },
         },
       });
 
@@ -1182,7 +1186,14 @@ export class AuthService {
           ? attendanceKeys.has(moduleKey)
           : !allowedAttendanceOnly.has(moduleKey);
       return shouldDisable
-        ? [{ empresaId, moduleKey, enabled: false, actualizadoPorId: usuarioId }]
+        ? [
+            {
+              empresaId,
+              moduleKey,
+              enabled: false,
+              actualizadoPorId: usuarioId,
+            },
+          ]
         : [];
     });
   }

@@ -149,6 +149,12 @@ describe('PlatformAdminService', () => {
           ),
         ),
       },
+      plan: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      planModulo: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       pagoSuscripcion: {
         aggregate: jest.fn().mockResolvedValue({
           _sum: { montoTotal: new Prisma.Decimal(248) },
@@ -247,6 +253,105 @@ describe('PlatformAdminService', () => {
       subscriptionEvents: 0,
       affiliateEvents: 0,
     });
+  });
+
+  it('updates the trial end date for a company in trial', async () => {
+    const updated = {
+      id: 7n,
+      nombreComercial: 'Nuvex Demo',
+      planCodigo: PlanCodigo.prueba,
+      planFinAt: new Date('2026-08-20T04:59:59.999Z'),
+    };
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 7n }]),
+      empresa: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 7n,
+          nombreComercial: 'Nuvex Demo',
+          planCodigo: PlanCodigo.prueba,
+          planFinAt: new Date('2026-08-10T04:59:59.999Z'),
+        }),
+        update: jest.fn().mockResolvedValue(updated),
+      },
+      platformAuditLog: { create: jest.fn() },
+    };
+    const prisma = {
+      $transaction: jest
+        .fn()
+        .mockImplementation(
+          (operation: (client: typeof tx) => Promise<unknown>) => operation(tx),
+        ),
+    } as unknown as PrismaService;
+    const service = new PlatformAdminService(
+      prisma,
+      new PlansService({} as PrismaService),
+    );
+    jest.spyOn(service, 'findCompany').mockResolvedValue({
+      id: '7',
+      planCode: PlanCodigo.prueba,
+      endsAt: updated.planFinAt.toISOString(),
+    } as never);
+
+    const result = await service.updateCompanyTrial(
+      { sub: '21', roles: ['SUPERADMIN'] },
+      '7',
+      { endsAt: '2026-08-19' },
+    );
+
+    expect(tx.empresa.update).toHaveBeenCalledWith({
+      where: { id: 7n },
+      data: { planFinAt: updated.planFinAt },
+    });
+    const auditCalls = tx.platformAuditLog.create.mock.calls as unknown as [
+      [
+        {
+          data: {
+            action: string;
+            metadata: { previousEndsAt: string | null; endsAt: string | null };
+          };
+        },
+      ],
+    ];
+    const auditArg = auditCalls[0][0];
+    expect(auditArg.data.action).toBe('company_trial_updated');
+    expect(auditArg.data.metadata).toMatchObject({
+      previousEndsAt: '2026-08-10T04:59:59.999Z',
+      endsAt: '2026-08-20T04:59:59.999Z',
+    });
+    expect(result.endsAt).toBe('2026-08-20T04:59:59.999Z');
+  });
+
+  it('blocks trial date edits for paid-plan companies', async () => {
+    const update = jest.fn();
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 7n }]),
+      empresa: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 7n,
+          nombreComercial: 'Nuvex Demo',
+          planCodigo: PlanCodigo.emprendedor,
+          planFinAt: new Date('2026-08-10T04:59:59.999Z'),
+        }),
+        update,
+      },
+    };
+    const prisma = {
+      $transaction: jest
+        .fn()
+        .mockImplementation(
+          (operation: (client: typeof tx) => Promise<unknown>) => operation(tx),
+        ),
+    } as unknown as PrismaService;
+
+    await expect(
+      new PlatformAdminService(
+        prisma,
+        new PlansService({} as PrismaService),
+      ).updateCompanyTrial({ sub: '21', roles: ['SUPERADMIN'] }, '7', {
+        endsAt: '2026-08-19',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('prevents a platform administrator from deactivating their own account', async () => {

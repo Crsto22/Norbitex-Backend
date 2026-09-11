@@ -19,6 +19,7 @@ import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { UpdatePlanLimitsDto } from './dto/update-plan-limits.dto';
 import { UpdatePlanModulesDto } from './dto/update-plan-modules.dto';
 import { UpdatePlanPricingDto } from './dto/update-plan-pricing.dto';
+import { UpdatePlanTrialDto } from './dto/update-plan-trial.dto';
 import { UpdateOveragePricingDto } from './dto/update-overage-pricing.dto';
 import {
   attendanceModuleKeys,
@@ -281,6 +282,16 @@ export class PlansService {
     );
   }
 
+  async getTrialDays(tx: PricingClient = this.prisma) {
+    const plan = await tx.plan.findUnique({
+      where: { planCodigo: PlanCodigo.prueba },
+      select: { trialDays: true },
+    });
+    return (
+      plan?.trialDays ?? this.getDefinition(PlanCodigo.prueba).trialDays ?? 7
+    );
+  }
+
   async updatePricing(
     actor: JwtPayload,
     code: PlanCodigo,
@@ -466,19 +477,23 @@ export class PlansService {
       return result;
     });
 
-    const pricing = await this.prisma.tarifaPlan.findUnique({
-      where: { planCodigo: code },
-      include: {
-        actualizadoPor: {
-          select: { id: true, nombre: true, apellido: true, email: true },
+    const [pricing, plan] = await Promise.all([
+      this.prisma.tarifaPlan.findUnique({
+        where: { planCodigo: code },
+        include: {
+          actualizadoPor: {
+            select: { id: true, nombre: true, apellido: true, email: true },
+          },
         },
-      },
-    });
+      }),
+      this.prisma.plan.findUnique({ where: { planCodigo: code } }),
+    ]);
     return {
       ...this.mapCommercialDefinition(
         code,
         this.requirePricing(pricing, code),
         updated,
+        plan,
       ),
       updatedBy: pricing?.actualizadoPor
         ? {
@@ -506,6 +521,53 @@ export class PlansService {
           }
         : null,
     };
+  }
+
+  async updateTrial(
+    actor: JwtPayload,
+    code: PlanCodigo,
+    dto: UpdatePlanTrialDto,
+  ) {
+    if (code !== PlanCodigo.prueba) {
+      throw new BadRequestException('Solo el plan Prueba tiene dias editables');
+    }
+
+    const actorId = BigInt(actor.sub);
+    const expectedUpdatedAt = new Date(dto.expectedUpdatedAt);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "plan_codigo" FROM "plan" WHERE "plan_codigo" = CAST(${code} AS "PlanCodigo") FOR UPDATE`;
+      const current = await tx.plan.findUnique({ where: { planCodigo: code } });
+      if (!current) throw new NotFoundException('Plan no encontrado');
+      if (current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+        throw new ConflictException({
+          code: 'PLAN_TRIAL_CHANGED',
+          message: 'La prueba fue modificada por otro administrador',
+        });
+      }
+
+      const updated = await tx.plan.update({
+        where: { planCodigo: code },
+        data: { trialDays: dto.trialDays, actualizadoPorId: actorId },
+      });
+
+      await tx.platformAuditLog.create({
+        data: {
+          usuarioId: actorId,
+          category: 'plan',
+          action: 'plan_trial_updated',
+          source: 'admin',
+          description: `Dias de prueba actualizados a ${dto.trialDays}`,
+          metadata: {
+            planCode: code,
+            previousTrialDays: current.trialDays,
+            trialDays: updated.trialDays,
+          },
+        },
+      });
+    });
+
+    const catalog = await this.getAdminPricingCatalog();
+    return catalog.find((plan) => plan.code === code)!;
   }
 
   async updateModules(
