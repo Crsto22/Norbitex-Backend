@@ -15,6 +15,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
+import { attendanceModuleKeys } from '../plans/plan-catalog';
 import { PlansService } from '../plans/plans.service';
 import {
   CloseOverageDto,
@@ -502,9 +503,8 @@ export class PlatformOveragesService {
               branchesLimit: dto.qrPointsLimit,
               documentQueriesLimit,
             },
-            additionalLimits: this.plansService.mapAdditionalLimits(
-              additionalLimits,
-            ),
+            additionalLimits:
+              this.plansService.mapAdditionalLimits(additionalLimits),
           },
         },
       });
@@ -945,21 +945,14 @@ export class PlatformOveragesService {
     },
     overrides: { moduleKey: string; enabled: boolean }[],
   ) {
-    const attendanceKeys = new Set<string>(
-      this.plansService.getDefinition(PlanCodigo.asistencias_basico).moduleKeys,
-    );
+    const attendanceKeys = new Set<string>(attendanceModuleKeys);
     const planModules = await tx.planModulo.findMany({
       where: { planCodigo: company.planCodigo, enabled: true },
       select: { moduleKey: true },
     });
-    const base = new Set(
-      planModules.length
-        ? planModules.map((module) => module.moduleKey)
-        : this.plansService.getDefinition(company.planCodigo).moduleKeys,
-    );
-    for (const moduleKey of attendanceKeys) base.delete(moduleKey);
-    if (this.plansService.mapAttendanceAddon(company).effectiveActive) {
-      for (const moduleKey of attendanceKeys) base.add(moduleKey);
+    const base = new Set(planModules.map((module) => module.moduleKey));
+    if (!this.plansService.mapAttendanceAddon(company).effectiveActive) {
+      for (const moduleKey of attendanceKeys) base.delete(moduleKey);
     }
     const effective = new Set(base);
     for (const override of overrides) {

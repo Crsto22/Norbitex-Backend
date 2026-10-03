@@ -804,15 +804,9 @@ export class PlansService {
       where: { planCodigo: company.planCodigo, enabled: true },
       select: { moduleKey: true },
     });
-    const available = new Set(
-      planModules.length
-        ? planModules.map((module) => module.moduleKey)
-        : this.getDefinition(company.planCodigo).moduleKeys,
-    );
-    for (const moduleKey of attendanceKeys) available.delete(moduleKey);
-
-    if (this.isAttendanceEffective(company)) {
-      for (const moduleKey of attendanceModuleKeys) available.add(moduleKey);
+    const available = new Set(planModules.map((module) => module.moduleKey));
+    if (!this.isAttendanceEffective(company)) {
+      for (const moduleKey of attendanceKeys) available.delete(moduleKey);
     }
 
     if (!company.id) return available;
@@ -1547,9 +1541,7 @@ export class PlansService {
 
     const definition = this.getDefinition(code);
     const mappedLimits = this.mapPlanLimits(limits);
-    const effectiveModuleKeys = moduleKeys?.length
-      ? moduleKeys
-      : [...definition.moduleKeys];
+    const effectiveModuleKeys = moduleKeys ?? [];
     return {
       ...definition,
       name: planRecord?.nombre ?? definition.name,
@@ -1601,7 +1593,7 @@ export class PlansService {
         `${trialDays ?? 7} dias de acceso`,
         `${limits.branches} sucursal${limits.branches === 1 ? '' : 'es'}`,
         `${limits.products.toLocaleString('es-PE')} productos`,
-        'Todos los modulos',
+        `${moduleKeys.length.toLocaleString('es-PE')} modulos incluidos`,
       ];
     }
     if (code === PlanCodigo.emprendedor) {
@@ -1609,7 +1601,7 @@ export class PlansService {
         `${limits.users.toLocaleString('es-PE')} usuarios`,
         `${limits.products.toLocaleString('es-PE')} productos`,
         `${limits.documents.toLocaleString('es-PE')} comprobantes al mes`,
-        'Reportes excepto usuarios',
+        `${moduleKeys.length.toLocaleString('es-PE')} modulos incluidos`,
       ];
     }
     if (code === PlanCodigo.basico) {
@@ -1617,7 +1609,7 @@ export class PlansService {
         `${limits.users.toLocaleString('es-PE')} usuario`,
         `${limits.products.toLocaleString('es-PE')} productos`,
         `${limits.documents.toLocaleString('es-PE')} comprobantes al mes`,
-        'Reportes de ventas y productos',
+        `${moduleKeys.length.toLocaleString('es-PE')} modulos incluidos`,
       ];
     }
     if (code === PlanCodigo.pos_basico) {
@@ -1625,7 +1617,7 @@ export class PlansService {
         `${limits.users.toLocaleString('es-PE')} usuario`,
         `${limits.products.toLocaleString('es-PE')} productos`,
         `${limits.documents.toLocaleString('es-PE')} comprobantes al mes`,
-        'Sin asistencias',
+        `${moduleKeys.length.toLocaleString('es-PE')} modulos incluidos`,
       ];
     }
     if (
@@ -1643,22 +1635,22 @@ export class PlansService {
       code === PlanCodigo.completo_empresa
     ) {
       return [
-        'POS + Asistencias',
         `${limits.attendanceEmployees.toLocaleString('es-PE')} trabajadores`,
         `${limits.attendanceQrPoints.toLocaleString('es-PE')} puntos QR`,
+        `${moduleKeys.length.toLocaleString('es-PE')} modulos incluidos`,
       ];
     }
     if (code === PlanCodigo.crecimiento) {
       return [
         `${limits.branches.toLocaleString('es-PE')} sucursales`,
         `${limits.users.toLocaleString('es-PE')} usuarios`,
-        'Todos los modulos',
+        `${moduleKeys.length.toLocaleString('es-PE')} modulos incluidos`,
       ];
     }
     return [
       `${limits.branches.toLocaleString('es-PE')} sucursales`,
       `${limits.users.toLocaleString('es-PE')} usuarios`,
-      'Todos los modulos',
+      `${moduleKeys.length.toLocaleString('es-PE')} modulos incluidos`,
     ];
   }
 

@@ -4,9 +4,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { calculatePlanSalePricing, PlansService } from './plans.service';
 
 describe('PlansService', () => {
+  const planModuloFindMany = jest.fn();
+  const companyModuleFindMany = jest.fn();
   const service = new PlansService({
-    planModulo: { findMany: jest.fn().mockResolvedValue([]) },
-    empresaModuloPlan: { findMany: jest.fn().mockResolvedValue([]) },
+    planModulo: { findMany: planModuloFindMany },
+    empresaModuloPlan: { findMany: companyModuleFindMany },
   } as never as PrismaService);
   const startsAt = new Date('2026-07-01T12:00:00.000Z');
   const entrepreneurLimits = {
@@ -22,6 +24,11 @@ describe('PlansService', () => {
     puntosQrAsistencia: 2n,
     updatedAt: startsAt,
   };
+
+  beforeEach(() => {
+    planModuloFindMany.mockReset().mockResolvedValue([]);
+    companyModuleFindMany.mockReset().mockResolvedValue([]);
+  });
 
   it('calculates trial, active and expired states from the plan dates', () => {
     expect(
@@ -56,6 +63,12 @@ describe('PlansService', () => {
   });
 
   it('intersects assigned modules and limits owners to their plan', async () => {
+    planModuloFindMany.mockResolvedValue([
+      { moduleKey: 'ventas-pos' },
+      { moduleKey: 'reportes-clientes' },
+      { moduleKey: 'stock-movimientos' },
+      { moduleKey: 'stock-kardex' },
+    ]);
     const company = {
       planCodigo: PlanCodigo.emprendedor,
       planInicioAt: startsAt,
@@ -85,6 +98,9 @@ describe('PlansService', () => {
   });
 
   it('adds attendance modules only when the company addon is active', async () => {
+    planModuloFindMany.mockResolvedValue([
+      { moduleKey: 'asistencias-dashboard' },
+    ]);
     const company = {
       planCodigo: PlanCodigo.basico,
       planInicioAt: startsAt,
@@ -143,40 +159,141 @@ describe('PlansService', () => {
     ).resolves.toContain('asistencias-dashboard');
   });
 
-  it('keeps the basic plan limited to essential operations', () => {
-    const modules = service.getDefinition(PlanCodigo.basico).moduleKeys;
+  it('keeps an empty persisted module configuration empty', async () => {
+    const company = {
+      planCodigo: PlanCodigo.basico,
+      planInicioAt: startsAt,
+      planFinAt: null,
+    };
 
-    expect(modules).toContain('ventas-pos');
-    expect(modules).toContain('comprobantes');
-    expect(modules).toContain('reportes-ventas');
-    expect(modules).toContain('reportes-productos');
-    expect(modules).toContain('stock-kardex');
-    expect(modules).not.toContain('asistencias-dashboard');
-    expect(modules).not.toContain('asistencias-marcajes');
-    expect(modules).not.toContain('caja');
-    expect(modules).not.toContain('usuarios');
-    expect(modules).not.toContain('gre-remitente');
+    await expect(
+      service.getEffectiveModuleKeys(company, ['OWNER'], []),
+    ).resolves.toEqual([]);
   });
 
-  it('applies the report and module ladder to commercial plans', () => {
-    expect(service.getDefinition(PlanCodigo.emprendedor).moduleKeys).toContain(
-      'reportes-clientes',
-    );
+  it('preserves explicit company module overrides', async () => {
+    companyModuleFindMany.mockResolvedValue([
+      { moduleKey: 'ventas-pos', enabled: true },
+    ]);
+
+    await expect(
+      service.getEffectiveModuleKeys(
+        {
+          id: 1n,
+          planCodigo: PlanCodigo.basico,
+          planInicioAt: startsAt,
+          planFinAt: null,
+        },
+        ['OWNER'],
+        [],
+      ),
+    ).resolves.toEqual(['ventas-pos']);
+  });
+
+  it('returns empty module arrays in the catalog without static fallbacks', async () => {
+    const codes = [
+      PlanCodigo.prueba,
+      PlanCodigo.basico,
+      PlanCodigo.emprendedor,
+      PlanCodigo.crecimiento,
+      PlanCodigo.empresarial,
+    ];
+    const catalogService = new PlansService({
+      tarifaPlan: {
+        findMany: jest.fn().mockResolvedValue(
+          codes.map((planCodigo) => ({
+            planCodigo,
+            precioMensual: new Prisma.Decimal(49),
+            descuentoMensualPorcentaje: new Prisma.Decimal(0),
+            descuentoAnualPorcentaje: new Prisma.Decimal(10),
+            updatedAt: startsAt,
+          })),
+        ),
+      },
+      limitePlan: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue(
+            codes.map((planCodigo) => ({ planCodigo, ...entrepreneurLimits })),
+          ),
+      },
+      plan: {
+        findMany: jest.fn().mockResolvedValue(
+          codes.map((planCodigo) => ({
+            planCodigo,
+            nombre: planCodigo,
+            descripcion: null,
+            estado: 'activo',
+            trialDays: planCodigo === PlanCodigo.prueba ? 7 : null,
+            updatedAt: startsAt,
+          })),
+        ),
+      },
+      planModulo: { findMany: jest.fn().mockResolvedValue([]) },
+    } as never as PrismaService);
+
+    const catalog = await catalogService.getCatalog();
+
+    expect(catalog).toHaveLength(codes.length);
+    expect(catalog.every((plan) => plan.moduleKeys.length === 0)).toBe(true);
     expect(
-      service.getDefinition(PlanCodigo.emprendedor).moduleKeys,
-    ).not.toContain('reportes-usuarios');
-    expect(service.getDefinition(PlanCodigo.emprendedor).moduleKeys).toContain(
-      'gre-remitente',
-    );
-    expect(service.getDefinition(PlanCodigo.emprendedor).moduleKeys).toContain(
-      'conductores',
-    );
-    expect(service.getDefinition(PlanCodigo.crecimiento).moduleKeys).toContain(
-      'gre-remitente',
-    );
-    expect(service.getDefinition(PlanCodigo.prueba).moduleKeys).toContain(
-      'conductores',
-    );
+      catalog.every((plan) => plan.highlights.at(-1) === '0 modulos incluidos'),
+    ).toBe(true);
+  });
+
+  it('persists an empty module selection without recreating defaults', async () => {
+    const updatedAt = new Date('2026-07-30T15:00:00.000Z');
+    const deleteMany = jest.fn();
+    const createMany = jest.fn();
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ plan_codigo: 'basico' }]),
+      plan: {
+        findUnique: jest.fn().mockResolvedValue({
+          planCodigo: PlanCodigo.basico,
+          nombre: 'Básico',
+          updatedAt,
+          modulos: [{ moduleKey: 'ventas-pos' }],
+        }),
+        update: jest.fn().mockResolvedValue({ updatedAt }),
+      },
+      planModulo: { deleteMany, createMany },
+      platformAuditLog: { create: jest.fn() },
+    };
+    const emptyService = new PlansService({
+      $transaction: jest
+        .fn()
+        .mockImplementation(
+          (operation: (client: typeof tx) => Promise<unknown>) => operation(tx),
+        ),
+    } as unknown as PrismaService);
+
+    await expect(
+      emptyService.updateModules(
+        { sub: '21', roles: ['SUPERADMIN'] },
+        PlanCodigo.basico,
+        { moduleKeys: [], expectedUpdatedAt: updatedAt.toISOString() },
+      ),
+    ).resolves.toEqual({
+      moduleKeys: [],
+      modulesUpdatedAt: updatedAt.toISOString(),
+    });
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { planCodigo: PlanCodigo.basico },
+    });
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects unknown plan module keys before writing', async () => {
+    await expect(
+      new PlansService({} as PrismaService).updateModules(
+        { sub: '21', roles: ['SUPERADMIN'] },
+        PlanCodigo.basico,
+        {
+          moduleKeys: ['modulo-inexistente'],
+          expectedUpdatedAt: startsAt.toISOString(),
+        },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('applies monthly and annual discounts only to their durations', () => {
