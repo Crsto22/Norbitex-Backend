@@ -45,6 +45,11 @@ export const planCatalog: Record<PlanCodigo, PlanDefinition> = {
     name: 'Básico',
     trialDays: null,
   },
+  impulsa: {
+    code: PlanCodigo.impulsa,
+    name: 'Impulsa',
+    trialDays: null,
+  },
   emprendedor: {
     code: PlanCodigo.emprendedor,
     name: 'Emprende',
@@ -90,6 +95,7 @@ export const planCatalog: Record<PlanCodigo, PlanDefinition> = {
 export const planList = [
   planCatalog.prueba,
   planCatalog.basico,
+  planCatalog.impulsa,
   planCatalog.emprendedor,
   planCatalog.crecimiento,
   planCatalog.empresarial,

@@ -32,6 +32,7 @@ import type { PlatformDashboardDateFilter } from './dto/platform-dashboard.dto';
 const planColors: Record<PlanCodigo, string> = {
   prueba: '#2563eb',
   basico: '#06b6d4',
+  impulsa: '#e11d48',
   emprendedor: '#10b981',
   crecimiento: '#f59e0b',
   empresarial: '#8b5cf6',

@@ -16,6 +16,7 @@ enum EmpresaEstado {
 enum PlanCodigo {
   prueba
   basico
+  impulsa
   emprendedor
   crecimiento
   empresarial

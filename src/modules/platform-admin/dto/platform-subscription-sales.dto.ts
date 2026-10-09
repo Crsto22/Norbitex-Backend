@@ -76,11 +76,17 @@ export class CreateSubscriptionSaleDto {
 
   @IsIn([
     PlanCodigo.basico,
+    PlanCodigo.impulsa,
     PlanCodigo.emprendedor,
     PlanCodigo.crecimiento,
     PlanCodigo.empresarial,
   ])
-  planCode!: 'basico' | 'emprendedor' | 'crecimiento' | 'empresarial';
+  planCode!:
+    | 'basico'
+    | 'impulsa'
+    | 'emprendedor'
+    | 'crecimiento'
+    | 'empresarial';
 
   @IsIn([1, 3, 6, 12])
   months!: 1 | 3 | 6 | 12;
@@ -201,11 +207,17 @@ export class CreateAttendanceSubscriptionDto {
 export class CheckoutPosDto {
   @IsIn([
     PlanCodigo.basico,
+    PlanCodigo.impulsa,
     PlanCodigo.emprendedor,
     PlanCodigo.crecimiento,
     PlanCodigo.empresarial,
   ])
-  planCode!: 'basico' | 'emprendedor' | 'crecimiento' | 'empresarial';
+  planCode!:
+    | 'basico'
+    | 'impulsa'
+    | 'emprendedor'
+    | 'crecimiento'
+    | 'empresarial';
 
   @IsIn([1, 3, 6, 12])
   months!: 1 | 3 | 6 | 12;

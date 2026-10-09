@@ -194,6 +194,7 @@ describe('PlansService', () => {
     const codes = [
       PlanCodigo.prueba,
       PlanCodigo.basico,
+      PlanCodigo.impulsa,
       PlanCodigo.emprendedor,
       PlanCodigo.crecimiento,
       PlanCodigo.empresarial,

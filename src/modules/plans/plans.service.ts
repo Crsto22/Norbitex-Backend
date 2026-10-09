@@ -1612,6 +1612,14 @@ export class PlansService {
         `${moduleKeys.length.toLocaleString('es-PE')} modulos incluidos`,
       ];
     }
+    if (code === PlanCodigo.impulsa) {
+      return [
+        `${limits.users.toLocaleString('es-PE')} usuarios`,
+        `${limits.products.toLocaleString('es-PE')} productos`,
+        `${limits.documents.toLocaleString('es-PE')} comprobantes al mes`,
+        `${moduleKeys.length.toLocaleString('es-PE')} modulos incluidos`,
+      ];
+    }
     if (code === PlanCodigo.pos_basico) {
       return [
         `${limits.users.toLocaleString('es-PE')} usuario`,

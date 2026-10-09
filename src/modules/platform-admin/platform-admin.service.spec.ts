@@ -73,6 +73,13 @@ describe('PlatformAdminService', () => {
             updatedAt,
           },
           {
+            planCodigo: PlanCodigo.impulsa,
+            precioMensual: new Prisma.Decimal(29.9),
+            descuentoMensualPorcentaje: new Prisma.Decimal(0),
+            descuentoAnualPorcentaje: new Prisma.Decimal(10),
+            updatedAt,
+          },
+          {
             planCodigo: PlanCodigo.emprendedor,
             precioMensual: new Prisma.Decimal(79),
             descuentoMensualPorcentaje: new Prisma.Decimal(0),
@@ -100,6 +107,7 @@ describe('PlatformAdminService', () => {
           [
             [PlanCodigo.prueba, 1, 1, 50, 500, 100, 500 * 1024 * 1024],
             [PlanCodigo.basico, 1, 1, 100, 1_000, 250, 3 * 1024 * 1024 * 1024],
+            [PlanCodigo.impulsa, 2, 1, 800, 3_500, 350, 6 * 1024 * 1024 * 1024],
             [
               PlanCodigo.emprendedor,
               3,
