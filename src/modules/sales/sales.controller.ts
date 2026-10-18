@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -116,6 +117,15 @@ export class SalesController {
   @Post()
   @RequireModule('ventas-pos')
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateSaleDto) {
+    if (
+      dto.formaPago === 'CREDITO' &&
+      !user.moduleKeys?.includes('cuentas-cobrar')
+    ) {
+      throw new ForbiddenException({
+        code: 'MODULE_NOT_INCLUDED',
+        message: 'No tienes acceso al modulo cuentas-cobrar',
+      });
+    }
     return this.salesService.create(
       this.getEmpresaId(user),
       getCommercialScope(user),

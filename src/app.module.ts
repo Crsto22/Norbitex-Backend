@@ -13,6 +13,7 @@ import { PdfConcurrencyModule } from './common/pdf/pdf-concurrency.module';
 import { AttendanceDashboardModule } from './modules/attendance-dashboard/attendance-dashboard.module';
 import { AttendanceQrPointsModule } from './modules/attendance-qr-points/attendance-qr-points.module';
 import { AttendanceTimeEntriesModule } from './modules/attendance-time-entries/attendance-time-entries.module';
+import { AccountsReceivableModule } from './modules/accounts-receivable/accounts-receivable.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BrandsModule } from './modules/brands/brands.module';
 import { BranchesModule } from './modules/branches/branches.module';
@@ -74,6 +75,7 @@ import { validateEnvironment } from './config/environment';
     AttendanceDashboardModule,
     AttendanceQrPointsModule,
     AttendanceTimeEntriesModule,
+    AccountsReceivableModule,
     PrismaModule,
     PlansModule,
     AuthModule,

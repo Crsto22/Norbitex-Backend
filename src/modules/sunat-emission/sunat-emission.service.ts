@@ -34,6 +34,9 @@ const sunatSaleInclude = {
   empresa: true,
   sucursal: true,
   cliente: true,
+  cuentaPorCobrar: {
+    include: { cuotas: { orderBy: { numero: 'asc' } } },
+  },
   detalles: {
     include: {
       productoVariante: {

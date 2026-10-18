@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma, VentaTipoComprobante } from '@prisma/client';
+import { Prisma, VentaFormaPago, VentaTipoComprobante } from '@prisma/client';
 import { create } from 'xmlbuilder2';
 import {
   formatSunatNumber,
@@ -12,6 +12,9 @@ type SunatSale = Prisma.VentaGetPayload<{
     empresa: true;
     sucursal: true;
     cliente: true;
+    cuentaPorCobrar: {
+      include: { cuotas: true };
+    };
     detalles: {
       include: {
         productoVariante: {
@@ -194,7 +197,41 @@ export class SunatXmlBuilderService {
     terms.ele('cbc:ID').txt('FormaPago');
     terms
       .ele('cbc:PaymentMeansID')
-      .txt(sale.formaPago.toUpperCase() === 'CREDITO' ? 'Credito' : 'Contado');
+      .txt(sale.formaPago === VentaFormaPago.CREDITO ? 'Credito' : 'Contado');
+
+    if (sale.formaPago !== VentaFormaPago.CREDITO) {
+      return;
+    }
+    if (!sale.cuentaPorCobrar?.cuotas.length) {
+      throw new BadRequestException(
+        'La factura al credito no tiene cronograma de cuotas',
+      );
+    }
+
+    this.currency(
+      terms,
+      'cbc:Amount',
+      sale.cuentaPorCobrar.saldoInicial,
+      sale.moneda,
+    );
+    for (const installment of [...sale.cuentaPorCobrar.cuotas].sort(
+      (a, b) => a.numero - b.numero,
+    )) {
+      const installmentTerms = root.ele('cac:PaymentTerms');
+      installmentTerms.ele('cbc:ID').txt('FormaPago');
+      installmentTerms
+        .ele('cbc:PaymentMeansID')
+        .txt(`Cuota${installment.numero.toString().padStart(3, '0')}`);
+      this.currency(
+        installmentTerms,
+        'cbc:Amount',
+        installment.montoOriginal,
+        sale.moneda,
+      );
+      installmentTerms
+        .ele('cbc:PaymentDueDate')
+        .txt(installment.fechaVencimiento.toISOString().slice(0, 10));
+    }
   }
 
   private appendTaxTotals(root: XmlNode, sale: SunatSale) {

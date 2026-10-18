@@ -4,6 +4,7 @@ import {
   Prisma,
   ProductoTipo,
   SunatEstado,
+  VentaFormaPago,
   VentaTipoComprobante,
 } from '@prisma/client';
 import { existsSync } from 'node:fs';
@@ -72,6 +73,9 @@ const salePdfInclude = {
     include: {
       metodoPago: { select: { nombre: true } },
     },
+  },
+  cuentaPorCobrar: {
+    include: { cuotas: { orderBy: { numero: 'asc' } } },
   },
 } satisfies Prisma.VentaInclude;
 
@@ -429,6 +433,24 @@ export class SalesPdfService {
       left,
       contentWidth,
     );
+
+    if (sale.cuentaPorCobrar) {
+      const schedule = sale.cuentaPorCobrar.cuotas
+        .map(
+          (installment) =>
+            `Cuota ${installment.numero.toString().padStart(3, '0')}: S/ ${this.money(installment.montoOriginal)} - vence ${this.formatDate(installment.fechaVencimiento)}`,
+        )
+        .join('\n');
+      this.ensureA4Space(doc, 55 + sale.cuentaPorCobrar.cuotas.length * 12);
+      this.drawLabeledBox(
+        doc,
+        'Cronograma de credito:',
+        `Adelanto: S/ ${this.money(sale.cuentaPorCobrar.adelanto)}\nSaldo inicial: S/ ${this.money(sale.cuentaPorCobrar.saldoInicial)}\n${schedule}`,
+        fonts,
+        left,
+        contentWidth,
+      );
+    }
 
     const legalNote = this.buildLegalNote(sale, ambiente, electronicSale);
     this.ensureA4Space(doc, 35);
@@ -863,6 +885,26 @@ export class SalesPdfService {
       padding,
       width,
     );
+    if (sale.cuentaPorCobrar) {
+      this.ticketLabeledText(
+        doc,
+        'Saldo inicial:',
+        `S/ ${this.money(sale.cuentaPorCobrar.saldoInicial)}`,
+        fonts,
+        padding,
+        width,
+      );
+      for (const installment of sale.cuentaPorCobrar.cuotas) {
+        this.ticketLabeledText(
+          doc,
+          `Cuota ${installment.numero.toString().padStart(3, '0')}:`,
+          `S/ ${this.money(installment.montoOriginal)} - ${this.formatDate(installment.fechaVencimiento)}`,
+          fonts,
+          padding,
+          width,
+        );
+      }
+    }
 
     if (electronicSale) {
       this.ticketSeparator(doc, padding, width);
@@ -1317,6 +1359,17 @@ export class SalesPdfService {
   }
 
   private buildPaymentLabel(sale: SaleForPdf) {
+    if (sale.formaPago === VentaFormaPago.CREDITO) {
+      const advance = sale.pagos.length
+        ? sale.pagos
+            .map(
+              (payment) =>
+                `${payment.metodoPago.nombre} S/ ${this.money(payment.monto)}`,
+            )
+            .join(' / ')
+        : 'sin adelanto';
+      return `Credito - ${advance}`;
+    }
     if (!sale.pagos.length) {
       return 'Pendiente';
     }

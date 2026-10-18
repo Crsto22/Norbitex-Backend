@@ -6,6 +6,7 @@ import {
 import {
   CajaMovimientoTipo,
   CajaSesionEstado,
+  CuentaPorCobrarEstado,
   Prisma,
   SunatBajaEstado,
   SunatBajaTipo,
@@ -125,6 +126,11 @@ export class SunatBajaService {
         include: {
           sunatBajaLote: true,
         },
+      });
+
+      await tx.cuentaPorCobrar.updateMany({
+        where: { ventaId: venta.id },
+        data: { estado: CuentaPorCobrarEstado.anulacion_pendiente },
       });
 
       await tx.sunatJob.upsert({
@@ -550,7 +556,15 @@ export class SunatBajaService {
 
       const ventas = await tx.venta.findMany({
         where: { sunatBajaLoteId: loteId },
-        include: { pagos: true, detalles: true, cajaSesion: true },
+        include: {
+          pagos: {
+            include: {
+              cajaMovimientos: { include: { cajaSesion: true } },
+            },
+          },
+          detalles: true,
+          cajaSesion: true,
+        },
       });
 
       for (const venta of ventas) {
@@ -570,6 +584,25 @@ export class SunatBajaService {
           result.estado === SunatBajaEstado.observado
         ) {
           await this.finalizeLocalAnnul(tx, venta);
+        } else if (
+          result.estado === SunatBajaEstado.rechazado ||
+          result.estado === SunatBajaEstado.error_definitivo
+        ) {
+          const account = await tx.cuentaPorCobrar.findUnique({
+            where: { ventaId: venta.id },
+          });
+          if (account?.estado === CuentaPorCobrarEstado.anulacion_pendiente) {
+            await tx.cuentaPorCobrar.update({
+              where: { id: account.id },
+              data: {
+                estado: account.saldoPendiente.equals(0)
+                  ? CuentaPorCobrarEstado.pagada
+                  : account.adelanto.gt(0)
+                    ? CuentaPorCobrarEstado.parcial
+                    : CuentaPorCobrarEstado.pendiente,
+              },
+            });
+          }
         }
       }
     });
@@ -578,30 +611,42 @@ export class SunatBajaService {
   private async finalizeLocalAnnul(
     tx: Prisma.TransactionClient,
     venta: Prisma.VentaGetPayload<{
-      include: { pagos: true; detalles: true; cajaSesion: true };
+      include: {
+        pagos: {
+          include: { cajaMovimientos: { include: { cajaSesion: true } } };
+        };
+        detalles: true;
+        cajaSesion: true;
+      };
     }>,
   ) {
     if (venta.estado === VentaEstado.anulada) {
       return;
     }
 
-    if (venta.cajaSesion?.estado === CajaSesionEstado.abierta) {
-      const activePayments = venta.pagos.filter((p) => p.estado === 'activo');
-      if (activePayments.length > 0) {
-        await tx.cajaMovimiento.createMany({
-          data: activePayments.map((p) => ({
-            empresaId: venta.empresaId,
-            cajaSesionId: venta.cajaSesionId!,
-            ventaId: venta.id,
-            ventaPagoId: p.id,
-            metodoPagoId: p.metodoPagoId,
-            tipo: CajaMovimientoTipo.anulacion_venta,
-            monto: p.monto.mul(-1),
-            motivo: venta.anuladoRazon ?? 'Baja SUNAT aceptada',
-            referencia: p.referencia,
-          })),
-        });
-      }
+    const activePayments = venta.pagos.filter((p) => p.estado === 'activo');
+    const reversibleMovements = activePayments.flatMap((payment) =>
+      payment.cajaMovimientos.filter(
+        (movement) =>
+          (movement.tipo === CajaMovimientoTipo.venta ||
+            movement.tipo === CajaMovimientoTipo.cobranza) &&
+          movement.cajaSesion.estado === CajaSesionEstado.abierta,
+      ),
+    );
+    if (reversibleMovements.length > 0) {
+      await tx.cajaMovimiento.createMany({
+        data: reversibleMovements.map((movement) => ({
+          empresaId: venta.empresaId,
+          cajaSesionId: movement.cajaSesionId,
+          ventaId: venta.id,
+          ventaPagoId: movement.ventaPagoId,
+          metodoPagoId: movement.metodoPagoId,
+          tipo: CajaMovimientoTipo.anulacion_venta,
+          monto: movement.monto.mul(-1),
+          motivo: venta.anuladoRazon ?? 'Baja SUNAT aceptada',
+          referencia: movement.referencia,
+        })),
+      });
     }
 
     if (venta.sucursalId) {
@@ -624,6 +669,27 @@ export class SunatBajaService {
       where: { ventaId: venta.id },
       data: { estado: 'anulado' },
     });
+
+    const account = await tx.cuentaPorCobrar.findUnique({
+      where: { ventaId: venta.id },
+      select: { id: true },
+    });
+    if (account) {
+      await tx.cuentaPorCobrar.update({
+        where: { id: account.id },
+        data: {
+          estado: CuentaPorCobrarEstado.anulada,
+          saldoPendiente: new Prisma.Decimal(0),
+        },
+      });
+      await tx.cuentaPorCobrarCuota.updateMany({
+        where: { cuentaPorCobrarId: account.id },
+        data: {
+          estado: 'anulada',
+          saldo: new Prisma.Decimal(0),
+        },
+      });
+    }
 
     await tx.venta.update({
       where: { id: venta.id },

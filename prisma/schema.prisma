@@ -330,6 +330,31 @@ enum VentaPagoEstado {
   anulado
 }
 
+enum VentaFormaPago {
+  CONTADO
+  CREDITO
+}
+
+enum VentaPagoOrigen {
+  venta
+  cobranza
+}
+
+enum CuentaPorCobrarEstado {
+  pendiente
+  parcial
+  pagada
+  anulacion_pendiente
+  anulada
+}
+
+enum CuentaPorCobrarCuotaEstado {
+  pendiente
+  parcial
+  pagada
+  anulada
+}
+
 enum CajaSesionEstado {
   abierta
   cerrada
@@ -338,9 +363,11 @@ enum CajaSesionEstado {
 enum CajaMovimientoTipo {
   apertura
   venta
+  cobranza
   ingreso
   retiro
   anulacion_venta
+  anulacion_cobranza
 }
 
 enum CotizacionEstado {
@@ -458,6 +485,7 @@ model Empresa {
   catalogoVehiculos               CatalogoVehiculo[]
   cajasSesion                     CajaSesion[]
   cajaMovimientos                 CajaMovimiento[]
+  cuentasPorCobrar                CuentaPorCobrar[]
   cotizaciones                    Cotizacion[]
   seriesComprobante               SerieComprobante[]
   serieComprobanteSucursales      SerieComprobanteSucursal[]
@@ -621,6 +649,7 @@ model Cliente {
   ventas          Venta[]
   notasCredito    NotaCredito[]
   cotizaciones    Cotizacion[]
+  cuentasPorCobrar CuentaPorCobrar[]
 
   @@index([empresaId])
   @@index([tipoDocumento])
@@ -732,6 +761,7 @@ model Sucursal {
   usuariosAsignados          EmpresaUsuario[]           @relation("EmpresaUsuarioSucursal")
   puntosQrAsistencia         PuntoQrAsistencia[]
   marcajesAsistencia         MarcajeAsistencia[]
+  cuentasPorCobrar           CuentaPorCobrar[]
 
   @@unique([empresaId, nombreKey])
   @@index([empresaId])
@@ -1073,6 +1103,7 @@ model Usuario {
   guiasRemisionCreadas               GuiaRemision[]
   cajasSesion                        CajaSesion[]
   cajaMovimientos                    CajaMovimiento[]
+  ventasPagoCreados                  VentaPago[]                          @relation("VentaPagoCreadoPor")
   cotizacionesCreadas                Cotizacion[]
   platformAuditLogs                  PlatformAuditLog[]
   pagosSuscripcionRegistrados        PagoSuscripcion[]                    @relation("PagoSuscripcionRegistradoPor")
@@ -2216,7 +2247,7 @@ model Venta {
   numero                Int
   correlativo           String               @db.VarChar(15) // "NV01-000001"
   moneda                String               @default("PEN") @db.VarChar(3)
-  formaPago             String               @default("CONTADO") @map("forma_pago") @db.VarChar(10)
+  formaPago             VentaFormaPago       @default(CONTADO) @map("forma_pago")
   descuentoTipo         VentaDescuentoTipo?  @map("descuento_tipo")
   descuentoValor        Decimal?             @map("descuento_valor") @db.Decimal(10, 2)
   subtotal              Decimal              @db.Decimal(12, 2)
@@ -2273,6 +2304,7 @@ model Venta {
   entregas              VentaEntrega[]
   notasCredito          NotaCredito[]
   pagos                 VentaPago[]
+  cuentaPorCobrar       CuentaPorCobrar?
   cajaMovimientos       CajaMovimiento[]
   cotizacionOrigen      Cotizacion?          @relation("CotizacionConvertidaVenta")
   sunatBajaItems        SunatBajaItem[]
@@ -2472,23 +2504,97 @@ model NotaCreditoDetalle {
 }
 
 model VentaPago {
-  id              BigInt           @id @default(autoincrement())
-  ventaId         BigInt           @map("venta_id")
-  metodoPagoId    BigInt           @map("metodo_pago_id")
-  monto           Decimal          @db.Decimal(12, 2)
-  montoRecibido   Decimal?         @map("monto_recibido") @db.Decimal(12, 2)
-  vuelto          Decimal          @default(0) @db.Decimal(12, 2)
-  referencia      String?          @db.VarChar(200)
-  estado          VentaPagoEstado  @default(activo)
-  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
-  venta           Venta            @relation(fields: [ventaId], references: [id], onDelete: Cascade)
-  metodoPago      MetodoPago       @relation(fields: [metodoPagoId], references: [id], onDelete: Restrict)
+  id              BigInt                       @id @default(autoincrement())
+  publicId        String                       @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  ventaId         BigInt                       @map("venta_id")
+  metodoPagoId    BigInt                       @map("metodo_pago_id")
+  creadoPorId     BigInt?                      @map("creado_por_id")
+  requestId       String?                      @map("request_id") @db.Uuid
+  origen          VentaPagoOrigen              @default(venta)
+  monto           Decimal                      @db.Decimal(12, 2)
+  montoRecibido   Decimal?                     @map("monto_recibido") @db.Decimal(12, 2)
+  vuelto          Decimal                      @default(0) @db.Decimal(12, 2)
+  referencia      String?                      @db.VarChar(200)
+  estado          VentaPagoEstado              @default(activo)
+  createdAt       DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  venta           Venta                        @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  metodoPago      MetodoPago                   @relation(fields: [metodoPagoId], references: [id], onDelete: Restrict)
+  creadoPor       Usuario?                     @relation("VentaPagoCreadoPor", fields: [creadoPorId], references: [id], onDelete: SetNull)
   cajaMovimientos CajaMovimiento[]
+  aplicaciones    CuentaPorCobrarAplicacion[]
 
+  @@unique([ventaId, requestId])
   @@index([ventaId])
   @@index([metodoPagoId])
+  @@index([creadoPorId])
+  @@index([origen, createdAt])
   @@map("venta_pago")
+}
+
+model CuentaPorCobrar {
+  id                 BigInt                 @id @default(autoincrement())
+  publicId           String                 @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  empresaId          BigInt                 @map("empresa_id")
+  ventaId            BigInt                 @unique @map("venta_id")
+  clienteId          BigInt                 @map("cliente_id")
+  sucursalId         BigInt?                @map("sucursal_id")
+  moneda             String                 @default("PEN") @db.VarChar(3)
+  totalVenta         Decimal                @map("total_venta") @db.Decimal(12, 2)
+  adelanto           Decimal                @default(0) @db.Decimal(12, 2)
+  saldoInicial       Decimal                @map("saldo_inicial") @db.Decimal(12, 2)
+  saldoPendiente     Decimal                @map("saldo_pendiente") @db.Decimal(12, 2)
+  saldoFavor         Decimal                @default(0) @map("saldo_favor") @db.Decimal(12, 2)
+  estado             CuentaPorCobrarEstado  @default(pendiente)
+  primerVencimiento  DateTime               @map("primer_vencimiento") @db.Date
+  ultimoPagoAt       DateTime?              @map("ultimo_pago_at") @db.Timestamptz(6)
+  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa            Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  venta              Venta                  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  cliente            Cliente                @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  sucursal           Sucursal?              @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
+  cuotas             CuentaPorCobrarCuota[]
+
+  @@index([empresaId, estado])
+  @@index([empresaId, clienteId])
+  @@index([empresaId, sucursalId])
+  @@index([empresaId, primerVencimiento])
+  @@map("cuenta_por_cobrar")
+}
+
+model CuentaPorCobrarCuota {
+  id                 BigInt                       @id @default(autoincrement())
+  cuentaPorCobrarId  BigInt                       @map("cuenta_por_cobrar_id")
+  numero             Int
+  fechaVencimiento   DateTime                     @map("fecha_vencimiento") @db.Date
+  montoOriginal      Decimal                      @map("monto_original") @db.Decimal(12, 2)
+  montoPagado        Decimal                      @default(0) @map("monto_pagado") @db.Decimal(12, 2)
+  saldo              Decimal                      @db.Decimal(12, 2)
+  estado             CuentaPorCobrarCuotaEstado   @default(pendiente)
+  createdAt          DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  cuentaPorCobrar    CuentaPorCobrar              @relation(fields: [cuentaPorCobrarId], references: [id], onDelete: Cascade)
+  aplicaciones       CuentaPorCobrarAplicacion[]
+
+  @@unique([cuentaPorCobrarId, numero])
+  @@index([cuentaPorCobrarId, fechaVencimiento])
+  @@index([estado, fechaVencimiento])
+  @@map("cuenta_por_cobrar_cuota")
+}
+
+model CuentaPorCobrarAplicacion {
+  id        BigInt                 @id @default(autoincrement())
+  cuotaId   BigInt                 @map("cuota_id")
+  pagoId    BigInt                 @map("pago_id")
+  monto     Decimal                @db.Decimal(12, 2)
+  createdAt DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  cuota     CuentaPorCobrarCuota   @relation(fields: [cuotaId], references: [id], onDelete: Cascade)
+  pago      VentaPago              @relation(fields: [pagoId], references: [id], onDelete: Cascade)
+
+  @@unique([cuotaId, pagoId])
+  @@index([pagoId])
+  @@map("cuenta_por_cobrar_aplicacion")
 }
 
 model CajaSesion {

@@ -1,5 +1,6 @@
 import {
   IsArray,
+  ArrayMinSize,
   IsEnum,
   IsInt,
   IsISO8601,
@@ -11,7 +12,11 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { VentaDescuentoTipo, VentaTipoComprobante } from '@prisma/client';
+import {
+  VentaDescuentoTipo,
+  VentaFormaPago,
+  VentaTipoComprobante,
+} from '@prisma/client';
 
 export class CreateSaleDetalleDto {
   @IsString()
@@ -50,6 +55,26 @@ export class CreateSalePagoDto {
   referencia?: string;
 }
 
+export class CreateSaleCreditInstallmentDto {
+  @IsInt()
+  @Min(1)
+  numero: number;
+
+  @IsString()
+  monto: string;
+
+  @IsISO8601({ strict: true })
+  fechaVencimiento: string;
+}
+
+export class CreateSaleCreditDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateSaleCreditInstallmentDto)
+  cuotas: CreateSaleCreditInstallmentDto[];
+}
+
 export class CreateSaleDto {
   @IsOptional()
   @IsUUID('4')
@@ -57,6 +82,15 @@ export class CreateSaleDto {
 
   @IsEnum(VentaTipoComprobante)
   tipoComprobante: VentaTipoComprobante;
+
+  @IsOptional()
+  @IsEnum(VentaFormaPago)
+  formaPago?: VentaFormaPago = VentaFormaPago.CONTADO;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateSaleCreditDto)
+  credito?: CreateSaleCreditDto;
 
   @IsOptional()
   @IsString()

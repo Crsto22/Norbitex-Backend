@@ -10,6 +10,11 @@ export const userModules = [
   },
   { key: 'clientes', label: 'Clientes', route: '/clientes' },
   {
+    key: 'cuentas-cobrar',
+    label: 'Cuentas por cobrar',
+    route: '/cuentas-por-cobrar',
+  },
+  {
     key: 'historial-ventas',
     label: 'Historial de ventas',
     route: '/historial/ventas',

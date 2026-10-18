@@ -4,6 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  CuentaPorCobrarCuotaEstado,
+  CuentaPorCobrarEstado,
   Prisma,
   SunatEndpointCodigo,
   SunatEstado,
@@ -373,6 +375,77 @@ export class SunatCreditNoteEmissionService {
         where: { id: note.id },
         data: { stockDevuelto: ['06', '07'].includes(note.codigoMotivo) },
       });
+
+      if (['06', '07'].includes(note.codigoMotivo)) {
+        const account = await tx.cuentaPorCobrar.findUnique({
+          where: { ventaId: note.ventaReferenciaId },
+          include: {
+            cuotas: {
+              where: { saldo: { gt: 0 } },
+              orderBy: [{ fechaVencimiento: 'desc' }, { numero: 'desc' }],
+            },
+          },
+        });
+        if (account && account.estado !== CuentaPorCobrarEstado.anulada) {
+          let reduction = note.total;
+          for (const installment of account.cuotas) {
+            if (reduction.lte(0)) break;
+            const applied = Prisma.Decimal.min(reduction, installment.saldo);
+            const nextBalance = installment.saldo.sub(applied);
+            await tx.cuentaPorCobrarCuota.update({
+              where: { id: installment.id },
+              data: {
+                montoOriginal: installment.montoPagado.add(nextBalance),
+                saldo: nextBalance,
+                estado: nextBalance.equals(0)
+                  ? CuentaPorCobrarCuotaEstado.pagada
+                  : installment.montoPagado.gt(0)
+                    ? CuentaPorCobrarCuotaEstado.parcial
+                    : CuentaPorCobrarCuotaEstado.pendiente,
+              },
+            });
+            reduction = reduction.sub(applied);
+          }
+          const nextBalance = Prisma.Decimal.max(
+            account.saldoPendiente.sub(note.total),
+            new Prisma.Decimal(0),
+          );
+          await tx.cuentaPorCobrar.update({
+            where: { id: account.id },
+            data: {
+              totalVenta: Prisma.Decimal.max(
+                account.totalVenta.sub(note.total),
+                new Prisma.Decimal(0),
+              ),
+              saldoPendiente: nextBalance,
+              saldoFavor: account.saldoFavor.add(
+                Prisma.Decimal.max(
+                  note.total.sub(account.saldoPendiente),
+                  new Prisma.Decimal(0),
+                ),
+              ),
+              estado:
+                note.codigoMotivo === '06'
+                  ? CuentaPorCobrarEstado.anulada
+                  : nextBalance.equals(0)
+                    ? CuentaPorCobrarEstado.pagada
+                    : CuentaPorCobrarEstado.parcial,
+            },
+          });
+          if (note.codigoMotivo === '06') {
+            await tx.cuentaPorCobrarCuota.updateMany({
+              where: {
+                cuentaPorCobrarId: account.id,
+                saldo: { gt: 0 },
+              },
+              data: {
+                estado: CuentaPorCobrarCuotaEstado.anulada,
+                saldo: new Prisma.Decimal(0),
+              },
+            });
+          }
+        }
+      }
       await tx.venta.update({
         where: { id: note.ventaReferenciaId },
         data: {

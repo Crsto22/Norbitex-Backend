@@ -9,6 +9,8 @@ import {
   CajaMovimientoTipo,
   CajaSesionEstado,
   ClienteTipoDocumento,
+  ClienteEstado,
+  CuentaPorCobrarEstado,
   Prisma,
   SerieComprobante,
   SunatEstado,
@@ -16,6 +18,8 @@ import {
   SucursalTipo,
   VentaEntregaEstado,
   VentaEstado,
+  VentaFormaPago,
+  VentaPagoOrigen,
   VentaTipoComprobante,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -116,6 +120,9 @@ const ventaInclude = {
         },
       },
     },
+  },
+  cuentaPorCobrar: {
+    include: { cuotas: { orderBy: { numero: 'asc' } } },
   },
 } satisfies Prisma.VentaInclude;
 
@@ -398,6 +405,13 @@ export class SalesService {
     const userId = scope.userId.toString();
     const usuarioId = BigInt(userId);
     const electronicSale = isElectronicSaleType(dto.tipoComprobante);
+    const formaPago = dto.formaPago ?? VentaFormaPago.CONTADO;
+
+    if (formaPago === VentaFormaPago.CREDITO) {
+      await this.plansService.assertModulesIncluded(empresaId, [
+        'cuentas-cobrar',
+      ]);
+    }
 
     const sucursal = dto.sucursalId
       ? await this.prisma.sucursal.findFirst({
@@ -443,6 +457,18 @@ export class SalesService {
 
     if (dto.clienteId && !cliente) {
       throw new NotFoundException('Cliente no encontrado');
+    }
+
+    if (
+      formaPago === VentaFormaPago.CREDITO &&
+      (!cliente ||
+        cliente.estado !== ClienteEstado.activo ||
+        cliente.tipoDocumento === ClienteTipoDocumento.sin_documento ||
+        !cliente.numeroDocumento)
+    ) {
+      throw new BadRequestException(
+        'La venta al credito requiere un cliente activo e identificado',
+      );
     }
 
     const recogerDespues = dto.recogerDespues === true;
@@ -574,11 +600,29 @@ export class SalesService {
       new Prisma.Decimal(0),
     );
 
-    if (!pagoTotal.equals(total)) {
+    if (formaPago === VentaFormaPago.CONTADO && !pagoTotal.equals(total)) {
       throw new BadRequestException(
         `El total de pagos (${pagoTotal.toFixed(2)}) no coincide con el total de la venta (${total.toFixed(2)})`,
       );
     }
+
+    if (formaPago === VentaFormaPago.CREDITO && pagoTotal.gte(total)) {
+      throw new BadRequestException(
+        'Una venta al credito debe mantener un saldo pendiente mayor a cero',
+      );
+    }
+
+    if (formaPago === VentaFormaPago.CONTADO && dto.credito) {
+      throw new BadRequestException(
+        'Una venta al contado no puede incluir un cronograma de credito',
+      );
+    }
+
+    const saldoCredito = total.sub(pagoTotal);
+    const cuotasCredito =
+      formaPago === VentaFormaPago.CREDITO
+        ? this.validateCreditSchedule(dto, saldoCredito)
+        : [];
 
     const pagosData = dto.pagos.map((p) => {
       const metodoPago = metodoPagoMap.get(p.metodoPagoId)!;
@@ -609,6 +653,8 @@ export class SalesService {
         montoRecibido: p.montoRecibido ? montoRecibido : null,
         vuelto,
         referencia: p.referencia ?? null,
+        origen: VentaPagoOrigen.venta,
+        creadoPorId: usuarioId,
       };
     });
 
@@ -661,7 +707,7 @@ export class SalesService {
               numero,
               correlativo,
               moneda: 'PEN',
-              formaPago: 'CONTADO',
+              formaPago,
               descuentoTipo: dto.descuentoTipo ?? null,
               descuentoValor: dto.descuentoValor
                 ? new Prisma.Decimal(dto.descuentoValor)
@@ -746,6 +792,40 @@ export class SalesService {
                 lastAttemptAt: null,
                 processedAt: null,
                 nextRetryAt: new Date(),
+              },
+            });
+          }
+
+          if (formaPago === VentaFormaPago.CREDITO) {
+            await tx.cuentaPorCobrar.create({
+              data: {
+                empresaId,
+                ventaId: ventaData.id,
+                clienteId: cliente!.id,
+                sucursalId: ventaData.sucursalId,
+                moneda: ventaData.moneda,
+                totalVenta: total,
+                adelanto: pagoTotal,
+                saldoInicial: saldoCredito,
+                saldoPendiente: saldoCredito,
+                estado: pagoTotal.gt(0)
+                  ? CuentaPorCobrarEstado.parcial
+                  : CuentaPorCobrarEstado.pendiente,
+                primerVencimiento: cuotasCredito.reduce(
+                  (earliest, cuota) =>
+                    cuota.fechaVencimiento < earliest
+                      ? cuota.fechaVencimiento
+                      : earliest,
+                  cuotasCredito[0].fechaVencimiento,
+                ),
+                cuotas: {
+                  create: cuotasCredito.map((cuota) => ({
+                    numero: cuota.numero,
+                    fechaVencimiento: cuota.fechaVencimiento,
+                    montoOriginal: cuota.monto,
+                    saldo: cuota.monto,
+                  })),
+                },
               },
             });
           }
@@ -938,6 +1018,13 @@ export class SalesService {
           },
           include: ventaInclude,
         });
+
+        if (clienteId) {
+          await tx.cuentaPorCobrar.updateMany({
+            where: { ventaId: venta.id },
+            data: { clienteId },
+          });
+        }
 
         await tx.sunatJob.upsert({
           where: {
@@ -1366,7 +1453,11 @@ export class SalesService {
     const venta = await this.prisma.venta.findFirst({
       where: this.saleAccessWhere(empresaId, scope, publicId),
       include: {
-        pagos: true,
+        pagos: {
+          include: {
+            cajaMovimientos: { include: { cajaSesion: true } },
+          },
+        },
         cajaSesion: { select: { id: true, estado: true } },
       },
     });
@@ -1387,31 +1478,37 @@ export class SalesService {
       );
     }
 
-    const result = await this.prisma.$transaction(async (tx) => {
-      if (venta.cajaSesionId) {
-        const cajaSesion = await tx.cajaSesion.findUnique({
-          where: { id: venta.cajaSesionId },
-          select: { id: true, estado: true },
-        });
-
-        if (!cajaSesion || cajaSesion.estado !== CajaSesionEstado.abierta) {
-          throw new BadRequestException(
-            'No se puede anular una venta asociada a una caja cerrada',
-          );
-        }
-
-        const activePayments = venta.pagos.filter((p) => p.estado === 'activo');
+    await this.prisma.$transaction(async (tx) => {
+      const activePayments = venta.pagos.filter((p) => p.estado === 'activo');
+      const originalMovements = activePayments.flatMap((payment) =>
+        payment.cajaMovimientos.filter(
+          (movement) =>
+            movement.tipo === CajaMovimientoTipo.venta ||
+            movement.tipo === CajaMovimientoTipo.cobranza,
+        ),
+      );
+      if (
+        originalMovements.some(
+          (movement) => movement.cajaSesion.estado !== CajaSesionEstado.abierta,
+        )
+      ) {
+        throw new BadRequestException(
+          'No se puede anular una venta asociada a una caja cerrada',
+        );
+      }
+      if (originalMovements.length > 0) {
         await tx.cajaMovimiento.createMany({
-          data: activePayments.map((p) => ({
+          data: originalMovements.map((movement) => ({
             empresaId,
-            cajaSesionId: cajaSesion.id,
+            cajaSesionId: movement.cajaSesionId,
             ventaId: venta.id,
-            ventaPagoId: p.id,
-            metodoPagoId: p.metodoPagoId,
+            ventaPagoId: movement.ventaPagoId,
+            metodoPagoId: movement.metodoPagoId,
             tipo: CajaMovimientoTipo.anulacion_venta,
-            monto: p.monto.mul(-1),
+            monto: movement.monto.mul(-1),
             motivo: dto.razon,
-            referencia: p.referencia,
+            referencia: movement.referencia,
+            creadoPorId: scope.userId,
           })),
         });
       }
@@ -1451,10 +1548,31 @@ export class SalesService {
         data: { estado: 'anulado' },
       });
 
+      await tx.cuentaPorCobrar.updateMany({
+        where: { ventaId: venta.id },
+        data: {
+          estado: CuentaPorCobrarEstado.anulada,
+          saldoPendiente: new Prisma.Decimal(0),
+        },
+      });
+      const account = await tx.cuentaPorCobrar.findUnique({
+        where: { ventaId: venta.id },
+        select: { id: true },
+      });
+      if (account) {
+        await tx.cuentaPorCobrarCuota.updateMany({
+          where: { cuentaPorCobrarId: account.id },
+          data: {
+            estado: 'anulada',
+            saldo: new Prisma.Decimal(0),
+          },
+        });
+      }
+
       return anulled;
     });
 
-    return this.toVentaResponse(result);
+    return this.findOne(empresaId, scope, publicId);
   }
 
   // ── Find Products (existing) ───────────────────────────────────────
@@ -1941,6 +2059,59 @@ export class SalesService {
     return BigInt(value);
   }
 
+  private validateCreditSchedule(
+    dto: CreateSaleDto,
+    expectedBalance: Prisma.Decimal,
+  ) {
+    if (!dto.credito?.cuotas.length) {
+      throw new BadRequestException(
+        'La venta al credito requiere al menos una cuota',
+      );
+    }
+
+    const issueDate = new Date().toISOString().slice(0, 10);
+    const sorted = [...dto.credito.cuotas].sort((a, b) => a.numero - b.numero);
+    const installments = sorted.map((cuota, index) => {
+      if (cuota.numero !== index + 1) {
+        throw new BadRequestException(
+          'Las cuotas deben estar numeradas consecutivamente desde 1',
+        );
+      }
+
+      const dateKey = cuota.fechaVencimiento.slice(0, 10);
+      if (dateKey <= issueDate) {
+        throw new BadRequestException(
+          'Las cuotas deben vencer despues de la fecha de emision',
+        );
+      }
+
+      const monto = this.parseDecimalAmount(cuota.monto, 'monto de cuota');
+      if (monto.lte(0)) {
+        throw new BadRequestException(
+          'El monto de cada cuota debe ser mayor a cero',
+        );
+      }
+
+      return {
+        numero: cuota.numero,
+        monto,
+        fechaVencimiento: new Date(`${dateKey}T00:00:00.000Z`),
+      };
+    });
+    const scheduled = installments.reduce(
+      (sum, cuota) => sum.add(cuota.monto),
+      new Prisma.Decimal(0),
+    );
+
+    if (!scheduled.equals(expectedBalance)) {
+      throw new BadRequestException(
+        `La suma de cuotas (${scheduled.toFixed(2)}) no coincide con el saldo pendiente (${expectedBalance.toFixed(2)})`,
+      );
+    }
+
+    return installments;
+  }
+
   private parseDecimalAmount(value: string, fieldName: string) {
     try {
       const amount = new Prisma.Decimal(value);
@@ -2106,6 +2277,8 @@ export class SalesService {
       }),
       pagos: venta.pagos.map((p) => ({
         id: p.id.toString(),
+        publicId: p.publicId,
+        origen: p.origen,
         monto: p.monto.toString(),
         montoRecibido: p.montoRecibido?.toString() ?? null,
         vuelto: p.vuelto.toString(),
@@ -2120,6 +2293,32 @@ export class SalesService {
           permiteVuelto: p.metodoPago.permiteVuelto,
         },
       })),
+      cuentaPorCobrar: venta.cuentaPorCobrar
+        ? {
+            publicId: venta.cuentaPorCobrar.publicId,
+            totalVenta: venta.cuentaPorCobrar.totalVenta.toString(),
+            adelanto: venta.cuentaPorCobrar.adelanto.toString(),
+            saldoInicial: venta.cuentaPorCobrar.saldoInicial.toString(),
+            saldoPendiente: venta.cuentaPorCobrar.saldoPendiente.toString(),
+            saldoFavor: venta.cuentaPorCobrar.saldoFavor.toString(),
+            estado: venta.cuentaPorCobrar.estado,
+            vencida: venta.cuentaPorCobrar.cuotas.some(
+              (cuota) =>
+                cuota.saldo.gt(0) && cuota.fechaVencimiento < new Date(),
+            ),
+            cuotas: venta.cuentaPorCobrar.cuotas.map((cuota) => ({
+              numero: cuota.numero,
+              fechaVencimiento: cuota.fechaVencimiento
+                .toISOString()
+                .slice(0, 10),
+              montoOriginal: cuota.montoOriginal.toString(),
+              montoPagado: cuota.montoPagado.toString(),
+              saldo: cuota.saldo.toString(),
+              estado: cuota.estado,
+              vencida: cuota.saldo.gt(0) && cuota.fechaVencimiento < new Date(),
+            })),
+          }
+        : null,
     };
   }
 
