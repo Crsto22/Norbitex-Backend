@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BillingEnvironment, Prisma } from '@prisma/client';
+import { BillingEnvironment } from '@prisma/client';
 import { SecretsCryptoService } from '../../common/crypto/secrets-crypto.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BillingApiClientService } from './billing-api-client.service';
@@ -31,6 +31,7 @@ type RemoteWebhook = {
   id: string;
   url: string;
   environment: BillingEnvironment;
+  events?: string[];
   signingSecret?: string;
 };
 
@@ -41,6 +42,9 @@ const WEBHOOK_EVENTS = [
   'document.rejected',
   'document.retry_scheduled',
   'document.failed',
+  'sunat_void.accepted',
+  'sunat_void.rejected',
+  'sunat_void.failed',
 ];
 
 @Injectable()
@@ -167,8 +171,7 @@ export class BillingIntegrationService {
       }
 
       for (const series of company.seriesComprobante) {
-        const branchId =
-          series.sucursales[0]?.sucursalId ?? principal.id;
+        const branchId = series.sucursales[0]?.sucursalId ?? principal.id;
         const establishment = establishmentMap.get(branchId.toString());
         if (!establishment) continue;
         const fiscalSeries = await this.ensureFiscalSeries(
@@ -274,10 +277,7 @@ export class BillingIntegrationService {
     return result;
   }
 
-  async deleteCertificate(
-    empresaId: bigint,
-    environment: BillingEnvironment,
-  ) {
+  async deleteCertificate(empresaId: bigint, environment: BillingEnvironment) {
     const integration = await this.requiredIntegration(empresaId);
     const result = await this.api.admin(
       `/admin/tenants/${integration.tenantId}/sunat-credentials/${environment}/certificate`,
@@ -369,7 +369,10 @@ export class BillingIntegrationService {
           },
         },
         seriesComprobante: {
-          where: { activo: true, tipoComprobante: { in: ['boleta', 'factura'] } },
+          where: {
+            activo: true,
+            tipoComprobante: { in: ['boleta', 'factura'] },
+          },
           select: {
             id: true,
             serie: true,
@@ -571,6 +574,17 @@ export class BillingIntegrationService {
         },
       );
     }
+    const currentEvents = new Set(hook.events ?? []);
+    if (WEBHOOK_EVENTS.some((event) => !currentEvents.has(event))) {
+      hook = await this.api.application<RemoteWebhook>(
+        `/webhook-endpoints/${hook.id}`,
+        apiKey,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ events: WEBHOOK_EVENTS }),
+        },
+      );
+    }
     if (!hook.signingSecret) {
       hook = await this.api.application<RemoteWebhook>(
         `/webhook-endpoints/${hook.id}/rotate-secret`,
@@ -631,5 +645,8 @@ export class BillingIntegrationService {
 }
 
 function safeMessage(error: unknown) {
-  return (error instanceof Error ? error.message : String(error)).slice(0, 1000);
+  return (error instanceof Error ? error.message : String(error)).slice(
+    0,
+    1000,
+  );
 }

@@ -263,6 +263,7 @@ export class SunatBajaService {
     sunatBajaTipo: SunatBajaTipo | null;
     sunatBajaSolicitadaAt: Date | null;
     sunatBajaRespondidaAt: Date | null;
+    billingVoidRequestId?: string | null;
     sunatBajaLote?: {
       tipoEnvio: SunatBajaTipo;
       fechaGeneracion: Date;
@@ -285,8 +286,16 @@ export class SunatBajaService {
             correlativo: lote.correlativo,
           })
         : null,
-      xmlDisponible: Boolean(lote?.sunatXmlKey),
-      cdrDisponible: Boolean(lote?.sunatCdrKey),
+      xmlDisponible: Boolean(lote?.sunatXmlKey || venta.billingVoidRequestId),
+      cdrDisponible: Boolean(
+        lote?.sunatCdrKey ||
+        (venta.billingVoidRequestId &&
+          [
+            SunatBajaEstado.aceptado,
+            SunatBajaEstado.observado,
+            SunatBajaEstado.rechazado,
+          ].some((state) => state === venta.sunatBajaEstado)),
+      ),
       solicitadaAt: venta.sunatBajaSolicitadaAt?.toISOString() ?? null,
       respondidaAt: venta.sunatBajaRespondidaAt?.toISOString() ?? null,
     };

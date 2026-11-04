@@ -46,3 +46,21 @@ pendiente o procesando. Esto evita que ambos emisores envien el mismo documento.
 La primera version integrada admite clientes sin documento, DNI y RUC. Para
 boletas mayores a S/700 exige DNI o RUC; documentos de no domiciliados quedan
 fuera de esta primera version.
+
+## Bajas de boletas y facturas
+
+Con la integracion activa, `PATCH /sales/:publicId/annul` registra una operacion
+asíncrona `VOID` y exige `documentDelivered: false`. Billing procesa facturas
+mediante Comunicacion de Baja (`RA`) y boletas mediante Resumen Diario (`RC`).
+Nuvex no devuelve stock ni revierte pagos hasta recibir la aceptacion de SUNAT.
+
+Las rutas de consulta y descarga permanecen bajo `/sales/:publicId/sunat/baja`;
+Nuvex actua como proxy y nunca entrega la API key de Billing al navegador. Los
+eventos `sunat_void.accepted`, `sunat_void.rejected` y `sunat_void.failed` se
+validan con la misma firma HMAC del webhook de emision.
+
+Regla normativa aplicada: una boleta no otorgada se comunica como anulada en el
+Resumen Diario y debe remitirse dentro del plazo de siete dias calendario. Si el
+comprobante ya fue entregado o puesto a disposicion del cliente, corresponde una
+nota de credito. Fuente oficial consultada: [Boleta de Venta Electronica - SUNAT
+(actualizada el 25/09/2025)](https://cpe.sunat.gob.pe/tipos_de_comprobantes/boleta).

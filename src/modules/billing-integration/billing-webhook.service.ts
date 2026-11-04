@@ -3,11 +3,12 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { BillingEnvironment, Prisma } from '@prisma/client';
+import { BillingEnvironment } from '@prisma/client';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { SecretsCryptoService } from '../../common/crypto/secrets-crypto.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BillingEmissionService } from './billing-emission.service';
+import { BillingVoidRequest, BillingVoidService } from './billing-void.service';
 
 const EVENT_TYPES = new Set([
   'document.processing',
@@ -16,6 +17,9 @@ const EVENT_TYPES = new Set([
   'document.rejected',
   'document.retry_scheduled',
   'document.failed',
+  'sunat_void.accepted',
+  'sunat_void.rejected',
+  'sunat_void.failed',
 ]);
 
 @Injectable()
@@ -24,6 +28,7 @@ export class BillingWebhookService {
     private readonly prisma: PrismaService,
     private readonly crypto: SecretsCryptoService,
     private readonly emission: BillingEmissionService,
+    private readonly voids: BillingVoidService,
   ) {}
 
   async receive(input: {
@@ -48,8 +53,12 @@ export class BillingWebhookService {
     if (event.id !== input.eventId || event.type !== input.eventType) {
       throw new UnauthorizedException('Identidad del evento inconsistente');
     }
+    const externalId =
+      event.kind === 'document'
+        ? event.document.externalId
+        : event.voidRequest.resource.externalId;
     const sale = await this.prisma.venta.findUnique({
-      where: { publicId: event.data.document.externalId },
+      where: { publicId: externalId },
       select: {
         id: true,
         empresaId: true,
@@ -60,7 +69,10 @@ export class BillingWebhookService {
     if (!sale || !integration?.applicationId) {
       throw new UnauthorizedException('Documento Billing desconocido');
     }
-    const environment = event.data.document.environment;
+    const environment =
+      event.kind === 'document'
+        ? event.document.environment
+        : event.voidRequest.environment;
     const encrypted =
       environment === BillingEnvironment.BETA
         ? integration.betaWebhookSecretEncrypted
@@ -90,7 +102,11 @@ export class BillingWebhookService {
       },
     });
     try {
-      await this.emission.applyDocument(sale.id, event.data.document);
+      if (event.kind === 'document') {
+        await this.emission.applyDocument(sale.id, event.document);
+      } else {
+        await this.voids.apply(sale.id, event.voidRequest);
+      }
     } catch (error) {
       // No marcar como consumido un evento que no se pudo aplicar. Billing
       // podra reenviarlo con el mismo ID sin que la deduplicacion lo descarte.
@@ -105,35 +121,68 @@ export class BillingWebhookService {
 
 type WebhookDocument = Parameters<BillingEmissionService['applyDocument']>[1];
 
-function parseEvent(payload: unknown): {
-  id: string;
-  type: string;
-  createdAt: string;
-  data: { document: WebhookDocument };
-} {
+function parseEvent(payload: unknown):
+  | {
+      kind: 'document';
+      id: string;
+      type: string;
+      createdAt: string;
+      document: WebhookDocument;
+    }
+  | {
+      kind: 'void';
+      id: string;
+      type: string;
+      createdAt: string;
+      voidRequest: BillingVoidRequest;
+    } {
   if (!payload || typeof payload !== 'object') {
     throw new BadRequestException('Webhook invalido');
   }
   const value = payload as Record<string, unknown>;
   const data = value.data as Record<string, unknown> | undefined;
   const document = data?.document as Record<string, unknown> | undefined;
+  const voidRequest = data?.voidRequest as Record<string, unknown> | undefined;
+  const resource = voidRequest?.resource as Record<string, unknown> | undefined;
   if (
     typeof value.id !== 'string' ||
     typeof value.type !== 'string' ||
-    typeof value.createdAt !== 'string' ||
-    !document ||
-    typeof document.id !== 'string' ||
-    typeof document.externalId !== 'string' ||
-    typeof document.environment !== 'string'
+    typeof value.createdAt !== 'string'
   ) {
     throw new BadRequestException('Payload webhook incompleto');
   }
-  return value as unknown as {
-    id: string;
-    type: string;
-    createdAt: string;
-    data: { document: WebhookDocument };
-  };
+  if (
+    document &&
+    typeof document.id === 'string' &&
+    typeof document.externalId === 'string' &&
+    typeof document.environment === 'string'
+  ) {
+    return {
+      kind: 'document',
+      id: value.id,
+      type: value.type,
+      createdAt: value.createdAt,
+      document: document as unknown as WebhookDocument,
+    };
+  }
+  if (
+    voidRequest &&
+    typeof voidRequest.id === 'string' &&
+    typeof voidRequest.environment === 'string' &&
+    typeof voidRequest.status === 'string' &&
+    typeof voidRequest.procedure === 'string' &&
+    resource &&
+    typeof resource.externalId === 'string'
+  ) {
+    return {
+      kind: 'void',
+      id: value.id,
+      type: value.type,
+      createdAt: value.createdAt,
+      voidRequest: voidRequest as unknown as BillingVoidRequest,
+    };
+  }
+  throw new BadRequestException('Payload webhook incompleto');
 }
 
 function safeEqual(expected: string, actual: string) {

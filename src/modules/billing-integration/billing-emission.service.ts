@@ -8,7 +8,6 @@ import { Cron } from '@nestjs/schedule';
 import {
   BillingDocumentStatus,
   BillingEnvironment,
-  BillingOutboxStatus,
   Prisma,
   SunatEstado,
   VentaFormaPago,
@@ -21,6 +20,7 @@ import {
   BillingApiError,
 } from './billing-api-client.service';
 import { BillingIntegrationService } from './billing-integration.service';
+import { BillingVoidService } from './billing-void.service';
 
 type BillingDocument = {
   id: string;
@@ -56,6 +56,7 @@ export class BillingEmissionService {
     private readonly prisma: PrismaService,
     private readonly api: BillingApiClientService,
     private readonly integration: BillingIntegrationService,
+    private readonly voids: BillingVoidService,
   ) {}
 
   @Cron('*/10 * * * * *')
@@ -282,11 +283,15 @@ export class BillingEmissionService {
     );
     const file = await this.api.download(descriptor.url);
     if (file.bytes.length !== descriptor.sizeBytes) {
-      throw new BadRequestException('El artefacto Billing tiene tamano invalido');
+      throw new BadRequestException(
+        'El artefacto Billing tiene tamano invalido',
+      );
     }
     const digest = createHash('sha256').update(file.bytes).digest('hex');
     if (digest !== descriptor.sha256) {
-      throw new BadRequestException('El artefacto Billing no supero integridad');
+      throw new BadRequestException(
+        'El artefacto Billing no supero integridad',
+      );
     }
     return {
       buffer: file.bytes,
@@ -297,7 +302,9 @@ export class BillingEmissionService {
 
   async applyDocument(ventaId: bigint, document: BillingDocument) {
     const status = normalizeStatus(document.status);
-    const updatedAt = document.updatedAt ? new Date(document.updatedAt) : new Date();
+    const updatedAt = document.updatedAt
+      ? new Date(document.updatedAt)
+      : new Date();
     const sale = await this.prisma.venta.findUnique({
       where: { id: ventaId },
       select: { billingUpdatedAt: true },
@@ -324,7 +331,8 @@ export class BillingEmissionService {
         sunatRespondidoAt: dateOrNull(document.sunat?.respondedAt),
         billingLastError:
           status === 'FAILED' || status === 'REJECTED'
-            ? document.sunat?.message ?? 'Billing no pudo emitir el comprobante'
+            ? (document.sunat?.message ??
+              'Billing no pudo emitir el comprobante')
             : null,
       },
     });
@@ -333,10 +341,33 @@ export class BillingEmissionService {
   private async process(id: string) {
     const claimed = await this.prisma.billingOutbox.updateMany({
       where: { id, status: { in: ['PENDING', 'RETRY'] } },
-      data: { status: 'PROCESSING', lockedAt: new Date(), attempts: { increment: 1 } },
+      data: {
+        status: 'PROCESSING',
+        lockedAt: new Date(),
+        attempts: { increment: 1 },
+      },
     });
     if (!claimed.count) return;
-    const job = await this.prisma.billingOutbox.findUniqueOrThrow({ where: { id } });
+    const job = await this.prisma.billingOutbox.findUniqueOrThrow({
+      where: { id },
+    });
+    if (job.operation === 'VOID') {
+      try {
+        await this.voids.processOutboxJob(job);
+        await this.prisma.billingOutbox.update({
+          where: { id },
+          data: {
+            status: 'DONE',
+            lockedAt: null,
+            processedAt: new Date(),
+            lastError: null,
+          },
+        });
+      } catch (error) {
+        await this.voids.handleOutboxFailure(job, error);
+      }
+      return;
+    }
     try {
       const sale = await this.saleForEmission(job.ventaId, job.environment);
       const issueDate = limaDate(sale.createdAt);
@@ -350,7 +381,10 @@ export class BillingEmissionService {
           null,
         );
       }
-      const apiKey = await this.integration.apiKey(job.empresaId, job.environment);
+      const apiKey = await this.integration.apiKey(
+        job.empresaId,
+        job.environment,
+      );
       const document = await this.api.application<BillingDocument>(
         '/documents',
         apiKey,
@@ -363,7 +397,12 @@ export class BillingEmissionService {
       await this.prisma.$transaction(async (tx) => {
         await tx.billingOutbox.update({
           where: { id },
-          data: { status: 'DONE', lockedAt: null, processedAt: new Date(), lastError: null },
+          data: {
+            status: 'DONE',
+            lockedAt: null,
+            processedAt: new Date(),
+            lastError: null,
+          },
         });
       });
       await this.applyDocument(sale.id, document);
@@ -371,7 +410,10 @@ export class BillingEmissionService {
       const retryable =
         error instanceof BillingApiError ? error.retryable : true;
       const dead = !retryable || job.attempts >= job.maxAttempts;
-      const delay = Math.min(15 * 60_000, 10_000 * 2 ** Math.min(job.attempts, 6));
+      const delay = Math.min(
+        15 * 60_000,
+        10_000 * 2 ** Math.min(job.attempts, 6),
+      );
       await this.prisma.$transaction([
         this.prisma.billingOutbox.update({
           where: { id },
@@ -401,12 +443,18 @@ export class BillingEmissionService {
       where: { id: ventaId, billingEnvironment: environment },
       include: {
         empresa: { include: { billingIntegration: true } },
-        sucursal: { include: { billingEstablishments: { where: { environment } } } },
+        sucursal: {
+          include: { billingEstablishments: { where: { environment } } },
+        },
         cliente: true,
-        serieComprobante: { include: { billingSeries: { where: { environment } } } },
+        serieComprobante: {
+          include: { billingSeries: { where: { environment } } },
+        },
         detalles: { include: { productoVariante: true } },
         pagos: true,
-        cuentaPorCobrar: { include: { cuotas: { orderBy: { numero: 'asc' } } } },
+        cuentaPorCobrar: {
+          include: { cuotas: { orderBy: { numero: 'asc' } } },
+        },
       },
     });
   }
@@ -478,7 +526,9 @@ export class BillingEmissionService {
   }
 }
 
-function customer(sale: Awaited<ReturnType<BillingEmissionService['saleForEmission']>>) {
+function customer(
+  sale: Awaited<ReturnType<BillingEmissionService['saleForEmission']>>,
+) {
   const client = sale.cliente;
   if (!client) return { documentType: 'NONE', name: 'CLIENTE FINAL' };
   return {
@@ -503,7 +553,9 @@ function discount(type: string | null, value: Prisma.Decimal | null) {
   };
 }
 
-function normalizeStatus(status: BillingDocument['status']): BillingDocumentStatus {
+function normalizeStatus(
+  status: BillingDocument['status'],
+): BillingDocumentStatus {
   if (status === 'RECEIVED' || status === 'VALIDATING') return 'QUEUED';
   return status;
 }
@@ -549,7 +601,10 @@ function limaTime(value: Date) {
 }
 
 function safeMessage(error: unknown) {
-  return (error instanceof Error ? error.message : String(error)).slice(0, 1000);
+  return (error instanceof Error ? error.message : String(error)).slice(
+    0,
+    1000,
+  );
 }
 
 function calendarDayDifference(from: string, to: string) {

@@ -25,6 +25,7 @@ import { getCommercialScope } from '../../common/commercial-access';
 import { SalesPdfService } from './sales-pdf.service';
 import { SalesService } from './sales.service';
 import { SunatBajaService } from '../sunat-emission/sunat-baja.service';
+import { BillingVoidService } from '../billing-integration/billing-void.service';
 import { SunatEmissionService } from '../sunat-emission/sunat-emission.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { ConvertSaleDto } from './dto/convert-sale.dto';
@@ -51,6 +52,7 @@ export class SalesController {
     private readonly salesPdfService: SalesPdfService,
     private readonly sunatEmissionService: SunatEmissionService,
     private readonly sunatBajaService: SunatBajaService,
+    private readonly billingVoidService: BillingVoidService,
     private readonly billingEmissionService: BillingEmissionService,
     private readonly pdfConcurrency: PdfConcurrencyService,
   ) {}
@@ -218,10 +220,7 @@ export class SalesController {
       return this.sendBillingArtifact(response, file, 'inline');
     }
     const pdf = await this.pdfConcurrency.run(() =>
-      this.salesPdfService.generateSaleTicketPdf(
-        empresaId,
-        publicId,
-      ),
+      this.salesPdfService.generateSaleTicketPdf(empresaId, publicId),
     );
     response.set({
       'Content-Type': 'application/pdf',
@@ -311,14 +310,24 @@ export class SalesController {
   @Post(':publicId/sunat/baja/consultar-ticket')
   @RequireModule('historial-ventas', 'comprobantes')
   @Throttle(rateLimits.sunat)
-  consultarTicketBajaSunat(
+  async consultarTicketBajaSunat(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
   ) {
-    return this.sunatBajaService.consultarBajaVenta(
-      this.getEmpresaId(user),
-      publicId,
-    );
+    const empresaId = this.getEmpresaId(user);
+    return (await this.salesService.usesBilling(empresaId, publicId))
+      ? this.billingVoidService.consult(empresaId, publicId)
+      : this.sunatBajaService.consultarBajaVenta(empresaId, publicId);
+  }
+
+  @Post(':publicId/sunat/baja/retry')
+  @RequireModule('historial-ventas', 'comprobantes')
+  @Throttle(rateLimits.sunat)
+  retryBajaSunat(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ) {
+    return this.billingVoidService.retry(this.getEmpresaId(user), publicId);
   }
 
   @Get(':publicId/sunat/baja/xml')
@@ -329,8 +338,17 @@ export class SalesController {
     @Param('publicId') publicId: string,
     @Res() response: Response,
   ) {
+    const empresaId = this.getEmpresaId(user);
+    if (await this.salesService.usesBilling(empresaId, publicId)) {
+      const file = await this.billingVoidService.artifact(
+        empresaId,
+        publicId,
+        'xml',
+      );
+      return this.sendBillingArtifact(response, file);
+    }
     const file = await this.sunatBajaService.downloadBajaArtifact(
-      this.getEmpresaId(user),
+      empresaId,
       publicId,
       'xml',
     );
@@ -345,8 +363,17 @@ export class SalesController {
     @Param('publicId') publicId: string,
     @Res() response: Response,
   ) {
+    const empresaId = this.getEmpresaId(user);
+    if (await this.salesService.usesBilling(empresaId, publicId)) {
+      const file = await this.billingVoidService.artifact(
+        empresaId,
+        publicId,
+        'cdr',
+      );
+      return this.sendBillingArtifact(response, file);
+    }
     const file = await this.sunatBajaService.downloadBajaArtifact(
-      this.getEmpresaId(user),
+      empresaId,
       publicId,
       'cdr',
     );

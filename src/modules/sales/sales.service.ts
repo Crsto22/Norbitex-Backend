@@ -57,6 +57,7 @@ import { SunatBajaService } from '../sunat-emission/sunat-baja.service';
 import { assertSunatEnvironmentAllowed } from '../plans/sunat-plan-access';
 import { BillingEmissionService } from '../billing-integration/billing-emission.service';
 import { BillingIntegrationService } from '../billing-integration/billing-integration.service';
+import { BillingVoidService } from '../billing-integration/billing-void.service';
 
 const ventaInclude = {
   sucursal: { select: { id: true, nombre: true } },
@@ -182,6 +183,7 @@ export class SalesService {
     private readonly stockService: StockService,
     private readonly billingEmissionService: BillingEmissionService,
     private readonly billingIntegrationService: BillingIntegrationService,
+    private readonly billingVoidService: BillingVoidService,
   ) {}
 
   // ── Series ─────────────────────────────────────────────────────────
@@ -1101,29 +1103,29 @@ export class SalesService {
           });
         } else {
           await tx.sunatJob.upsert({
-          where: {
-            tipoDocumento_documentoId: {
+            where: {
+              tipoDocumento_documentoId: {
+                tipoDocumento: 'venta',
+                documentoId: venta.id,
+              },
+            },
+            create: {
+              empresaId,
               tipoDocumento: 'venta',
               documentoId: venta.id,
+              estado: 'pendiente_envio',
+              nextRetryAt: new Date(),
             },
-          },
-          create: {
-            empresaId,
-            tipoDocumento: 'venta',
-            documentoId: venta.id,
-            estado: 'pendiente_envio',
-            nextRetryAt: new Date(),
-          },
-          update: {
-            estado: 'pendiente_envio',
-            intentos: 0,
-            ultimoCodigo: null,
-            ultimoError: null,
-            lockedAt: null,
-            lastAttemptAt: null,
-            processedAt: null,
-            nextRetryAt: new Date(),
-          },
+            update: {
+              estado: 'pendiente_envio',
+              intentos: 0,
+              ultimoCodigo: null,
+              ultimoError: null,
+              lockedAt: null,
+              lastAttemptAt: null,
+              processedAt: null,
+              nextRetryAt: new Date(),
+            },
           });
         }
 
@@ -1555,6 +1557,14 @@ export class SalesService {
     }
 
     if (isElectronicSaleType(venta.tipoComprobante)) {
+      if (venta.billingEnvironment) {
+        return this.billingVoidService.request(
+          empresaId,
+          publicId,
+          dto.razon,
+          dto.documentDelivered,
+        );
+      }
       return this.sunatBajaService.solicitarBajaVenta(
         empresaId,
         publicId,

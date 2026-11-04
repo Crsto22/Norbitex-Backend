@@ -467,6 +467,7 @@ enum BillingOutboxStatus {
 
 enum BillingOutboxOperation {
   ISSUE
+  VOID
 }
 
 model Empresa {
@@ -2324,6 +2325,9 @@ model Venta {
   billingSunatObservations Json?              @map("billing_sunat_observations")
   billingLastError      String?               @map("billing_last_error") @db.VarChar(1000)
   billingAttempts       Int                   @default(0) @map("billing_attempts")
+  billingVoidRequestId  String?               @unique @map("billing_void_request_id") @db.Uuid
+  billingVoidUpdatedAt  DateTime?             @map("billing_void_updated_at") @db.Timestamptz(6)
+  billingVoidRetrySequence Int                 @default(0) @map("billing_void_retry_sequence")
   tipoAnulacion         String?              @map("tipo_anulacion") @db.VarChar(20)
   sunatBajaEstado       SunatBajaEstado?     @map("sunat_baja_estado")
   sunatBajaCodigo       String?              @map("sunat_baja_codigo") @db.VarChar(20)
@@ -2374,6 +2378,7 @@ model Venta {
   @@index([empresaId, recojoPosterior, estadoEntrega, createdAt])
   @@index([empresaId, sunatEstado])
   @@index([empresaId, sunatBajaEstado])
+  @@index([billingVoidUpdatedAt])
   @@index([sunatBajaLoteId])
   @@index([sucursalId])
   @@index([clienteId])
