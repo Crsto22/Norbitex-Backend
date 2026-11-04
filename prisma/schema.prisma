@@ -435,6 +435,40 @@ enum SunatJobEstado {
   error_definitivo
 }
 
+enum BillingEnvironment {
+  BETA
+  PRODUCTION
+}
+
+enum BillingIntegrationStatus {
+  PENDING
+  READY
+  ERROR
+  DISABLED
+}
+
+enum BillingDocumentStatus {
+  QUEUED
+  PROCESSING
+  ACCEPTED
+  ACCEPTED_WITH_OBSERVATIONS
+  REJECTED
+  RETRY_SCHEDULED
+  FAILED
+}
+
+enum BillingOutboxStatus {
+  PENDING
+  PROCESSING
+  RETRY
+  DONE
+  DEAD
+}
+
+enum BillingOutboxOperation {
+  ISSUE
+}
+
 model Empresa {
   id                              BigInt                           @id @default(autoincrement())
   nombreComercial                 String                           @map("nombre_comercial") @db.VarChar(150)
@@ -457,6 +491,7 @@ model Empresa {
   asistenciasFinAt                DateTime?                        @map("asistencias_fin_at") @db.Timestamptz(6)
   logoUrl                         String?                          @map("logo_url") @db.VarChar(500)
   logoPdfUrl                      String?                          @map("logo_pdf_url") @db.VarChar(500)
+  billingMicroserviceEnabled      Boolean                          @default(false) @map("billing_microservice_enabled")
   createdAt                       DateTime                         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                       DateTime                         @updatedAt @map("updated_at") @db.Timestamptz(6)
   usuarios                        EmpresaUsuario[]
@@ -508,6 +543,11 @@ model Empresa {
   marcajesAsistencia              MarcajeAsistencia[]
   afiliacion                      EmpresaAfiliacion?
   comisionesAfiliado              ComisionAfiliado[]
+  billingIntegration              BillingIntegration?
+  billingEstablishments           BillingEstablishmentMapping[]
+  billingSeries                   BillingSeriesMapping[]
+  billingOutbox                   BillingOutbox[]
+  billingWebhookEvents            BillingWebhookEvent[]
 
   @@map("empresa")
 }
@@ -762,6 +802,7 @@ model Sucursal {
   puntosQrAsistencia         PuntoQrAsistencia[]
   marcajesAsistencia         MarcajeAsistencia[]
   cuentasPorCobrar           CuentaPorCobrar[]
+  billingEstablishments      BillingEstablishmentMapping[]
 
   @@unique([empresaId, nombreKey])
   @@index([empresaId])
@@ -2017,6 +2058,7 @@ model SerieComprobante {
   tipoComprobante       VentaTipoComprobante       @map("tipo_comprobante")
   serie                 String                     @db.VarChar(4)
   numeroActual          Int                        @default(0) @map("numero_actual")
+  numeroProvisionalActual Int                      @default(0) @map("numero_provisional_actual")
   esPrincipal           Boolean                    @default(false) @map("es_principal")
   aplicaTodasSucursales Boolean                    @default(true) @map("aplica_todas_sucursales")
   activo                Boolean                    @default(true)
@@ -2027,6 +2069,7 @@ model SerieComprobante {
   ventas                Venta[]
   notasCredito          NotaCredito[]
   guiasRemision         GuiaRemision[]
+  billingSeries         BillingSeriesMapping[]
 
   @@unique([empresaId, tipoComprobante, serie])
   @@index([empresaId])
@@ -2274,6 +2317,13 @@ model Venta {
   sunatCdrKey           String?              @map("sunat_cdr_key") @db.VarChar(600)
   sunatEnviadoAt        DateTime?            @map("sunat_enviado_at") @db.Timestamptz(6)
   sunatRespondidoAt     DateTime?            @map("sunat_respondido_at") @db.Timestamptz(6)
+  billingDocumentId     String?               @unique @map("billing_document_id") @db.Uuid
+  billingEnvironment    BillingEnvironment?   @map("billing_environment")
+  billingStatus         BillingDocumentStatus? @map("billing_status")
+  billingUpdatedAt      DateTime?             @map("billing_updated_at") @db.Timestamptz(6)
+  billingSunatObservations Json?              @map("billing_sunat_observations")
+  billingLastError      String?               @map("billing_last_error") @db.VarChar(1000)
+  billingAttempts       Int                   @default(0) @map("billing_attempts")
   tipoAnulacion         String?              @map("tipo_anulacion") @db.VarChar(20)
   sunatBajaEstado       SunatBajaEstado?     @map("sunat_baja_estado")
   sunatBajaCodigo       String?              @map("sunat_baja_codigo") @db.VarChar(20)
@@ -2308,6 +2358,7 @@ model Venta {
   cajaMovimientos       CajaMovimiento[]
   cotizacionOrigen      Cotizacion?          @relation("CotizacionConvertidaVenta")
   sunatBajaItems        SunatBajaItem[]
+  billingOutbox         BillingOutbox[]
 
   @@unique([serieComprobanteId, numero])
   @@unique([empresaId, codigoInterno])
@@ -2595,6 +2646,107 @@ model CuentaPorCobrarAplicacion {
   @@unique([cuotaId, pagoId])
   @@index([pagoId])
   @@map("cuenta_por_cobrar_aplicacion")
+}
+
+model BillingIntegration {
+  id                                BigInt                   @id @default(autoincrement())
+  empresaId                         BigInt                   @unique @map("empresa_id")
+  tenantId                          String?                  @map("tenant_id") @db.Uuid
+  applicationId                     String?                  @map("application_id") @db.Uuid
+  environment                       BillingEnvironment       @default(BETA)
+  betaApiKeyEncrypted               String?                  @map("beta_api_key_encrypted")
+  productionApiKeyEncrypted         String?                  @map("production_api_key_encrypted")
+  betaCredentialsConfigured         Boolean                  @default(false) @map("beta_credentials_configured")
+  productionCredentialsConfigured   Boolean                  @default(false) @map("production_credentials_configured")
+  betaCertificateConfigured         Boolean                  @default(false) @map("beta_certificate_configured")
+  productionCertificateConfigured   Boolean                  @default(false) @map("production_certificate_configured")
+  betaWebhookEndpointId             String?                  @map("beta_webhook_endpoint_id") @db.Uuid
+  productionWebhookEndpointId       String?                  @map("production_webhook_endpoint_id") @db.Uuid
+  betaWebhookSecretEncrypted        String?                  @map("beta_webhook_secret_encrypted")
+  productionWebhookSecretEncrypted  String?                  @map("production_webhook_secret_encrypted")
+  status                            BillingIntegrationStatus @default(PENDING)
+  lastError                         String?                  @map("last_error") @db.VarChar(1000)
+  lastSyncedAt                      DateTime?                @map("last_synced_at") @db.Timestamptz(6)
+  createdAt                         DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                         DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                           Empresa                  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([applicationId])
+  @@map("billing_integration")
+}
+
+model BillingEstablishmentMapping {
+  id                      BigInt             @id @default(autoincrement())
+  empresaId               BigInt             @map("empresa_id")
+  sucursalId              BigInt             @map("sucursal_id")
+  environment             BillingEnvironment
+  billingEstablishmentId  String             @map("billing_establishment_id") @db.Uuid
+  code                    String             @db.VarChar(10)
+  createdAt               DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                 Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  sucursal                Sucursal           @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+
+  @@unique([sucursalId, environment])
+  @@unique([empresaId, environment, code])
+  @@index([empresaId, environment])
+  @@map("billing_establishment_mapping")
+}
+
+model BillingSeriesMapping {
+  id                      BigInt             @id @default(autoincrement())
+  empresaId               BigInt             @map("empresa_id")
+  serieComprobanteId      BigInt             @map("serie_comprobante_id")
+  environment             BillingEnvironment
+  billingFiscalSeriesId   String             @map("billing_fiscal_series_id") @db.Uuid
+  createdAt               DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                 Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  serieComprobante        SerieComprobante   @relation(fields: [serieComprobanteId], references: [id], onDelete: Cascade)
+
+  @@unique([serieComprobanteId, environment])
+  @@index([empresaId, environment])
+  @@map("billing_series_mapping")
+}
+
+model BillingOutbox {
+  id              String                 @id @default(uuid()) @db.Uuid
+  empresaId       BigInt                 @map("empresa_id")
+  ventaId         BigInt                 @map("venta_id")
+  environment     BillingEnvironment
+  operation       BillingOutboxOperation @default(ISSUE)
+  idempotencyKey  String                 @unique @map("idempotency_key") @db.VarChar(100)
+  status          BillingOutboxStatus    @default(PENDING)
+  attempts        Int                    @default(0)
+  maxAttempts     Int                    @default(12) @map("max_attempts")
+  nextAttemptAt   DateTime               @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lockedAt        DateTime?              @map("locked_at") @db.Timestamptz(6)
+  lastError       String?                @map("last_error") @db.VarChar(1000)
+  processedAt     DateTime?              @map("processed_at") @db.Timestamptz(6)
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa         Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  venta           Venta                  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+
+  @@unique([ventaId, environment, operation])
+  @@index([status, nextAttemptAt])
+  @@index([empresaId, status])
+  @@map("billing_outbox")
+}
+
+model BillingWebhookEvent {
+  eventId         String             @id @map("event_id") @db.Uuid
+  empresaId       BigInt             @map("empresa_id")
+  applicationId   String             @map("application_id") @db.Uuid
+  environment     BillingEnvironment
+  eventType       String             @map("event_type") @db.VarChar(80)
+  eventCreatedAt  DateTime           @map("event_created_at") @db.Timestamptz(6)
+  processedAt     DateTime           @default(now()) @map("processed_at") @db.Timestamptz(6)
+  empresa         Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@index([empresaId, processedAt])
+  @@map("billing_webhook_event")
 }
 
 model CajaSesion {

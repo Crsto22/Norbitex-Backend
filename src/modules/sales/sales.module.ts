@@ -7,9 +7,16 @@ import { SalesPdfService } from './sales-pdf.service';
 import { SalesService } from './sales.service';
 import { SaleScopeGuard } from './guards/sale-scope.guard';
 import { StockModule } from '../stock/stock.module';
+import { BillingIntegrationModule } from '../billing-integration/billing-integration.module';
 
 @Module({
-  imports: [PrismaModule, StorageModule, SunatEmissionModule, StockModule],
+  imports: [
+    PrismaModule,
+    StorageModule,
+    SunatEmissionModule,
+    StockModule,
+    BillingIntegrationModule,
+  ],
   controllers: [SalesController],
   providers: [SalesService, SalesPdfService, SaleScopeGuard],
   exports: [SalesService, SalesPdfService],

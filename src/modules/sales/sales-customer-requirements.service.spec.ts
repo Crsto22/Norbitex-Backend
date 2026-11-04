@@ -46,7 +46,7 @@ describe('SalesService customer requirements', () => {
     ).not.toThrow();
   });
 
-  it('requires DNI for receipt above S/700', () => {
+  it('requires an identified customer for receipt above S/700', () => {
     expect(() =>
       service.validateSaleCustomerRequirements(
         VentaTipoComprobante.boleta,
@@ -54,5 +54,19 @@ describe('SalesService customer requirements', () => {
         new Prisma.Decimal('700.01'),
       ),
     ).toThrow(BadRequestException);
+  });
+
+  it('allows RUC for receipt above S/700', () => {
+    expect(() =>
+      service.validateSaleCustomerRequirements(
+        VentaTipoComprobante.boleta,
+        {
+          tipoDocumento: ClienteTipoDocumento.ruc,
+          numeroDocumento: '20615136663',
+          razonSocial: 'CORDEX T & D S.A.C.',
+        },
+        new Prisma.Decimal('700.01'),
+      ),
+    ).not.toThrow();
   });
 });

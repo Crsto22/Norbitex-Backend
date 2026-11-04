@@ -37,6 +37,7 @@ import {
 import { FindSaleProductsQueryDto } from './dto/find-sale-products-query.dto';
 import { FindSeriesQueryDto } from './dto/find-series-query.dto';
 import { AnnulSaleDto } from './dto/annul-sale.dto';
+import { BillingEmissionService } from '../billing-integration/billing-emission.service';
 import {
   CreateSerieComprobanteDto,
   UpdateSerieComprobanteDto,
@@ -50,6 +51,7 @@ export class SalesController {
     private readonly salesPdfService: SalesPdfService,
     private readonly sunatEmissionService: SunatEmissionService,
     private readonly sunatBajaService: SunatBajaService,
+    private readonly billingEmissionService: BillingEmissionService,
     private readonly pdfConcurrency: PdfConcurrencyService,
   ) {}
 
@@ -177,8 +179,17 @@ export class SalesController {
     @Param('publicId') publicId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
+    const empresaId = this.getEmpresaId(user);
+    if (await this.salesService.usesBilling(empresaId, publicId)) {
+      const file = await this.billingEmissionService.artifact(
+        empresaId,
+        publicId,
+        'PDF_A4',
+      );
+      return this.sendBillingArtifact(response, file, 'inline');
+    }
     const pdf = await this.pdfConcurrency.run(() =>
-      this.salesPdfService.generateSalePdf(this.getEmpresaId(user), publicId),
+      this.salesPdfService.generateSalePdf(empresaId, publicId),
     );
     response.set({
       'Content-Type': 'application/pdf',
@@ -197,9 +208,18 @@ export class SalesController {
     @Param('publicId') publicId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
+    const empresaId = this.getEmpresaId(user);
+    if (await this.salesService.usesBilling(empresaId, publicId)) {
+      const file = await this.billingEmissionService.artifact(
+        empresaId,
+        publicId,
+        'PDF_TICKET',
+      );
+      return this.sendBillingArtifact(response, file, 'inline');
+    }
     const pdf = await this.pdfConcurrency.run(() =>
       this.salesPdfService.generateSaleTicketPdf(
-        this.getEmpresaId(user),
+        empresaId,
         publicId,
       ),
     );
@@ -215,27 +235,27 @@ export class SalesController {
   @Get(':publicId/sunat')
   @RequireModule('historial-ventas', 'comprobantes')
   @Throttle(rateLimits.sunat)
-  getSunatStatus(
+  async getSunatStatus(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
   ) {
-    return this.sunatEmissionService.getSaleSunatStatus(
-      this.getEmpresaId(user),
-      publicId,
-    );
+    const empresaId = this.getEmpresaId(user);
+    return (await this.salesService.usesBilling(empresaId, publicId))
+      ? this.billingEmissionService.status(empresaId, publicId)
+      : this.sunatEmissionService.getSaleSunatStatus(empresaId, publicId);
   }
 
   @Post(':publicId/sunat/retry')
   @RequireModule('historial-ventas', 'comprobantes')
   @Throttle(rateLimits.sunat)
-  retrySunat(
+  async retrySunat(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
   ) {
-    return this.sunatEmissionService.retrySale(
-      this.getEmpresaId(user),
-      publicId,
-    );
+    const empresaId = this.getEmpresaId(user);
+    return (await this.salesService.usesBilling(empresaId, publicId))
+      ? this.billingEmissionService.retry(empresaId, publicId)
+      : this.sunatEmissionService.retrySale(empresaId, publicId);
   }
 
   @Get(':publicId/sunat/xml')
@@ -246,8 +266,17 @@ export class SalesController {
     @Param('publicId') publicId: string,
     @Res() response: Response,
   ) {
+    const empresaId = this.getEmpresaId(user);
+    if (await this.salesService.usesBilling(empresaId, publicId)) {
+      const file = await this.billingEmissionService.artifact(
+        empresaId,
+        publicId,
+        'XML',
+      );
+      return this.sendBillingArtifact(response, file);
+    }
     const file = await this.sunatEmissionService.downloadSaleArtifact(
-      this.getEmpresaId(user),
+      empresaId,
       publicId,
       'xml',
     );
@@ -262,8 +291,17 @@ export class SalesController {
     @Param('publicId') publicId: string,
     @Res() response: Response,
   ) {
+    const empresaId = this.getEmpresaId(user);
+    if (await this.salesService.usesBilling(empresaId, publicId)) {
+      const file = await this.billingEmissionService.artifact(
+        empresaId,
+        publicId,
+        'CDR',
+      );
+      return this.sendBillingArtifact(response, file);
+    }
     const file = await this.sunatEmissionService.downloadSaleArtifact(
-      this.getEmpresaId(user),
+      empresaId,
       publicId,
       'cdr',
     );
@@ -411,5 +449,18 @@ export class SalesController {
     });
 
     response.send(buffer);
+  }
+
+  private sendBillingArtifact(
+    response: Response,
+    file: { buffer: Buffer; filename: string; contentType: string },
+    disposition: 'inline' | 'attachment' = 'attachment',
+  ) {
+    response.set({
+      'Content-Type': file.contentType,
+      'Content-Disposition': `${disposition}; filename="${file.filename}"`,
+      'Content-Length': file.buffer.length,
+    });
+    response.send(file.buffer);
   }
 }

@@ -8,7 +8,7 @@ import { AppModule } from './app.module';
 import { RequestMetricsService } from './common/metrics/request-metrics.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const server = app.getHttpAdapter().getInstance() as express.Express;
   const isProduction = process.env.NODE_ENV === 'production';
   const corsOrigins = getCorsOrigins();

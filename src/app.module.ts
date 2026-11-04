@@ -16,6 +16,7 @@ import { AttendanceTimeEntriesModule } from './modules/attendance-time-entries/a
 import { AccountsReceivableModule } from './modules/accounts-receivable/accounts-receivable.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BrandsModule } from './modules/brands/brands.module';
+import { BillingIntegrationModule } from './modules/billing-integration/billing-integration.module';
 import { BranchesModule } from './modules/branches/branches.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { CashRegisterModule } from './modules/cash-register/cash-register.module';
@@ -82,6 +83,7 @@ import { validateEnvironment } from './config/environment';
     ColorsModule,
     SizesModule,
     BrandsModule,
+    BillingIntegrationModule,
     CategoriesModule,
     CashRegisterModule,
     BranchesModule,

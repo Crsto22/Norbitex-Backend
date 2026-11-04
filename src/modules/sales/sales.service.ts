@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   CajaMovimientoTipo,
   CajaSesionEstado,
+  BillingEnvironment,
   ClienteTipoDocumento,
   ClienteEstado,
   CuentaPorCobrarEstado,
@@ -54,6 +55,7 @@ import {
 import { isElectronicSaleType } from '../sunat-emission/sunat-comprobante.helper';
 import { SunatBajaService } from '../sunat-emission/sunat-baja.service';
 import { assertSunatEnvironmentAllowed } from '../plans/sunat-plan-access';
+import { BillingEmissionService } from '../billing-integration/billing-emission.service';
 
 const ventaInclude = {
   sucursal: { select: { id: true, nombre: true } },
@@ -177,6 +179,7 @@ export class SalesService {
     private readonly sunatBajaService: SunatBajaService,
     private readonly plansService: PlansService,
     private readonly stockService: StockService,
+    private readonly billingEmissionService: BillingEmissionService,
   ) {}
 
   // ── Series ─────────────────────────────────────────────────────────
@@ -405,6 +408,9 @@ export class SalesService {
     const userId = scope.userId.toString();
     const usuarioId = BigInt(userId);
     const electronicSale = isElectronicSaleType(dto.tipoComprobante);
+    const billingContext = electronicSale
+      ? await this.getBillingContext(empresaId)
+      : { enabled: false, environment: BillingEnvironment.BETA };
     const formaPago = dto.formaPago ?? VentaFormaPago.CONTADO;
 
     if (formaPago === VentaFormaPago.CREDITO) {
@@ -476,7 +482,7 @@ export class SalesService {
       this.validatePickupClient(cliente);
     }
 
-    if (electronicSale) {
+    if (electronicSale && !billingContext.enabled) {
       await this.validateSunatSalePrerequisites(empresaId);
     }
 
@@ -529,6 +535,14 @@ export class SalesService {
 
     if (electronicSale) {
       this.validateElectronicSerie(dto.tipoComprobante, serie.serie);
+      if (billingContext.enabled) {
+        await this.validateBillingSalePrerequisites(
+          empresaId,
+          billingContext.environment,
+          serie.id,
+          sucursal?.id ?? null,
+        );
+      }
     }
 
     const sunatConfig = electronicSale
@@ -681,18 +695,25 @@ export class SalesService {
             );
           }
 
-          const updatedSerie = await tx.serieComprobante.update({
-            where: { id: serie.id },
-            data: { numeroActual: { increment: 1 } },
-          });
-
-          const numero = updatedSerie.numeroActual;
-          const correlativo = `${serie.serie}-${numero.toString().padStart(6, '0')}`;
           const codigoInterno = await this.generateInternalSaleCode(
             tx,
             empresaId,
             new Date(),
           );
+          const useBilling = electronicSale && billingContext.enabled;
+          const updatedSerie = await tx.serieComprobante.update({
+            where: { id: serie.id },
+            data: useBilling
+              ? { numeroProvisionalActual: { increment: 1 } }
+              : { numeroActual: { increment: 1 } },
+          });
+
+          const numero = useBilling
+            ? -updatedSerie.numeroProvisionalActual
+            : updatedSerie.numeroActual;
+          const correlativo = useBilling
+            ? codigoInterno
+            : `${serie.serie}-${numero.toString().padStart(6, '0')}`;
 
           const ventaData = await tx.venta.create({
             data: {
@@ -731,6 +752,11 @@ export class SalesService {
               sunatEstado: electronicSale
                 ? SunatEstado.pendiente_envio
                 : SunatEstado.no_aplica,
+              billingEnvironment: useBilling
+                ? billingContext.environment
+                : null,
+              billingStatus: useBilling ? 'QUEUED' : null,
+              billingUpdatedAt: useBilling ? new Date() : null,
               observaciones: dto.observaciones ?? null,
               creadoPorId: usuarioId,
               cajaSesionId: cajaSesion?.id ?? null,
@@ -768,7 +794,14 @@ export class SalesService {
             include: ventaInclude,
           });
 
-          if (electronicSale) {
+          if (electronicSale && useBilling) {
+            await this.billingEmissionService.enqueue(tx, {
+              empresaId,
+              ventaId: ventaData.id,
+              environment: billingContext.environment,
+              publicId: ventaData.publicId,
+            });
+          } else if (electronicSale) {
             await tx.sunatJob.upsert({
               where: {
                 tipoDocumento_documentoId: {
@@ -934,7 +967,10 @@ export class SalesService {
       cliente,
       venta.total,
     );
-    await this.validateSunatSalePrerequisites(empresaId);
+    const billingContext = await this.getBillingContext(empresaId);
+    if (!billingContext.enabled) {
+      await this.validateSunatSalePrerequisites(empresaId);
+    }
 
     const serie = await this.resolveSerie(
       empresaId,
@@ -942,6 +978,14 @@ export class SalesService {
       venta.sucursalId,
     );
     this.validateElectronicSerie(dto.tipoComprobante, serie.serie);
+    if (billingContext.enabled) {
+      await this.validateBillingSalePrerequisites(
+        empresaId,
+        billingContext.environment,
+        serie.id,
+        venta.sucursalId,
+      );
+    }
 
     const sunatConfig = await this.prisma.sunatConfig.findUnique({
       where: { empresaId },
@@ -969,10 +1013,16 @@ export class SalesService {
       async (tx) => {
         const updatedSerie = await tx.serieComprobante.update({
           where: { id: serie.id },
-          data: { numeroActual: { increment: 1 } },
+          data: billingContext.enabled
+            ? { numeroProvisionalActual: { increment: 1 } }
+            : { numeroActual: { increment: 1 } },
         });
-        const numero = updatedSerie.numeroActual;
-        const correlativo = `${serie.serie}-${numero.toString().padStart(6, '0')}`;
+        const numero = billingContext.enabled
+          ? -updatedSerie.numeroProvisionalActual
+          : updatedSerie.numeroActual;
+        const correlativo = billingContext.enabled
+          ? venta.codigoInterno
+          : `${serie.serie}-${numero.toString().padStart(6, '0')}`;
 
         await Promise.all(
           calculated.lines.map((line, index) =>
@@ -1015,6 +1065,12 @@ export class SalesService {
             sunatCdrKey: null,
             sunatEnviadoAt: null,
             sunatRespondidoAt: null,
+            billingEnvironment: billingContext.enabled
+              ? billingContext.environment
+              : null,
+            billingStatus: billingContext.enabled ? 'QUEUED' : null,
+            billingUpdatedAt: billingContext.enabled ? new Date() : null,
+            billingLastError: null,
           },
           include: ventaInclude,
         });
@@ -1026,7 +1082,15 @@ export class SalesService {
           });
         }
 
-        await tx.sunatJob.upsert({
+        if (billingContext.enabled) {
+          await this.billingEmissionService.enqueue(tx, {
+            empresaId,
+            ventaId: venta.id,
+            environment: billingContext.environment,
+            publicId: venta.publicId,
+          });
+        } else {
+          await tx.sunatJob.upsert({
           where: {
             tipoDocumento_documentoId: {
               tipoDocumento: 'venta',
@@ -1050,7 +1114,8 @@ export class SalesService {
             processedAt: null,
             nextRetryAt: new Date(),
           },
-        });
+          });
+        }
 
         return ventaData;
       },
@@ -1063,6 +1128,15 @@ export class SalesService {
   async findByRequestIdResponse(empresaId: bigint, requestId?: string) {
     const sale = await this.findByRequestId(empresaId, requestId);
     return sale ? this.toVentaResponse(sale) : null;
+  }
+
+  async usesBilling(empresaId: bigint, publicId: string) {
+    const sale = await this.prisma.venta.findFirst({
+      where: { empresaId, publicId },
+      select: { billingEnvironment: true },
+    });
+    if (!sale) throw new NotFoundException('Venta no encontrada');
+    return sale.billingEnvironment !== null;
   }
 
   private findByRequestId(empresaId: bigint, requestId?: string) {
@@ -1945,6 +2019,75 @@ export class SalesService {
     }
   }
 
+  private async getBillingContext(empresaId: bigint) {
+    const company = await this.prisma.empresa.findUnique({
+      where: { id: empresaId },
+      select: {
+        billingMicroserviceEnabled: true,
+        billingIntegration: {
+          select: { environment: true, status: true },
+        },
+      },
+    });
+    const enabled = company?.billingMicroserviceEnabled === true;
+    if (enabled && company?.billingIntegration?.status !== 'READY') {
+      throw new BadRequestException(
+        'La integracion con Nuvex Billing no esta lista',
+      );
+    }
+    return {
+      enabled,
+      environment:
+        company?.billingIntegration?.environment ?? BillingEnvironment.BETA,
+    };
+  }
+
+  private async validateBillingSalePrerequisites(
+    empresaId: bigint,
+    environment: BillingEnvironment,
+    serieComprobanteId: bigint,
+    sucursalId: bigint | null,
+  ) {
+    if (!sucursalId) {
+      throw new BadRequestException(
+        'Selecciona una sucursal para emitir el comprobante',
+      );
+    }
+    const [integration, establishment, series] = await Promise.all([
+      this.prisma.billingIntegration.findUnique({ where: { empresaId } }),
+      this.prisma.billingEstablishmentMapping.findUnique({
+        where: { sucursalId_environment: { sucursalId, environment } },
+      }),
+      this.prisma.billingSeriesMapping.findUnique({
+        where: {
+          serieComprobanteId_environment: {
+            serieComprobanteId,
+            environment,
+          },
+        },
+      }),
+    ]);
+    const hasKey =
+      environment === BillingEnvironment.BETA
+        ? integration?.betaApiKeyEncrypted
+        : integration?.productionApiKeyEncrypted;
+    if (!integration || integration.status !== 'READY' || !hasKey) {
+      throw new BadRequestException(
+        `Configura Nuvex Billing para el ambiente ${environment}`,
+      );
+    }
+    if (!establishment) {
+      throw new BadRequestException(
+        'La sucursal no esta sincronizada con Nuvex Billing',
+      );
+    }
+    if (!series) {
+      throw new BadRequestException(
+        'La serie no esta sincronizada con Nuvex Billing',
+      );
+    }
+  }
+
   private validateSaleCustomerRequirements(
     tipoComprobante: VentaTipoComprobante,
     cliente: {
@@ -1971,12 +2114,16 @@ export class SalesService {
       tipoComprobante === VentaTipoComprobante.boleta &&
       total.gt(700) &&
       (!cliente ||
-        cliente.tipoDocumento !== ClienteTipoDocumento.dni ||
         !cliente.numeroDocumento ||
-        cliente.numeroDocumento.length !== 8)
+        !(
+          (cliente.tipoDocumento === ClienteTipoDocumento.dni &&
+            /^\d{8}$/.test(cliente.numeroDocumento)) ||
+          (cliente.tipoDocumento === ClienteTipoDocumento.ruc &&
+            /^\d{11}$/.test(cliente.numeroDocumento))
+        ))
     ) {
       throw new BadRequestException(
-        'Para emitir boleta mayor a S/700 el cliente debe tener DNI de 8 digitos',
+        'Para emitir boleta mayor a S/700 el cliente debe tener DNI o RUC valido',
       );
     }
   }
@@ -2160,6 +2307,8 @@ export class SalesService {
       serie: venta.serie,
       numero: venta.numero,
       correlativo: venta.correlativo,
+      correlativoFiscal:
+        venta.billingEnvironment && venta.numero < 1 ? null : venta.correlativo,
       estado: venta.estado,
       recojoPosterior: venta.recojoPosterior,
       recojoHasta: venta.recojoHasta?.toISOString() ?? null,
@@ -2182,11 +2331,28 @@ export class SalesService {
         codigo: venta.sunatCodigo,
         mensaje: venta.sunatMensaje,
         hash: venta.sunatHash,
-        xmlDisponible: Boolean(venta.sunatXmlKey),
-        cdrDisponible: Boolean(venta.sunatCdrKey),
+        xmlDisponible:
+          Boolean(venta.sunatXmlKey) ||
+          venta.billingStatus === 'ACCEPTED' ||
+          venta.billingStatus === 'ACCEPTED_WITH_OBSERVATIONS',
+        cdrDisponible:
+          Boolean(venta.sunatCdrKey) ||
+          venta.billingStatus === 'ACCEPTED' ||
+          venta.billingStatus === 'ACCEPTED_WITH_OBSERVATIONS',
         enviadoAt: venta.sunatEnviadoAt?.toISOString() ?? null,
         respondidoAt: venta.sunatRespondidoAt?.toISOString() ?? null,
       },
+      billing: venta.billingEnvironment
+        ? {
+            documentId: venta.billingDocumentId,
+            environment: venta.billingEnvironment,
+            status: venta.billingStatus,
+            observations: venta.billingSunatObservations,
+            lastError: venta.billingLastError,
+            attempts: venta.billingAttempts,
+            updatedAt: venta.billingUpdatedAt?.toISOString() ?? null,
+          }
+        : null,
       sunatBaja: this.sunatBajaService.toPublicSunatBaja(venta),
       observaciones: venta.observaciones,
       anuladoAt: venta.anuladoAt?.toISOString() ?? null,

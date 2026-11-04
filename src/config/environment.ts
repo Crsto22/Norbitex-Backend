@@ -14,6 +14,9 @@ const requiredProductionVariables = [
   'SUNAT_SECRETS_ENCRYPTION_KEY',
   'LOCAL_STORAGE_DIR',
   'METRICS_TOKEN',
+  'BILLING_API_URL',
+  'BILLING_PLATFORM_ADMIN_KEY',
+  'BILLING_WEBHOOK_PUBLIC_URL',
 ] as const;
 
 export function validateEnvironment(config: Record<string, unknown>) {
@@ -63,6 +66,13 @@ export function validateEnvironment(config: Record<string, unknown>) {
   const frontendUrl = text(config.FRONTEND_URL);
   if (frontendUrl && !isHttpsUrl(frontendUrl)) {
     errors.push('FRONTEND_URL debe usar HTTPS');
+  }
+
+  for (const key of ['BILLING_API_URL', 'BILLING_WEBHOOK_PUBLIC_URL']) {
+    const value = text(config[key]);
+    if (value && !isHttpsUrl(value)) {
+      errors.push(`${key} debe usar HTTPS`);
+    }
   }
 
   if (text(config.BREVO_ENABLED)?.toLowerCase() !== 'true') {
