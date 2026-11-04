@@ -20,6 +20,11 @@ type RemoteSeries = {
   id: string;
   series: string;
   environment: BillingEnvironment;
+  applicationId: string;
+  establishmentId: string;
+  documentType: 'RECEIPT' | 'INVOICE';
+  currentNumber: number;
+  active: boolean;
 };
 type RemoteApiKey = { apiKey: string };
 type RemoteWebhook = {
@@ -91,6 +96,18 @@ export class BillingIntegrationService {
       establishments: company._count.billingEstablishments,
       series: company._count.billingSeries,
     };
+  }
+
+  async syncConfigured(empresaId: bigint) {
+    const integration = await this.prisma.billingIntegration.findUnique({
+      where: { empresaId },
+      select: { environment: true, tenantId: true, applicationId: true },
+    });
+    if (!integration?.tenantId || !integration.applicationId) {
+      return { status: 'SKIPPED' as const };
+    }
+    await this.provision(empresaId, integration.environment);
+    return { status: 'SYNCED' as const };
   }
 
   async provision(empresaId: bigint, environment: BillingEnvironment) {
@@ -482,11 +499,36 @@ export class BillingIntegrationService {
     const all = await this.api.admin<RemoteSeries[]>(
       `/admin/tenants/${tenantId}/fiscal-series`,
     );
+    const documentType =
+      series.tipoComprobante === 'boleta' ? 'RECEIPT' : 'INVOICE';
     const existing = all.find(
       (item) =>
-        item.series === series.serie && item.environment === environment,
+        item.series === series.serie &&
+        item.environment === environment &&
+        item.documentType === documentType,
     );
-    if (existing) return existing;
+    if (existing) {
+      if (
+        existing.applicationId === applicationId &&
+        existing.establishmentId === establishmentId &&
+        existing.active &&
+        existing.currentNumber >= series.numeroActual
+      ) {
+        return existing;
+      }
+      return this.api.admin<RemoteSeries>(
+        `/admin/tenants/${tenantId}/fiscal-series/${existing.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            applicationId,
+            establishmentId,
+            active: true,
+            minimumNumber: series.numeroActual,
+          }),
+        },
+      );
+    }
     return this.api.admin<RemoteSeries>(
       `/admin/tenants/${tenantId}/fiscal-series`,
       {
@@ -495,8 +537,7 @@ export class BillingIntegrationService {
           applicationId,
           establishmentId,
           environment,
-          documentType:
-            series.tipoComprobante === 'boleta' ? 'RECEIPT' : 'INVOICE',
+          documentType,
           series: series.serie,
           initialNumber: series.numeroActual,
         }),

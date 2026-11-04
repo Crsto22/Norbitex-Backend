@@ -56,6 +56,7 @@ import { isElectronicSaleType } from '../sunat-emission/sunat-comprobante.helper
 import { SunatBajaService } from '../sunat-emission/sunat-baja.service';
 import { assertSunatEnvironmentAllowed } from '../plans/sunat-plan-access';
 import { BillingEmissionService } from '../billing-integration/billing-emission.service';
+import { BillingIntegrationService } from '../billing-integration/billing-integration.service';
 
 const ventaInclude = {
   sucursal: { select: { id: true, nombre: true } },
@@ -180,6 +181,7 @@ export class SalesService {
     private readonly plansService: PlansService,
     private readonly stockService: StockService,
     private readonly billingEmissionService: BillingEmissionService,
+    private readonly billingIntegrationService: BillingIntegrationService,
   ) {}
 
   // ── Series ─────────────────────────────────────────────────────────
@@ -311,7 +313,11 @@ export class SalesService {
       });
     });
 
-    return this.toSerieResponse(serie);
+    return this.withBillingSeriesSync(
+      empresaId,
+      serie.tipoComprobante,
+      this.toSerieResponse(serie),
+    );
   }
 
   async updateSerie(
@@ -389,7 +395,11 @@ export class SalesService {
       });
     });
 
-    return this.toSerieResponse(updated);
+    return this.withBillingSeriesSync(
+      empresaId,
+      updated.tipoComprobante,
+      this.toSerieResponse(updated),
+    );
   }
 
   // ── Create Sale ────────────────────────────────────────────────────
@@ -2192,6 +2202,35 @@ export class SalesService {
       activo: serie.activo,
       createdAt: serie.createdAt.toISOString(),
     };
+  }
+
+  private async withBillingSeriesSync<T extends Record<string, unknown>>(
+    empresaId: bigint,
+    tipoComprobante: VentaTipoComprobante,
+    response: T,
+  ) {
+    if (
+      tipoComprobante !== VentaTipoComprobante.boleta &&
+      tipoComprobante !== VentaTipoComprobante.factura
+    ) {
+      return response;
+    }
+    try {
+      const billingSync =
+        await this.billingIntegrationService.syncConfigured(empresaId);
+      return { ...response, billingSync };
+    } catch (error) {
+      return {
+        ...response,
+        billingSync: {
+          status: 'ERROR' as const,
+          message:
+            error instanceof Error
+              ? error.message
+              : 'No se pudo sincronizar Billing',
+        },
+      };
+    }
   }
 
   private parseOptionalId(value: string | undefined, fieldName: string) {
