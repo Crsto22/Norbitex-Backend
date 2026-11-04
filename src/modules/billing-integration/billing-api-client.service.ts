@@ -111,8 +111,27 @@ function safeJson(value: string): unknown {
 }
 
 function errorMessage(payload: unknown) {
+  if (typeof payload === 'string') return payload.trim() || null;
   if (!payload || typeof payload !== 'object') return null;
-  const message = (payload as { message?: unknown }).message;
+  const problem = payload as {
+    detail?: unknown;
+    message?: unknown;
+    errors?: unknown;
+    title?: unknown;
+  };
+  if (typeof problem.detail === 'string' && problem.detail.trim()) {
+    return problem.detail.trim();
+  }
+  const message = problem.message;
   if (Array.isArray(message)) return message.join(', ');
-  return typeof message === 'string' ? message : null;
+  if (typeof message === 'string' && message.trim()) return message.trim();
+  if (Array.isArray(problem.errors)) {
+    const errors = problem.errors.filter(
+      (item): item is string => typeof item === 'string' && Boolean(item.trim()),
+    );
+    if (errors.length) return errors.join(', ');
+  }
+  return typeof problem.title === 'string' && problem.title.trim()
+    ? problem.title.trim()
+    : null;
 }
