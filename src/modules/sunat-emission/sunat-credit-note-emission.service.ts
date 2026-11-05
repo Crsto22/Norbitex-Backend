@@ -70,6 +70,11 @@ export class SunatCreditNoteEmissionService {
     if (!note) {
       throw new NotFoundException('Nota de credito no encontrada');
     }
+    if (note.numero === null) {
+      throw new BadRequestException(
+        'La nota aun no tiene numeracion fiscal asignada',
+      );
+    }
 
     await this.markSending(note.id);
     try {
@@ -344,17 +349,18 @@ export class SunatCreditNoteEmissionService {
     };
   }
 
-  private async applyAcceptedEffects(noteId: bigint) {
-    const note = await this.prisma.notaCredito.findUnique({
-      where: { id: noteId },
-      include: {
-        ventaReferencia: true,
-        detalles: { include: { ventaDetalleReferencia: true } },
-      },
-    });
-    if (!note || note.stockDevuelto) return;
-
+  async applyAcceptedEffects(noteId: bigint) {
     await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "nota_credito" WHERE "id" = ${noteId} FOR UPDATE`;
+      const note = await tx.notaCredito.findUnique({
+        where: { id: noteId },
+        include: {
+          ventaReferencia: true,
+          detalles: { include: { ventaDetalleReferencia: true } },
+        },
+      });
+      if (!note || note.commercialEffectsApplied || note.stockDevuelto) return;
+
       if (['06', '07'].includes(note.codigoMotivo) && note.sucursalId) {
         for (const detail of note.detalles) {
           await this.stockService.changeStock(tx, {
@@ -373,7 +379,10 @@ export class SunatCreditNoteEmissionService {
 
       await tx.notaCredito.update({
         where: { id: note.id },
-        data: { stockDevuelto: ['06', '07'].includes(note.codigoMotivo) },
+        data: {
+          stockDevuelto: ['06', '07'].includes(note.codigoMotivo),
+          commercialEffectsApplied: true,
+        },
       });
 
       if (['06', '07'].includes(note.codigoMotivo)) {

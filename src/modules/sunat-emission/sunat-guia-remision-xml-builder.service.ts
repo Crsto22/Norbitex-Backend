@@ -88,7 +88,13 @@ export class SunatGuiaRemisionXmlBuilderService {
   private relatedDocuments(root: XmlNode, guia: SunatGuia) {
     for (const document of guia.documentosRelacionados) {
       const reference = root.ele('cac:AdditionalDocumentReference');
-      this.text(reference, 'cbc:ID', `${document.serie}-${document.numero}`);
+      this.text(
+        reference,
+        'cbc:ID',
+        document.serie
+          ? `${document.serie}-${document.numero}`
+          : document.numero,
+      );
       this.text(reference, 'cbc:DocumentTypeCode', document.tipoDocumento, {
         listAgencyName: 'PE:SUNAT',
         listName: 'Documento relacionado al transporte',
@@ -363,6 +369,11 @@ export class SunatGuiaRemisionXmlBuilderService {
   }
 
   private guideNumber(guia: SunatGuia) {
+    if (guia.numero == null) {
+      throw new BadRequestException(
+        'La guía todavía no tiene correlativo fiscal',
+      );
+    }
     return `${guia.serie}-${guia.numero.toString().padStart(8, '0')}`;
   }
 

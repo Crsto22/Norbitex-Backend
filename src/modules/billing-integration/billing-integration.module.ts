@@ -9,9 +9,13 @@ import { BillingWebhookController } from './billing-webhook.controller';
 import { BillingWebhookService } from './billing-webhook.service';
 import { BillingVoidService } from './billing-void.service';
 import { StockModule } from '../stock/stock.module';
+import { SunatEmissionModule } from '../sunat-emission/sunat-emission.module';
+import { BillingCreditNoteService } from './billing-credit-note.service';
+import { BillingDespatchGuideService } from './billing-despatch-guide.service';
+import { BillingDebitNoteService } from './billing-debit-note.service';
 
 @Module({
-  imports: [PrismaModule, StockModule],
+  imports: [PrismaModule, StockModule, SunatEmissionModule],
   controllers: [BillingIntegrationController, BillingWebhookController],
   providers: [
     BillingApiClientService,
@@ -19,6 +23,9 @@ import { StockModule } from '../stock/stock.module';
     BillingEmissionService,
     BillingWebhookService,
     BillingVoidService,
+    BillingCreditNoteService,
+    BillingDespatchGuideService,
+    BillingDebitNoteService,
     SecretsCryptoService,
   ],
   exports: [
@@ -26,6 +33,9 @@ import { StockModule } from '../stock/stock.module';
     BillingIntegrationService,
     BillingEmissionService,
     BillingVoidService,
+    BillingCreditNoteService,
+    BillingDespatchGuideService,
+    BillingDebitNoteService,
   ],
 })
 export class BillingIntegrationModule {}

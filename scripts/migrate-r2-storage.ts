@@ -247,7 +247,7 @@ async function findDocument(oldKey: string, newKey: string) {
   const note = await prisma.notaCredito.findFirst({
     where: { sunatXmlKey: keyFilter },
   });
-  if (note)
+  if (note?.numero != null)
     return documentRecord(
       ambiente,
       '07',
@@ -262,7 +262,7 @@ async function findDocument(oldKey: string, newKey: string) {
   const guide = await prisma.guiaRemision.findFirst({
     where: { sunatXmlKey: keyFilter },
   });
-  if (guide)
+  if (guide?.numero != null)
     return documentRecord(
       ambiente,
       '09',

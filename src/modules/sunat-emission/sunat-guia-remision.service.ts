@@ -98,8 +98,8 @@ export class SunatGuiaRemisionService {
     guia: SunatGuia,
     config: Awaited<ReturnType<SunatGuiaRemisionService['resolveConfig']>>,
   ) {
-    const base = `${guia.empresa.ruc}-09-${guia.serie}-${guia.numero
-      .toString()
+    const base = `${guia.empresa.ruc}-09-${guia.serie}-${guia
+      .numero!.toString()
       .padStart(8, '0')}`;
     const xmlName = `${base}.xml`;
     const zipName = `${base}.zip`;
@@ -138,7 +138,7 @@ export class SunatGuiaRemisionService {
       ambiente: config.ambiente,
       tipoDoc: '09',
       serie: guia.serie,
-      correlativo: guia.numero.toString().padStart(8, '0'),
+      correlativo: guia.numero!.toString().padStart(8, '0'),
       ticket: null,
       estado: 'PENDIENTE' as const,
       fechaEmision: guia.fechaEmision.toISOString().slice(0, 10),
@@ -201,8 +201,8 @@ export class SunatGuiaRemisionService {
     }
 
     const cdr = await this.cdrParser.parse(response.cdr);
-    const cdrName = `R-${guia.empresa.ruc}-09-${guia.serie}-${guia.numero
-      .toString()
+    const cdrName = `R-${guia.empresa.ruc}-09-${guia.serie}-${guia
+      .numero!.toString()
       .padStart(8, '0')}.zip`;
     const stored = await this.storage.storeGuiaDocument({
       empresaId: guia.empresaId,
@@ -213,8 +213,8 @@ export class SunatGuiaRemisionService {
       contentType: 'application/zip',
     });
     const processedAt = new Date();
-    const base = `${guia.empresa.ruc}-09-${guia.serie}-${guia.numero
-      .toString()
+    const base = `${guia.empresa.ruc}-09-${guia.serie}-${guia
+      .numero!.toString()
       .padStart(8, '0')}`;
     await this.storage.storeGuiaMetadata({
       empresaId: guia.empresaId,
@@ -225,7 +225,7 @@ export class SunatGuiaRemisionService {
         ambiente: config.ambiente,
         tipoDoc: '09',
         serie: guia.serie,
-        correlativo: guia.numero.toString().padStart(8, '0'),
+        correlativo: guia.numero!.toString().padStart(8, '0'),
         ticket: guia.sunatTicket,
         estado: sunatMetadataState(cdr.estado),
         fechaEmision: guia.fechaEmision.toISOString().slice(0, 10),

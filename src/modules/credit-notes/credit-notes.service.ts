@@ -82,8 +82,8 @@ type CreditNoteWithRelations = Prisma.NotaCreditoGetPayload<{
 }>;
 
 const saleForCreditNoteInclude = {
-  empresa: true,
-  sucursal: true,
+  empresa: { include: { billingIntegration: true } },
+  sucursal: { include: { billingEstablishments: true } },
   cliente: true,
   detalles: {
     include: {
@@ -126,7 +126,50 @@ export class CreditNotesService {
     }
     this.validateSale(venta);
 
+    const billingEnvironment = this.billingEnvironment(venta);
+    if (
+      billingEnvironment &&
+      venta.tipoComprobante === VentaTipoComprobante.boleta &&
+      dto.codigoMotivo === '02'
+    ) {
+      throw new BadRequestException(
+        'El motivo 02 no es aplicable a una boleta electronica',
+      );
+    }
+
     const serie = await this.resolveSerie(empresaId, venta, dto);
+    if (billingEnvironment) {
+      const [seriesMapping, establishmentMapping] = await Promise.all([
+        this.prisma.billingSeriesMapping.findUnique({
+          where: {
+            serieComprobanteId_environment: {
+              serieComprobanteId: serie.id,
+              environment: billingEnvironment,
+            },
+          },
+        }),
+        venta.sucursalId
+          ? this.prisma.billingEstablishmentMapping.findUnique({
+              where: {
+                sucursalId_environment: {
+                  sucursalId: venta.sucursalId,
+                  environment: billingEnvironment,
+                },
+              },
+            })
+          : null,
+      ]);
+      if (!seriesMapping) {
+        throw new BadRequestException(
+          'La serie de nota de credito no esta sincronizada con Billing',
+        );
+      }
+      if (!establishmentMapping) {
+        throw new BadRequestException(
+          'La sucursal no esta sincronizada con Billing',
+        );
+      }
+    }
     const lines = await this.buildLines(venta, dto);
 
     const totals = this.sumLines(lines);
@@ -136,12 +179,17 @@ export class CreditNotesService {
         : VentaTipoComprobante.nota_credito_boleta;
 
     const created = await this.prisma.$transaction(async (tx) => {
-      const updatedSerie = await tx.serieComprobante.update({
-        where: { id: serie.id },
-        data: { numeroActual: { increment: 1 } },
-      });
-      const numero = updatedSerie.numeroActual;
-      const correlativo = `${serie.serie}-${numero.toString().padStart(6, '0')}`;
+      const numero = billingEnvironment
+        ? null
+        : (
+            await tx.serieComprobante.update({
+              where: { id: serie.id },
+              data: { numeroActual: { increment: 1 } },
+            })
+          ).numeroActual;
+      const correlativo = numero
+        ? `${serie.serie}-${numero.toString().padStart(6, '0')}`
+        : null;
 
       const note = await tx.notaCredito.create({
         data: {
@@ -173,6 +221,9 @@ export class CreditNotesService {
           opInafectas: totals.opInafectas,
           igvMonto: totals.igvMonto,
           total: totals.total,
+          billingEnvironment,
+          billingStatus: billingEnvironment ? 'QUEUED' : null,
+          billingUpdatedAt: billingEnvironment ? new Date() : null,
           detalles: {
             create: lines.map((line) => ({
               ventaDetalleReferenciaId: line.ventaDetalleId,
@@ -194,31 +245,42 @@ export class CreditNotesService {
         include: creditNoteInclude,
       });
 
-      await tx.sunatJob.upsert({
-        where: {
-          tipoDocumento_documentoId: {
+      if (billingEnvironment) {
+        await tx.billingCreditNoteOutbox.create({
+          data: {
+            empresaId,
+            notaCreditoId: note.id,
+            environment: billingEnvironment,
+            idempotencyKey: `nuvex:${billingEnvironment.toLowerCase()}:credit-note:${note.publicId}:issue`,
+          },
+        });
+      } else {
+        await tx.sunatJob.upsert({
+          where: {
+            tipoDocumento_documentoId: {
+              tipoDocumento: SunatJobTipoDocumento.nota_credito,
+              documentoId: note.id,
+            },
+          },
+          create: {
+            empresaId,
             tipoDocumento: SunatJobTipoDocumento.nota_credito,
             documentoId: note.id,
+            estado: 'pendiente_envio',
+            nextRetryAt: new Date(),
           },
-        },
-        create: {
-          empresaId,
-          tipoDocumento: SunatJobTipoDocumento.nota_credito,
-          documentoId: note.id,
-          estado: 'pendiente_envio',
-          nextRetryAt: new Date(),
-        },
-        update: {
-          estado: 'pendiente_envio',
-          intentos: 0,
-          ultimoCodigo: null,
-          ultimoError: null,
-          lockedAt: null,
-          lastAttemptAt: null,
-          processedAt: null,
-          nextRetryAt: new Date(),
-        },
-      });
+          update: {
+            estado: 'pendiente_envio',
+            intentos: 0,
+            ultimoCodigo: null,
+            ultimoError: null,
+            lockedAt: null,
+            lastAttemptAt: null,
+            processedAt: null,
+            nextRetryAt: new Date(),
+          },
+        });
+      }
 
       return note;
     });
@@ -367,6 +429,33 @@ export class CreditNotesService {
     }
   }
 
+  private billingEnvironment(venta: SaleForCreditNote) {
+    if (!venta.empresa.billingMicroserviceEnabled) return null;
+    const integration = venta.empresa.billingIntegration;
+    if (!integration || integration.status !== 'READY') {
+      throw new BadRequestException(
+        'La empresa no tiene una integracion Billing lista',
+      );
+    }
+    if (
+      !venta.billingDocumentId ||
+      !venta.billingEnvironment ||
+      !['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS'].includes(
+        venta.billingStatus ?? '',
+      )
+    ) {
+      throw new BadRequestException(
+        'El comprobante original debe estar aceptado por Billing',
+      );
+    }
+    if (venta.billingEnvironment !== integration.environment) {
+      throw new BadRequestException(
+        'El comprobante original pertenece a otro ambiente Billing',
+      );
+    }
+    return integration.environment;
+  }
+
   private async resolveSerie(
     empresaId: bigint,
     venta: SaleForCreditNote,
@@ -469,7 +558,7 @@ export class CreditNotesService {
         ventaDetalleReferencia: { ventaId: venta.id },
         notaCredito: {
           sunatEstado: { in: ACTIVE_SUNAT_STATES },
-          codigoMotivo: { in: ['06', '07'] },
+          codigoMotivo: { in: ['02', '06', '07'] },
         },
       },
       _sum: { cantidad: true },
@@ -608,11 +697,24 @@ export class CreditNotesService {
         codigo: note.sunatCodigo,
         mensaje: note.sunatMensaje,
         hash: note.sunatHash,
-        xmlDisponible: Boolean(note.sunatXmlKey),
-        cdrDisponible: Boolean(note.sunatCdrKey),
+        xmlDisponible:
+          Boolean(note.sunatXmlKey) || acceptedBilling(note.billingStatus),
+        cdrDisponible:
+          Boolean(note.sunatCdrKey) || acceptedBilling(note.billingStatus),
         enviadoAt: note.sunatEnviadoAt?.toISOString() ?? null,
         respondidoAt: note.sunatRespondidoAt?.toISOString() ?? null,
       },
+      billing: note.billingEnvironment
+        ? {
+            provider: 'NUVEX_BILLING',
+            documentId: note.billingDocumentId,
+            environment: note.billingEnvironment,
+            status: note.billingStatus ?? 'QUEUED',
+            lastError: note.billingLastError,
+            attempts: note.billingAttempts,
+            updatedAt: note.billingUpdatedAt?.toISOString() ?? null,
+          }
+        : null,
       ventaReferencia: {
         publicId: note.ventaReferencia.publicId,
         correlativo: note.ventaReferencia.correlativo,
@@ -694,4 +796,8 @@ export class CreditNotesService {
       updatedAt: note.updatedAt.toISOString(),
     };
   }
+}
+
+function acceptedBilling(status: string | null) {
+  return status === 'ACCEPTED' || status === 'ACCEPTED_WITH_OBSERVATIONS';
 }

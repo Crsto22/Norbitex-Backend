@@ -55,6 +55,17 @@ La primera version integrada admite clientes sin documento, DNI y RUC. Para
 boletas mayores a S/700 exige DNI o RUC; documentos de no domiciliados quedan
 fuera de esta primera version.
 
+## Notas de credito de empresas clientes
+
+Cuando Billing esta activo, las notas `FC...` y `BC...` se registran primero en
+Nuvex y se envian de forma asincrona a `/v1/credit-notes`. Billing asigna el
+correlativo, valida el saldo del comprobante original y genera XML, CDR y PDF.
+Las series de notas deben sincronizarse despues de desplegar esta version.
+
+La devolucion de stock y la reduccion de cuentas por cobrar se ejecutan una sola
+vez, unicamente cuando SUNAT acepta la nota. Las notas historicas sin
+`billingDocumentId` conservan el emisor y los archivos anteriores.
+
 ## Bajas de boletas y facturas
 
 Con la integracion activa, `PATCH /sales/:publicId/annul` registra una operacion
@@ -72,3 +83,12 @@ Resumen Diario y debe remitirse dentro del plazo de siete dias calendario. Si el
 comprobante ya fue entregado o puesto a disposicion del cliente, corresponde una
 nota de credito. Fuente oficial consultada: [Boleta de Venta Electronica - SUNAT
 (actualizada el 25/09/2025)](https://cpe.sunat.gob.pe/tipos_de_comprobantes/boleta).
+# GRE Remitente
+
+- Las series `T...` se sincronizan como `DESPATCH_GUIDE` por sucursal y ambiente.
+- Los borradores permanecen en Nuvex y no consumen correlativo fiscal.
+- Al emitir se crea `BillingDespatchGuideOutbox`; Billing asigna el numero,
+  firma el XML, envia a SUNAT en produccion y devuelve CDR/PDF.
+- `BETA` solo valida internamente como `VALIDATED_BETA`, sin aceptacion SUNAT.
+- XML, CDR y PDF se transmiten por proxy; las GRE historicas conservan el flujo anterior.
+- La baja de una GRE aceptada requiere SUNAT SOL y confirmacion posterior desde Nuvex.

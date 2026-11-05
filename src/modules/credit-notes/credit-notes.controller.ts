@@ -24,6 +24,7 @@ import { SalesService } from '../sales/sales.service';
 import { SunatCreditNoteEmissionService } from '../sunat-emission/sunat-credit-note-emission.service';
 import { CreditNotePdfService } from './credit-note-pdf.service';
 import { CreditNotesService } from './credit-notes.service';
+import { BillingCreditNoteService } from '../billing-integration/billing-credit-note.service';
 import {
   CreateCreditNoteDto,
   FindCreditNotesQueryDto,
@@ -39,6 +40,7 @@ export class CreditNotesController {
     private readonly sunatCreditNoteEmissionService: SunatCreditNoteEmissionService,
     private readonly salesService: SalesService,
     private readonly pdfConcurrency: PdfConcurrencyService,
+    private readonly billingCreditNotes: BillingCreditNoteService,
   ) {}
 
   @Get()
@@ -77,6 +79,24 @@ export class CreditNotesController {
     @Param('publicId') publicId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
+    const note = await this.creditNotesService.findOne(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+    );
+    if (note.billing) {
+      const file = await this.billingCreditNotes.artifact(
+        this.getEmpresaId(user),
+        publicId,
+        'PDF_A4',
+      );
+      response.set({
+        'Content-Type': file.contentType,
+        'Content-Disposition': `inline; filename="${file.filename}"`,
+        'Content-Length': file.buffer.length,
+      });
+      return new StreamableFile(file.buffer);
+    }
     const pdf = await this.pdfConcurrency.run(() =>
       this.creditNotePdfService.generatePdf(this.getEmpresaId(user), publicId),
     );
@@ -91,14 +111,19 @@ export class CreditNotesController {
 
   @Post(':publicId/sunat/retry')
   @Throttle(rateLimits.sunat)
-  retrySunat(
+  async retrySunat(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
   ) {
-    return this.sunatCreditNoteEmissionService.retry(
-      this.getEmpresaId(user),
+    const empresaId = this.getEmpresaId(user);
+    const note = await this.creditNotesService.findOne(
+      empresaId,
+      getCommercialScope(user),
       publicId,
     );
+    return note.billing
+      ? this.billingCreditNotes.retry(empresaId, publicId)
+      : this.sunatCreditNoteEmissionService.retry(empresaId, publicId);
   }
 
   @Get(':publicId/sunat/xml')
@@ -106,14 +131,33 @@ export class CreditNotesController {
   async downloadSunatXml(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
-    @Res() response: Response,
+    @Res({ passthrough: true }) response: Response,
   ) {
+    const empresaId = this.getEmpresaId(user);
+    const note = await this.creditNotesService.findOne(
+      empresaId,
+      getCommercialScope(user),
+      publicId,
+    );
+    if (note.billing) {
+      const file = await this.billingCreditNotes.artifact(
+        empresaId,
+        publicId,
+        'XML',
+      );
+      response.set({
+        'Content-Type': file.contentType,
+        'Content-Disposition': `attachment; filename="${file.filename}"`,
+        'Content-Length': file.buffer.length,
+      });
+      return new StreamableFile(file.buffer);
+    }
     const file = await this.sunatCreditNoteEmissionService.downloadArtifact(
-      this.getEmpresaId(user),
+      empresaId,
       publicId,
       'xml',
     );
-    return response.redirect(file.url);
+    response.redirect(file.url);
   }
 
   @Get(':publicId/sunat/cdr')
@@ -121,14 +165,33 @@ export class CreditNotesController {
   async downloadSunatCdr(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
-    @Res() response: Response,
+    @Res({ passthrough: true }) response: Response,
   ) {
+    const empresaId = this.getEmpresaId(user);
+    const note = await this.creditNotesService.findOne(
+      empresaId,
+      getCommercialScope(user),
+      publicId,
+    );
+    if (note.billing) {
+      const file = await this.billingCreditNotes.artifact(
+        empresaId,
+        publicId,
+        'CDR',
+      );
+      response.set({
+        'Content-Type': file.contentType,
+        'Content-Disposition': `attachment; filename="${file.filename}"`,
+        'Content-Length': file.buffer.length,
+      });
+      return new StreamableFile(file.buffer);
+    }
     const file = await this.sunatCreditNoteEmissionService.downloadArtifact(
-      this.getEmpresaId(user),
+      empresaId,
       publicId,
       'cdr',
     );
-    return response.redirect(file.url);
+    response.redirect(file.url);
   }
 
   @Get(':publicId')

@@ -190,6 +190,34 @@ describe('PlansService', () => {
     ).resolves.toEqual(['ventas-pos']);
   });
 
+  it('allows nota-debito only when enabled by the plan or company override', async () => {
+    const company = {
+      id: 1n,
+      planCodigo: PlanCodigo.basico,
+      planInicioAt: startsAt,
+      planFinAt: null,
+    };
+
+    await expect(
+      service.getEffectiveModuleKeys(company, ['OWNER'], []),
+    ).resolves.not.toContain('nota-debito');
+
+    companyModuleFindMany.mockResolvedValue([
+      { moduleKey: 'nota-debito', enabled: true },
+    ]);
+    await expect(
+      service.getEffectiveModuleKeys(company, ['OWNER'], []),
+    ).resolves.toContain('nota-debito');
+
+    planModuloFindMany.mockResolvedValue([{ moduleKey: 'nota-debito' }]);
+    companyModuleFindMany.mockResolvedValue([
+      { moduleKey: 'nota-debito', enabled: false },
+    ]);
+    await expect(
+      service.getEffectiveModuleKeys(company, ['OWNER'], []),
+    ).resolves.not.toContain('nota-debito');
+  });
+
   it('returns empty module arrays in the catalog without static fallbacks', async () => {
     const codes = [
       PlanCodigo.prueba,
@@ -295,6 +323,56 @@ describe('PlansService', () => {
         },
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('accepts nota-debito as an optional plan module', async () => {
+    const updatedAt = new Date('2026-07-30T15:00:00.000Z');
+    const createMany = jest.fn();
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ plan_codigo: 'basico' }]),
+      plan: {
+        findUnique: jest.fn().mockResolvedValue({
+          planCodigo: PlanCodigo.basico,
+          nombre: 'Basico',
+          updatedAt,
+          modulos: [],
+        }),
+        update: jest.fn().mockResolvedValue({ updatedAt }),
+      },
+      planModulo: { deleteMany: jest.fn(), createMany },
+      platformAuditLog: { create: jest.fn() },
+    };
+    const moduleService = new PlansService({
+      $transaction: jest
+        .fn()
+        .mockImplementation(
+          (operation: (client: typeof tx) => Promise<unknown>) => operation(tx),
+        ),
+    } as unknown as PrismaService);
+
+    await expect(
+      moduleService.updateModules(
+        { sub: '21', roles: ['SUPERADMIN'] },
+        PlanCodigo.basico,
+        {
+          moduleKeys: ['nota-debito'],
+          expectedUpdatedAt: updatedAt.toISOString(),
+        },
+      ),
+    ).resolves.toEqual({
+      moduleKeys: ['nota-debito'],
+      modulesUpdatedAt: updatedAt.toISOString(),
+    });
+    expect(createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          planCodigo: PlanCodigo.basico,
+          moduleKey: 'nota-debito',
+          enabled: true,
+          actualizadoPorId: 21n,
+        },
+      ],
+    });
   });
 
   it('applies monthly and annual discounts only to their durations', () => {

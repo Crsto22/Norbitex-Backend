@@ -22,6 +22,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { CashRegisterModule } from './modules/cash-register/cash-register.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { CreditNotesModule } from './modules/credit-notes/credit-notes.module';
+import { DebitNotesModule } from './modules/debit-notes/debit-notes.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { DocumentoConsultaModule } from './modules/documento-consulta/documento-consulta.module';
 import { EmployeesModule } from './modules/employees/employees.module';
@@ -89,6 +90,7 @@ import { validateEnvironment } from './config/environment';
     BranchesModule,
     ClientsModule,
     CreditNotesModule,
+    DebitNotesModule,
     DashboardModule,
     DocumentoConsultaModule,
     EmployeesModule,

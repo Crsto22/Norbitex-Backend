@@ -8,6 +8,7 @@ import {
   IsString,
   Matches,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -43,13 +44,16 @@ export class GuiaRemisionDetalleDto {
 
 export class GuiaRemisionDocumentoRelacionadoDto {
   @IsString()
-  @Matches(/^(01|03|04)$/)
+  @Matches(/^(01|03|04|09|12|48|49|50|52|7[1-8]|80|81|91|92)$/)
   tipoDocumento: string;
 
+  @IsOptional()
   @IsString()
-  serie: string;
+  @MaxLength(20)
+  serie?: string;
 
   @IsString()
+  @MaxLength(100)
   numero: string;
 }
 
@@ -115,7 +119,7 @@ export class CreateGuiaRemisionDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^(01|02|03|04|05|06|07|13|14|17)$/)
+  @Matches(/^(01|02|03|04|05|06|07|08|09|13|14|17|18|19)$/)
   motivoTraslado?: string;
 
   @IsOptional()
@@ -261,4 +265,10 @@ export class AutocompletarGuiaVentaQueryDto {
 export class AnnulGuiaRemisionDto {
   @IsString()
   razon: string;
+}
+
+export class ConfirmVoidGuiaRemisionDto {
+  @IsString()
+  @Matches(/^.{3,120}$/)
+  referenciaSol: string;
 }

@@ -25,6 +25,11 @@ type XmlNode = ReturnType<typeof create>;
 export class SunatCreditNoteXmlBuilderService {
   build(note: CreditNoteForXml) {
     this.validate(note);
+    if (note.numero === null) {
+      throw new BadRequestException(
+        'La nota aun no tiene numeracion fiscal asignada',
+      );
+    }
 
     const root = create({ version: '1.0', encoding: 'UTF-8' }).ele(
       'CreditNote',

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, ProductoTipo } from '@prisma/client';
 import sharp from 'sharp';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -59,6 +63,11 @@ export class CreditNotePdfService {
     });
 
     if (!note) throw new NotFoundException('Nota de credito no encontrada');
+    if (note.numero === null) {
+      throw new BadRequestException(
+        'La nota aun no tiene numeracion fiscal asignada',
+      );
+    }
 
     return this.salesPdfService.generateCommercialDocumentPdf({
       issuer: {

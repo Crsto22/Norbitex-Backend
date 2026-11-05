@@ -1,0 +1,479 @@
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
+import {
+  BillingDocumentStatus,
+  BillingEnvironment,
+  SunatEstado,
+} from '@prisma/client';
+import { createHash } from 'node:crypto';
+import { PrismaService } from '../../prisma/prisma.service';
+import { SunatCreditNoteEmissionService } from '../sunat-emission/sunat-credit-note-emission.service';
+import {
+  BillingApiClientService,
+  BillingApiError,
+} from './billing-api-client.service';
+import { BillingIntegrationService } from './billing-integration.service';
+
+export type BillingCreditNoteDocument = {
+  id: string;
+  externalId: string;
+  status: BillingDocumentStatus | 'RECEIVED' | 'VALIDATING';
+  series: string;
+  number: number;
+  fullNumber?: string;
+  environment: BillingEnvironment;
+  updatedAt?: string;
+  sunat?: {
+    code?: string | null;
+    message?: string | null;
+    observations?: string[];
+    submittedAt?: string | null;
+    respondedAt?: string | null;
+  };
+};
+
+type ArtifactDescriptor = {
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  url: string;
+};
+
+@Injectable()
+export class BillingCreditNoteService {
+  private readonly logger = new Logger(BillingCreditNoteService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly api: BillingApiClientService,
+    private readonly integration: BillingIntegrationService,
+    private readonly legacyEmission: SunatCreditNoteEmissionService,
+  ) {}
+
+  @Cron('5/10 * * * * *')
+  async processOutbox() {
+    const jobs = await this.prisma.billingCreditNoteOutbox.findMany({
+      where: {
+        status: { in: ['PENDING', 'RETRY'] },
+        nextAttemptAt: { lte: new Date() },
+        OR: [
+          { lockedAt: null },
+          { lockedAt: { lt: new Date(Date.now() - 10 * 60_000) } },
+        ],
+      },
+      orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
+      take: 10,
+    });
+    for (const job of jobs) {
+      try {
+        await this.process(job.id);
+      } catch (error) {
+        this.logger.error(
+          `Billing credit note outbox ${job.id}: ${safeMessage(error)}`,
+        );
+      }
+    }
+  }
+
+  @Cron('45 */5 * * * *')
+  async reconcilePending() {
+    const notes = await this.prisma.notaCredito.findMany({
+      where: {
+        billingDocumentId: { not: null },
+        billingStatus: { in: ['QUEUED', 'PROCESSING', 'RETRY_SCHEDULED'] },
+        billingUpdatedAt: { lt: new Date(Date.now() - 5 * 60_000) },
+      },
+      select: {
+        id: true,
+        empresaId: true,
+        billingDocumentId: true,
+        billingEnvironment: true,
+      },
+      take: 50,
+    });
+    for (const note of notes) {
+      if (!note.billingDocumentId || !note.billingEnvironment) continue;
+      try {
+        const apiKey = await this.integration.apiKey(
+          note.empresaId,
+          note.billingEnvironment,
+        );
+        const document = await this.api.application<BillingCreditNoteDocument>(
+          `/documents/${note.billingDocumentId}`,
+          apiKey,
+        );
+        await this.applyDocument(note.id, document);
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo conciliar nota ${note.id}: ${safeMessage(error)}`,
+        );
+      }
+    }
+  }
+
+  async retry(empresaId: bigint, publicId: string) {
+    const note = await this.prisma.notaCredito.findFirst({
+      where: { empresaId, publicId },
+    });
+    if (!note) throw new NotFoundException('Nota de credito no encontrada');
+    if (!note.billingEnvironment) {
+      throw new BadRequestException('La nota no pertenece a Billing');
+    }
+    if (note.billingDocumentId) {
+      const apiKey = await this.integration.apiKey(
+        empresaId,
+        note.billingEnvironment,
+      );
+      const document = await this.api.application<BillingCreditNoteDocument>(
+        `/documents/${note.billingDocumentId}/retry`,
+        apiKey,
+        {
+          method: 'POST',
+          headers: {
+            'Idempotency-Key': `nuvex:${note.billingEnvironment.toLowerCase()}:credit-note:${note.publicId}:retry:${note.billingAttempts + 1}`,
+          },
+        },
+      );
+      await this.applyDocument(note.id, document);
+      return { status: document.status };
+    }
+    await this.prisma.$transaction([
+      this.prisma.billingCreditNoteOutbox.updateMany({
+        where: { notaCreditoId: note.id },
+        data: {
+          status: 'PENDING',
+          nextAttemptAt: new Date(),
+          lockedAt: null,
+          lastError: null,
+        },
+      }),
+      this.prisma.notaCredito.update({
+        where: { id: note.id },
+        data: {
+          billingStatus: 'QUEUED',
+          billingLastError: null,
+          billingUpdatedAt: new Date(),
+          sunatEstado: 'pendiente_envio',
+        },
+      }),
+    ]);
+    return { status: 'QUEUED' };
+  }
+
+  async artifact(
+    empresaId: bigint,
+    publicId: string,
+    type: 'XML' | 'CDR' | 'PDF_A4',
+  ) {
+    const note = await this.prisma.notaCredito.findFirst({
+      where: { empresaId, publicId },
+      select: {
+        billingDocumentId: true,
+        billingEnvironment: true,
+        billingStatus: true,
+      },
+    });
+    if (!note?.billingDocumentId || !note.billingEnvironment) {
+      throw new NotFoundException('La nota aun no tiene artefactos Billing');
+    }
+    if (!accepted(note.billingStatus)) {
+      throw new BadRequestException(
+        'Los archivos estaran disponibles cuando SUNAT acepte la nota',
+      );
+    }
+    const apiKey = await this.integration.apiKey(
+      empresaId,
+      note.billingEnvironment,
+    );
+    const descriptor = await this.api.application<ArtifactDescriptor>(
+      `/documents/${note.billingDocumentId}/artifacts/${type}`,
+      apiKey,
+    );
+    const downloaded = await this.api.download(descriptor.url);
+    if (downloaded.bytes.length !== descriptor.sizeBytes) {
+      throw new BadRequestException(
+        'El artefacto Billing tiene tamano invalido',
+      );
+    }
+    const digest = createHash('sha256').update(downloaded.bytes).digest('hex');
+    if (digest !== descriptor.sha256) {
+      throw new BadRequestException(
+        'El artefacto Billing no supero integridad',
+      );
+    }
+    return {
+      buffer: downloaded.bytes,
+      filename: descriptor.fileName,
+      contentType: descriptor.contentType || downloaded.contentType,
+    };
+  }
+
+  async applyDocument(noteId: bigint, document: BillingCreditNoteDocument) {
+    const status = normalizeStatus(document.status);
+    const updatedAt = document.updatedAt
+      ? new Date(document.updatedAt)
+      : new Date();
+    const note = await this.prisma.notaCredito.findUnique({
+      where: { id: noteId },
+      select: {
+        billingUpdatedAt: true,
+        serieComprobanteId: true,
+        sunatEstado: true,
+      },
+    });
+    if (!note) return;
+    if (note.billingUpdatedAt && note.billingUpdatedAt > updatedAt) return;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.notaCredito.update({
+        where: { id: noteId },
+        data: {
+          billingDocumentId: document.id,
+          billingEnvironment: document.environment,
+          billingStatus: status,
+          billingUpdatedAt: updatedAt,
+          serie: document.series,
+          numero: document.number,
+          correlativo:
+            document.fullNumber ??
+            `${document.series}-${String(document.number).padStart(8, '0')}`,
+          sunatEstado: sunatStatus(status),
+          sunatCodigo: document.sunat?.code ?? null,
+          sunatMensaje: document.sunat?.message ?? null,
+          sunatEnviadoAt: dateOrNull(document.sunat?.submittedAt),
+          sunatRespondidoAt: dateOrNull(document.sunat?.respondedAt),
+          billingLastError:
+            status === 'FAILED' || status === 'REJECTED'
+              ? (document.sunat?.message ?? 'Billing no pudo emitir la nota')
+              : null,
+        },
+      });
+      await tx.serieComprobante.updateMany({
+        where: {
+          id: note.serieComprobanteId,
+          numeroActual: { lt: document.number },
+        },
+        data: { numeroActual: document.number },
+      });
+    });
+    if (accepted(status) && !acceptedSunat(note.sunatEstado)) {
+      await this.legacyEmission.applyAcceptedEffects(noteId);
+    }
+  }
+
+  private async process(id: string) {
+    const claimed = await this.prisma.billingCreditNoteOutbox.updateMany({
+      where: { id, status: { in: ['PENDING', 'RETRY'] } },
+      data: {
+        status: 'PROCESSING',
+        lockedAt: new Date(),
+        attempts: { increment: 1 },
+      },
+    });
+    if (!claimed.count) return;
+    const job = await this.prisma.billingCreditNoteOutbox.findUniqueOrThrow({
+      where: { id },
+    });
+    try {
+      const note = await this.noteForEmission(
+        job.notaCreditoId,
+        job.environment,
+      );
+      const apiKey = await this.integration.apiKey(
+        job.empresaId,
+        job.environment,
+      );
+      const document = await this.api.application<BillingCreditNoteDocument>(
+        '/credit-notes',
+        apiKey,
+        {
+          method: 'POST',
+          headers: { 'Idempotency-Key': job.idempotencyKey },
+          body: JSON.stringify(this.payload(note)),
+        },
+      );
+      await this.applyDocument(note.id, document);
+      await this.prisma.billingCreditNoteOutbox.update({
+        where: { id },
+        data: {
+          status: 'DONE',
+          lockedAt: null,
+          processedAt: new Date(),
+          lastError: null,
+        },
+      });
+    } catch (error) {
+      const retryable =
+        error instanceof BillingApiError ? error.retryable : true;
+      const dead = !retryable || job.attempts >= job.maxAttempts;
+      const delay = Math.min(
+        15 * 60_000,
+        10_000 * 2 ** Math.min(job.attempts, 6),
+      );
+      await this.prisma.$transaction([
+        this.prisma.billingCreditNoteOutbox.update({
+          where: { id },
+          data: {
+            status: dead ? 'DEAD' : 'RETRY',
+            lockedAt: null,
+            lastError: safeMessage(error),
+            nextAttemptAt: new Date(Date.now() + delay),
+          },
+        }),
+        this.prisma.notaCredito.update({
+          where: { id: job.notaCreditoId },
+          data: {
+            billingStatus: dead ? 'FAILED' : 'RETRY_SCHEDULED',
+            billingLastError: safeMessage(error),
+            billingAttempts: { increment: 1 },
+            billingUpdatedAt: new Date(),
+            sunatEstado: dead ? 'error_definitivo' : 'error_transitorio',
+            sunatMensaje: safeMessage(error).slice(0, 500),
+          },
+        }),
+      ]);
+    }
+  }
+
+  noteForEmission(noteId: bigint, environment: BillingEnvironment) {
+    return this.prisma.notaCredito.findFirstOrThrow({
+      where: { id: noteId, billingEnvironment: environment },
+      include: {
+        ventaReferencia: {
+          include: { detalles: { orderBy: { id: 'asc' } } },
+        },
+        cliente: true,
+        sucursal: {
+          include: { billingEstablishments: { where: { environment } } },
+        },
+        serieComprobante: {
+          include: { billingSeries: { where: { environment } } },
+        },
+        detalles: {
+          include: { ventaDetalleReferencia: true },
+          orderBy: { id: 'asc' },
+        },
+      },
+    });
+  }
+
+  private payload(note: Awaited<ReturnType<typeof this.noteForEmission>>) {
+    if (!note.ventaReferencia.billingDocumentId) {
+      throw new BadRequestException(
+        'El comprobante original no pertenece a Billing',
+      );
+    }
+    if (!note.sucursal?.billingEstablishments[0]) {
+      throw new BadRequestException(
+        'La sucursal no esta sincronizada con Billing',
+      );
+    }
+    if (!note.serieComprobante.billingSeries[0]) {
+      throw new BadRequestException(
+        'La serie no esta sincronizada con Billing',
+      );
+    }
+    const sourceLines = new Map(
+      note.ventaReferencia.detalles.map((line, index) => [
+        line.id.toString(),
+        index + 1,
+      ]),
+    );
+    const nonConsuming = note.codigoMotivo === '03';
+    return {
+      externalId: `credit-note:${note.publicId}`,
+      referenceDocumentId: note.ventaReferencia.billingDocumentId,
+      series: note.serie,
+      issueDate: limaDate(note.createdAt),
+      currency: note.moneda,
+      reasonCode: note.codigoMotivo,
+      reasonDescription: note.descripcionMotivo,
+      customer: customer(note),
+      adjustments: note.detalles.map((line) => {
+        const referenceId = line.ventaDetalleReferenciaId?.toString();
+        const lineNumber = referenceId
+          ? sourceLines.get(referenceId)
+          : undefined;
+        if (!lineNumber) {
+          throw new BadRequestException(
+            'La nota contiene una linea sin referencia al comprobante original',
+          );
+        }
+        return {
+          referenceLineNumber: lineNumber,
+          ...(nonConsuming ? {} : { quantity: line.cantidad.toString() }),
+          amount: nonConsuming ? '0.00' : line.total.toFixed(2),
+          description: nonConsuming ? note.descripcionMotivo : line.descripcion,
+        };
+      }),
+    };
+  }
+}
+
+function customer(
+  note: Awaited<ReturnType<BillingCreditNoteService['noteForEmission']>>,
+) {
+  const client = note.cliente;
+  if (!client) return { documentType: 'NONE' };
+  return {
+    documentType:
+      client.tipoDocumento === 'dni'
+        ? 'DNI'
+        : client.tipoDocumento === 'ruc'
+          ? 'RUC'
+          : 'NONE',
+    documentNumber: client.numeroDocumento,
+  };
+}
+
+function normalizeStatus(
+  status: BillingCreditNoteDocument['status'],
+): BillingDocumentStatus {
+  return status === 'RECEIVED' || status === 'VALIDATING' ? 'QUEUED' : status;
+}
+
+function accepted(status: BillingDocumentStatus | null) {
+  return status === 'ACCEPTED' || status === 'ACCEPTED_WITH_OBSERVATIONS';
+}
+
+function acceptedSunat(status: SunatEstado) {
+  return status === 'aceptado' || status === 'observado';
+}
+
+function sunatStatus(status: BillingDocumentStatus): SunatEstado {
+  const map: Record<BillingDocumentStatus, SunatEstado> = {
+    QUEUED: 'pendiente_envio',
+    PROCESSING: 'enviando',
+    ACCEPTED: 'aceptado',
+    ACCEPTED_WITH_OBSERVATIONS: 'observado',
+    REJECTED: 'rechazado',
+    RETRY_SCHEDULED: 'error_transitorio',
+    FAILED: 'error_definitivo',
+  };
+  return map[status];
+}
+
+function dateOrNull(value?: string | null) {
+  return value ? new Date(value) : null;
+}
+
+function limaDate(value: Date) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Lima',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(value);
+}
+
+function safeMessage(error: unknown) {
+  return (error instanceof Error ? error.message : String(error)).slice(
+    0,
+    1000,
+  );
+}

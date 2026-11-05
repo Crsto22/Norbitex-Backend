@@ -22,7 +22,12 @@ type RemoteSeries = {
   environment: BillingEnvironment;
   applicationId: string;
   establishmentId: string;
-  documentType: 'RECEIPT' | 'INVOICE';
+  documentType:
+    | 'RECEIPT'
+    | 'INVOICE'
+    | 'CREDIT_NOTE'
+    | 'DEBIT_NOTE'
+    | 'DESPATCH_GUIDE';
   currentNumber: number;
   active: boolean;
 };
@@ -42,6 +47,13 @@ const WEBHOOK_EVENTS = [
   'document.rejected',
   'document.retry_scheduled',
   'document.failed',
+  'despatch_guide.processing',
+  'despatch_guide.beta_validated',
+  'despatch_guide.accepted',
+  'despatch_guide.accepted_with_observations',
+  'despatch_guide.rejected',
+  'despatch_guide.failed',
+  'sunat_void.manual_action_required',
   'sunat_void.accepted',
   'sunat_void.rejected',
   'sunat_void.failed',
@@ -181,8 +193,14 @@ export class BillingIntegrationService {
           environment,
           {
             ...series,
-            tipoComprobante:
-              series.tipoComprobante === 'boleta' ? 'boleta' : 'factura',
+            tipoComprobante: series.tipoComprobante as
+              | 'boleta'
+              | 'factura'
+              | 'nota_credito_factura'
+              | 'nota_credito_boleta'
+              | 'nota_debito_factura'
+              | 'nota_debito_boleta'
+              | 'guia_remision',
           },
         );
         await this.prisma.billingSeriesMapping.upsert({
@@ -315,7 +333,7 @@ export class BillingIntegrationService {
       const legacyJobs = await this.prisma.sunatJob.count({
         where: {
           empresaId,
-          tipoDocumento: 'venta',
+          tipoDocumento: { in: ['venta', 'nota_credito'] },
           estado: { in: ['pendiente_envio', 'procesando'] },
         },
       });
@@ -371,7 +389,17 @@ export class BillingIntegrationService {
         seriesComprobante: {
           where: {
             activo: true,
-            tipoComprobante: { in: ['boleta', 'factura'] },
+            tipoComprobante: {
+              in: [
+                'boleta',
+                'factura',
+                'nota_credito_factura',
+                'nota_credito_boleta',
+                'nota_debito_factura',
+                'nota_debito_boleta',
+                'guia_remision',
+              ],
+            },
           },
           select: {
             id: true,
@@ -495,7 +523,14 @@ export class BillingIntegrationService {
     environment: BillingEnvironment,
     series: {
       serie: string;
-      tipoComprobante: 'boleta' | 'factura';
+      tipoComprobante:
+        | 'boleta'
+        | 'factura'
+        | 'nota_credito_factura'
+        | 'nota_credito_boleta'
+        | 'nota_debito_factura'
+        | 'nota_debito_boleta'
+        | 'guia_remision';
       numeroActual: number;
     },
   ) {
@@ -503,7 +538,16 @@ export class BillingIntegrationService {
       `/admin/tenants/${tenantId}/fiscal-series`,
     );
     const documentType =
-      series.tipoComprobante === 'boleta' ? 'RECEIPT' : 'INVOICE';
+      series.tipoComprobante === 'boleta'
+        ? 'RECEIPT'
+        : series.tipoComprobante === 'factura'
+          ? 'INVOICE'
+          : series.tipoComprobante === 'guia_remision'
+            ? 'DESPATCH_GUIDE'
+            : series.tipoComprobante === 'nota_debito_factura' ||
+                series.tipoComprobante === 'nota_debito_boleta'
+              ? 'DEBIT_NOTE'
+              : 'CREDIT_NOTE';
     const existing = all.find(
       (item) =>
         item.series === series.serie &&

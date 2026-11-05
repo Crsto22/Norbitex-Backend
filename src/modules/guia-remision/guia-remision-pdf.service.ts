@@ -92,7 +92,7 @@ export class GuiaRemisionPdfService {
     <div class="box doc">
       GUIA DE REMISION REMITENTE<br />
       ELECTRONICA<br /><br />
-      ${this.escape(guia.correlativo)}
+      ${this.escape(guia.correlativo ?? 'CORRELATIVO PENDIENTE')}
     </div>
   </div>
 
@@ -160,7 +160,11 @@ export class GuiaRemisionPdfService {
   <div class="grid">
     <div class="box">${guia.vehiculos.map((v) => this.escape(v.placa)).join('<br />')}</div>
     <div class="box">${guia.documentosRelacionados
-      .map((d) => this.escape(`${d.tipoDocumento} ${d.serie}-${d.numero}`))
+      .map((d) =>
+        this.escape(
+          `${d.tipoDocumento} ${d.serie ? `${d.serie}-` : ''}${d.numero}`,
+        ),
+      )
       .join('<br />')}</div>
   </div>
 

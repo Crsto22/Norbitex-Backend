@@ -7,9 +7,10 @@ import { GuiaRemisionController } from './guia-remision.controller';
 import { GuiaRemisionPdfService } from './guia-remision-pdf.service';
 import { GuiaRemisionService } from './guia-remision.service';
 import { GuiaScopeGuard } from './guards/guia-scope.guard';
+import { BillingIntegrationModule } from '../billing-integration/billing-integration.module';
 
 @Module({
-  imports: [PrismaModule, SunatEmissionModule],
+  imports: [PrismaModule, SunatEmissionModule, BillingIntegrationModule],
   controllers: [GuiaRemisionController, GuiaRemisionCatalogosController],
   providers: [
     GuiaRemisionService,

@@ -264,13 +264,23 @@ export class BillingEmissionService {
     if (!sale?.billingDocumentId || !sale.billingEnvironment) {
       throw new NotFoundException('El comprobante aun no tiene artefactos');
     }
-    if (
-      !['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS'].includes(
-        sale.billingStatus ?? '',
-      )
-    ) {
+    const status = sale.billingStatus ?? '';
+    const isPrintable =
+      type === 'PDF_A4' || type === 'PDF_TICKET'
+        ? [
+            'QUEUED',
+            'PROCESSING',
+            'RETRY_SCHEDULED',
+            'ACCEPTED',
+            'ACCEPTED_WITH_OBSERVATIONS',
+            'REJECTED',
+          ].includes(status)
+        : ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS'].includes(status);
+    if (!isPrintable) {
       throw new BadRequestException(
-        'Los archivos estaran disponibles cuando SUNAT acepte el comprobante',
+        type === 'PDF_A4' || type === 'PDF_TICKET'
+          ? 'La representacion impresa aun no esta disponible'
+          : 'Los archivos estaran disponibles cuando SUNAT acepte el comprobante',
       );
     }
     const apiKey = await this.integration.apiKey(

@@ -292,6 +292,8 @@ enum VentaTipoComprobante {
   guia_remision
   nota_credito_factura
   nota_credito_boleta
+  nota_debito_factura
+  nota_debito_boleta
 }
 
 enum GuiaRemisionEstado {
@@ -516,6 +518,7 @@ model Empresa {
   ventas                          Venta[]
   ventasCodigoInternoSecuencias   VentaCodigoInternoSecuencia[]
   notasCredito                    NotaCredito[]
+  notasDebito                     NotaDebito[]
   guiasRemision                   GuiaRemision[]
   catalogoTransporteParticipantes CatalogoTransporteParticipante[]
   catalogoVehiculos               CatalogoVehiculo[]
@@ -548,6 +551,9 @@ model Empresa {
   billingEstablishments           BillingEstablishmentMapping[]
   billingSeries                   BillingSeriesMapping[]
   billingOutbox                   BillingOutbox[]
+  billingCreditNoteOutbox         BillingCreditNoteOutbox[]
+  billingDebitNoteOutbox          BillingDebitNoteOutbox[]
+  billingDespatchGuideOutboxes    BillingDespatchGuideOutbox[]
   billingWebhookEvents            BillingWebhookEvent[]
 
   @@map("empresa")
@@ -689,6 +695,7 @@ model Cliente {
   empresa          Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
   ventas           Venta[]
   notasCredito     NotaCredito[]
+  notasDebito      NotaDebito[]
   cotizaciones     Cotizacion[]
   cuentasPorCobrar CuentaPorCobrar[]
 
@@ -793,6 +800,7 @@ model Sucursal {
   comprasOrdenes             CompraOrden[]                 @relation("CompraOrdenDestino")
   ventas                     Venta[]
   notasCredito               NotaCredito[]
+  notasDebito                NotaDebito[]
   guiasRemision              GuiaRemision[]                @relation("GuiaRemisionSucursal")
   guiasRemisionPartida       GuiaRemision[]                @relation("GuiaRemisionSucursalPartida")
   guiasRemisionLlegada       GuiaRemision[]                @relation("GuiaRemisionSucursalLlegada")
@@ -1142,6 +1150,7 @@ model Usuario {
   ventasCreadas                      Venta[]
   ventasEntregadas                   VentaEntrega[]                       @relation("VentaEntregaUsuario")
   notasCreditoCreadas                NotaCredito[]
+  notasDebitoCreadas                 NotaDebito[]
   guiasRemisionCreadas               GuiaRemision[]
   cajasSesion                        CajaSesion[]
   cajaMovimientos                    CajaMovimiento[]
@@ -2095,6 +2104,7 @@ model SerieComprobante {
   sucursales              SerieComprobanteSucursal[]
   ventas                  Venta[]
   notasCredito            NotaCredito[]
+  notasDebito             NotaDebito[]
   guiasRemision           GuiaRemision[]
   billingSeries           BillingSeriesMapping[]
 
@@ -2128,8 +2138,8 @@ model GuiaRemision {
   creadoPorId               BigInt?                              @map("creado_por_id")
   serieComprobanteId        BigInt                               @map("serie_comprobante_id")
   serie                     String                               @db.VarChar(4)
-  numero                    Int
-  correlativo               String                               @db.VarChar(15)
+  numero                    Int?
+  correlativo               String?                              @db.VarChar(15)
   fechaEmision              DateTime                             @default(now()) @map("fecha_emision") @db.Date
   fechaInicioTraslado       DateTime                             @map("fecha_inicio_traslado") @db.Date
   fechaEntregaTransportista DateTime?                            @map("fecha_entrega_transportista") @db.Date
@@ -2165,6 +2175,17 @@ model GuiaRemision {
   sunatPdfKey               String?                              @map("sunat_pdf_key") @db.VarChar(600)
   sunatEnviadoAt            DateTime?                            @map("sunat_enviado_at") @db.Timestamptz(6)
   sunatRespondidoAt         DateTime?                            @map("sunat_respondido_at") @db.Timestamptz(6)
+  billingDocumentId         String?                              @unique @map("billing_document_id") @db.Uuid
+  billingEnvironment        BillingEnvironment?                  @map("billing_environment")
+  billingStatus             String?                              @map("billing_status") @db.VarChar(60)
+  billingUpdatedAt          DateTime?                            @map("billing_updated_at") @db.Timestamptz(6)
+  billingLastError          String?                              @map("billing_last_error") @db.VarChar(1000)
+  billingAttempts           Int                                  @default(0) @map("billing_attempts")
+  billingVoidRequestId      String?                              @map("billing_void_request_id") @db.Uuid
+  billingVoidStatus         String?                              @map("billing_void_status") @db.VarChar(60)
+  billingVoidReference      String?                              @map("billing_void_reference") @db.VarChar(120)
+  billingVoidRequestedAt    DateTime?                            @map("billing_void_requested_at") @db.Timestamptz(6)
+  billingVoidConfirmedAt    DateTime?                            @map("billing_void_confirmed_at") @db.Timestamptz(6)
   anuladoAt                 DateTime?                            @map("anulado_at") @db.Timestamptz(6)
   anuladoRazon              String?                              @map("anulado_razon") @db.VarChar(500)
   createdAt                 DateTime                             @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -2179,6 +2200,7 @@ model GuiaRemision {
   documentosRelacionados    GuiaRemisionDocumentoRelacionado[]
   participantes             GuiaRemisionTransporteParticipante[]
   vehiculos                 GuiaRemisionVehiculo[]
+  billingOutbox             BillingDespatchGuideOutbox[]
 
   @@unique([serieComprobanteId, numero])
   @@index([empresaId])
@@ -2215,8 +2237,8 @@ model GuiaRemisionDocumentoRelacionado {
   id             BigInt       @id @default(autoincrement())
   guiaRemisionId BigInt       @map("guia_remision_id")
   tipoDocumento  String       @map("tipo_documento") @db.VarChar(2)
-  serie          String       @db.VarChar(4)
-  numero         String       @db.VarChar(20)
+  serie          String?      @db.VarChar(20)
+  numero         String       @db.VarChar(100)
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   guiaRemision   GuiaRemision @relation(fields: [guiaRemisionId], references: [id], onDelete: Cascade)
 
@@ -2383,6 +2405,7 @@ model Venta {
   detalles                 VentaDetalle[]
   entregas                 VentaEntrega[]
   notasCredito             NotaCredito[]
+  notasDebito              NotaDebito[]
   pagos                    VentaPago[]
   cuentaPorCobrar          CuentaPorCobrar?
   cajaMovimientos          CajaMovimiento[]
@@ -2452,6 +2475,7 @@ model VentaDetalle {
   venta                   Venta                 @relation(fields: [ventaId], references: [id], onDelete: Cascade)
   productoVariante        ProductoVariante      @relation(fields: [productoVarianteId], references: [id], onDelete: Restrict)
   notasCreditoDetalle     NotaCreditoDetalle[]
+  notasDebitoDetalle      NotaDebitoDetalle[]
   entregasDetalle         VentaEntregaDetalle[]
 
   @@index([ventaId])
@@ -2493,58 +2517,66 @@ model VentaEntregaDetalle {
 }
 
 model NotaCredito {
-  id                 BigInt               @id @default(autoincrement())
-  publicId           String               @unique @default(cuid()) @map("public_id") @db.VarChar(30)
-  empresaId          BigInt               @map("empresa_id")
-  ventaReferenciaId  BigInt               @map("venta_referencia_id")
-  sucursalId         BigInt?              @map("sucursal_id")
-  clienteId          BigInt?              @map("cliente_id")
-  serieComprobanteId BigInt               @map("serie_comprobante_id")
-  creadoPorId        BigInt?              @map("creado_por_id")
-  tipoComprobante    VentaTipoComprobante @map("tipo_comprobante")
-  serie              String               @db.VarChar(4)
-  numero             Int
-  correlativo        String               @db.VarChar(15)
-  moneda             String               @default("PEN") @db.VarChar(3)
-  codigoMotivo       String               @map("codigo_motivo") @db.VarChar(2)
-  descripcionMotivo  String               @map("descripcion_motivo") @db.VarChar(255)
-  tipoDocumentoRef   String               @map("tipo_documento_ref") @db.VarChar(2)
-  serieRef           String               @map("serie_ref") @db.VarChar(4)
-  numeroRef          Int                  @map("numero_ref")
-  correlativoRef     String               @map("correlativo_ref") @db.VarChar(15)
-  subtotal           Decimal              @db.Decimal(12, 2)
-  descuentoMonto     Decimal              @default(0) @map("descuento_monto") @db.Decimal(12, 2)
-  igvPorcentaje      Decimal              @default(18.00) @map("igv_porcentaje") @db.Decimal(5, 2)
-  opGravadas         Decimal              @default(0) @map("op_gravadas") @db.Decimal(12, 2)
-  opExoneradas       Decimal              @default(0) @map("op_exoneradas") @db.Decimal(12, 2)
-  opInafectas        Decimal              @default(0) @map("op_inafectas") @db.Decimal(12, 2)
-  igvMonto           Decimal              @default(0) @map("igv_monto") @db.Decimal(12, 2)
-  total              Decimal              @db.Decimal(12, 2)
-  estado             String               @default("emitida") @db.VarChar(20)
-  sunatEstado        SunatEstado          @default(pendiente_envio) @map("sunat_estado")
-  sunatCodigo        String?              @map("sunat_codigo") @db.VarChar(20)
-  sunatMensaje       String?              @map("sunat_mensaje") @db.VarChar(500)
-  sunatHash          String?              @map("sunat_hash") @db.VarChar(120)
-  sunatXmlNombre     String?              @map("sunat_xml_nombre") @db.VarChar(180)
-  sunatXmlKey        String?              @map("sunat_xml_key") @db.VarChar(600)
-  sunatZipNombre     String?              @map("sunat_zip_nombre") @db.VarChar(180)
-  sunatZipKey        String?              @map("sunat_zip_key") @db.VarChar(600)
-  sunatCdrNombre     String?              @map("sunat_cdr_nombre") @db.VarChar(180)
-  sunatCdrKey        String?              @map("sunat_cdr_key") @db.VarChar(600)
-  sunatPdfNombre     String?              @map("sunat_pdf_nombre") @db.VarChar(180)
-  sunatPdfKey        String?              @map("sunat_pdf_key") @db.VarChar(600)
-  sunatEnviadoAt     DateTime?            @map("sunat_enviado_at") @db.Timestamptz(6)
-  sunatRespondidoAt  DateTime?            @map("sunat_respondido_at") @db.Timestamptz(6)
-  stockDevuelto      Boolean              @default(false) @map("stock_devuelto")
-  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
-  empresa            Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  ventaReferencia    Venta                @relation(fields: [ventaReferenciaId], references: [id], onDelete: Restrict)
-  sucursal           Sucursal?            @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
-  cliente            Cliente?             @relation(fields: [clienteId], references: [id], onDelete: SetNull)
-  serieComprobante   SerieComprobante     @relation(fields: [serieComprobanteId], references: [id], onDelete: Restrict)
-  creadoPor          Usuario?             @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
-  detalles           NotaCreditoDetalle[]
+  id                       BigInt                    @id @default(autoincrement())
+  publicId                 String                    @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  empresaId                BigInt                    @map("empresa_id")
+  ventaReferenciaId        BigInt                    @map("venta_referencia_id")
+  sucursalId               BigInt?                   @map("sucursal_id")
+  clienteId                BigInt?                   @map("cliente_id")
+  serieComprobanteId       BigInt                    @map("serie_comprobante_id")
+  creadoPorId              BigInt?                   @map("creado_por_id")
+  tipoComprobante          VentaTipoComprobante      @map("tipo_comprobante")
+  serie                    String                    @db.VarChar(4)
+  numero                   Int?
+  correlativo              String?                   @db.VarChar(15)
+  moneda                   String                    @default("PEN") @db.VarChar(3)
+  codigoMotivo             String                    @map("codigo_motivo") @db.VarChar(2)
+  descripcionMotivo        String                    @map("descripcion_motivo") @db.VarChar(255)
+  tipoDocumentoRef         String                    @map("tipo_documento_ref") @db.VarChar(2)
+  serieRef                 String                    @map("serie_ref") @db.VarChar(4)
+  numeroRef                Int                       @map("numero_ref")
+  correlativoRef           String                    @map("correlativo_ref") @db.VarChar(15)
+  subtotal                 Decimal                   @db.Decimal(12, 2)
+  descuentoMonto           Decimal                   @default(0) @map("descuento_monto") @db.Decimal(12, 2)
+  igvPorcentaje            Decimal                   @default(18.00) @map("igv_porcentaje") @db.Decimal(5, 2)
+  opGravadas               Decimal                   @default(0) @map("op_gravadas") @db.Decimal(12, 2)
+  opExoneradas             Decimal                   @default(0) @map("op_exoneradas") @db.Decimal(12, 2)
+  opInafectas              Decimal                   @default(0) @map("op_inafectas") @db.Decimal(12, 2)
+  igvMonto                 Decimal                   @default(0) @map("igv_monto") @db.Decimal(12, 2)
+  total                    Decimal                   @db.Decimal(12, 2)
+  estado                   String                    @default("emitida") @db.VarChar(20)
+  sunatEstado              SunatEstado               @default(pendiente_envio) @map("sunat_estado")
+  sunatCodigo              String?                   @map("sunat_codigo") @db.VarChar(20)
+  sunatMensaje             String?                   @map("sunat_mensaje") @db.VarChar(500)
+  sunatHash                String?                   @map("sunat_hash") @db.VarChar(120)
+  sunatXmlNombre           String?                   @map("sunat_xml_nombre") @db.VarChar(180)
+  sunatXmlKey              String?                   @map("sunat_xml_key") @db.VarChar(600)
+  sunatZipNombre           String?                   @map("sunat_zip_nombre") @db.VarChar(180)
+  sunatZipKey              String?                   @map("sunat_zip_key") @db.VarChar(600)
+  sunatCdrNombre           String?                   @map("sunat_cdr_nombre") @db.VarChar(180)
+  sunatCdrKey              String?                   @map("sunat_cdr_key") @db.VarChar(600)
+  sunatPdfNombre           String?                   @map("sunat_pdf_nombre") @db.VarChar(180)
+  sunatPdfKey              String?                   @map("sunat_pdf_key") @db.VarChar(600)
+  sunatEnviadoAt           DateTime?                 @map("sunat_enviado_at") @db.Timestamptz(6)
+  sunatRespondidoAt        DateTime?                 @map("sunat_respondido_at") @db.Timestamptz(6)
+  billingDocumentId        String?                   @unique @map("billing_document_id") @db.Uuid
+  billingEnvironment       BillingEnvironment?       @map("billing_environment")
+  billingStatus            BillingDocumentStatus?    @map("billing_status")
+  billingUpdatedAt         DateTime?                 @map("billing_updated_at") @db.Timestamptz(6)
+  billingLastError         String?                   @map("billing_last_error") @db.VarChar(1000)
+  billingAttempts          Int                       @default(0) @map("billing_attempts")
+  commercialEffectsApplied Boolean                   @default(false) @map("commercial_effects_applied")
+  stockDevuelto            Boolean                   @default(false) @map("stock_devuelto")
+  createdAt                DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                  Empresa                   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  ventaReferencia          Venta                     @relation(fields: [ventaReferenciaId], references: [id], onDelete: Restrict)
+  sucursal                 Sucursal?                 @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
+  cliente                  Cliente?                  @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  serieComprobante         SerieComprobante          @relation(fields: [serieComprobanteId], references: [id], onDelete: Restrict)
+  creadoPor                Usuario?                  @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
+  detalles                 NotaCreditoDetalle[]
+  billingOutbox            BillingCreditNoteOutbox[]
 
   @@unique([serieComprobanteId, numero])
   @@index([empresaId])
@@ -2583,6 +2615,82 @@ model NotaCreditoDetalle {
   @@index([ventaDetalleReferenciaId])
   @@index([productoVarianteId])
   @@map("nota_credito_detalle")
+}
+
+model NotaDebito {
+  id                       BigInt                 @id @default(autoincrement())
+  publicId                 String                 @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  empresaId                BigInt                 @map("empresa_id")
+  ventaReferenciaId        BigInt                 @map("venta_referencia_id")
+  sucursalId               BigInt?                @map("sucursal_id")
+  clienteId                BigInt                 @map("cliente_id")
+  serieComprobanteId       BigInt                 @map("serie_comprobante_id")
+  creadoPorId              BigInt?                @map("creado_por_id")
+  tipoComprobante          VentaTipoComprobante   @map("tipo_comprobante")
+  serie                    String                 @db.VarChar(4)
+  numero                   Int?
+  correlativo              String?                @db.VarChar(15)
+  moneda                   String                 @default("PEN") @db.VarChar(3)
+  codigoMotivo             String                 @map("codigo_motivo") @db.VarChar(2)
+  descripcionMotivo        String                 @map("descripcion_motivo") @db.VarChar(250)
+  tipoDocumentoRef         String                 @map("tipo_documento_ref") @db.VarChar(2)
+  serieRef                 String                 @map("serie_ref") @db.VarChar(4)
+  numeroRef                Int                    @map("numero_ref")
+  correlativoRef           String                 @map("correlativo_ref") @db.VarChar(15)
+  fechaVencimiento         DateTime               @map("fecha_vencimiento") @db.Date
+  opGravadas               Decimal                @default(0) @map("op_gravadas") @db.Decimal(12, 2)
+  opExoneradas             Decimal                @default(0) @map("op_exoneradas") @db.Decimal(12, 2)
+  opInafectas              Decimal                @default(0) @map("op_inafectas") @db.Decimal(12, 2)
+  igvMonto                 Decimal                @default(0) @map("igv_monto") @db.Decimal(12, 2)
+  total                    Decimal                @db.Decimal(12, 2)
+  sunatEstado              SunatEstado            @default(pendiente_envio) @map("sunat_estado")
+  sunatCodigo              String?                @map("sunat_codigo") @db.VarChar(20)
+  sunatMensaje             String?                @map("sunat_mensaje") @db.VarChar(500)
+  sunatEnviadoAt           DateTime?              @map("sunat_enviado_at") @db.Timestamptz(6)
+  sunatRespondidoAt        DateTime?              @map("sunat_respondido_at") @db.Timestamptz(6)
+  billingDocumentId        String?                @unique @map("billing_document_id") @db.Uuid
+  billingEnvironment       BillingEnvironment     @map("billing_environment")
+  billingStatus            BillingDocumentStatus @default(QUEUED) @map("billing_status")
+  billingUpdatedAt         DateTime?              @map("billing_updated_at") @db.Timestamptz(6)
+  billingLastError         String?                @map("billing_last_error") @db.VarChar(1000)
+  billingAttempts          Int                    @default(0) @map("billing_attempts")
+  commercialEffectsApplied Boolean                @default(false) @map("commercial_effects_applied")
+  createdAt                DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                  Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  ventaReferencia          Venta                  @relation(fields: [ventaReferenciaId], references: [id], onDelete: Restrict)
+  sucursal                 Sucursal?              @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
+  cliente                  Cliente                @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  serieComprobante         SerieComprobante       @relation(fields: [serieComprobanteId], references: [id], onDelete: Restrict)
+  creadoPor                Usuario?               @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
+  detalles                 NotaDebitoDetalle[]
+  billingOutbox            BillingDebitNoteOutbox[]
+
+  @@unique([serieComprobanteId, numero])
+  @@index([empresaId, sunatEstado])
+  @@index([ventaReferenciaId])
+  @@index([clienteId])
+  @@index([sucursalId])
+  @@index([createdAt])
+  @@map("nota_debito")
+}
+
+model NotaDebitoDetalle {
+  id                       BigInt        @id @default(autoincrement())
+  notaDebitoId             BigInt        @map("nota_debito_id")
+  ventaDetalleReferenciaId BigInt        @map("venta_detalle_referencia_id")
+  descripcion              String        @db.VarChar(255)
+  importe                  Decimal       @db.Decimal(12, 2)
+  valorVenta               Decimal       @map("valor_venta") @db.Decimal(12, 2)
+  igvMonto                 Decimal       @map("igv_monto") @db.Decimal(12, 2)
+  tipoAfectacionIgvCodigo  String        @map("tipo_afectacion_igv_codigo") @db.VarChar(4)
+  createdAt                DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  notaDebito               NotaDebito    @relation(fields: [notaDebitoId], references: [id], onDelete: Cascade)
+  ventaDetalleReferencia   VentaDetalle  @relation(fields: [ventaDetalleReferenciaId], references: [id], onDelete: Restrict)
+
+  @@unique([notaDebitoId, ventaDetalleReferenciaId])
+  @@index([ventaDetalleReferenciaId])
+  @@map("nota_debito_detalle")
 }
 
 model VentaPago {
@@ -2812,6 +2920,78 @@ model BillingOutbox {
   @@index([status, nextAttemptAt])
   @@index([empresaId, status])
   @@map("billing_outbox")
+}
+
+model BillingCreditNoteOutbox {
+  id             String              @id @default(uuid()) @db.Uuid
+  empresaId      BigInt              @map("empresa_id")
+  notaCreditoId  BigInt              @map("nota_credito_id")
+  environment    BillingEnvironment
+  idempotencyKey String              @unique @map("idempotency_key") @db.VarChar(120)
+  status         BillingOutboxStatus @default(PENDING)
+  attempts       Int                 @default(0)
+  maxAttempts    Int                 @default(12) @map("max_attempts")
+  nextAttemptAt  DateTime            @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lockedAt       DateTime?           @map("locked_at") @db.Timestamptz(6)
+  lastError      String?             @map("last_error") @db.VarChar(1000)
+  processedAt    DateTime?           @map("processed_at") @db.Timestamptz(6)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa        Empresa             @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  notaCredito    NotaCredito         @relation(fields: [notaCreditoId], references: [id], onDelete: Cascade)
+
+  @@unique([notaCreditoId, environment])
+  @@index([status, nextAttemptAt])
+  @@index([empresaId, status])
+  @@map("billing_credit_note_outbox")
+}
+
+model BillingDebitNoteOutbox {
+  id             String              @id @default(uuid()) @db.Uuid
+  empresaId      BigInt              @map("empresa_id")
+  notaDebitoId   BigInt              @map("nota_debito_id")
+  environment    BillingEnvironment
+  idempotencyKey String              @unique @map("idempotency_key") @db.VarChar(120)
+  status         BillingOutboxStatus @default(PENDING)
+  attempts       Int                 @default(0)
+  maxAttempts    Int                 @default(12) @map("max_attempts")
+  nextAttemptAt  DateTime            @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lockedAt       DateTime?           @map("locked_at") @db.Timestamptz(6)
+  lastError      String?             @map("last_error") @db.VarChar(1000)
+  processedAt    DateTime?           @map("processed_at") @db.Timestamptz(6)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa        Empresa             @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  notaDebito     NotaDebito          @relation(fields: [notaDebitoId], references: [id], onDelete: Cascade)
+
+  @@unique([notaDebitoId, environment])
+  @@index([status, nextAttemptAt])
+  @@index([empresaId, status])
+  @@map("billing_debit_note_outbox")
+}
+
+model BillingDespatchGuideOutbox {
+  id             String              @id @default(uuid()) @db.Uuid
+  empresaId      BigInt              @map("empresa_id")
+  guiaRemisionId BigInt              @map("guia_remision_id")
+  environment    BillingEnvironment
+  idempotencyKey String              @unique @map("idempotency_key") @db.VarChar(140)
+  status         BillingOutboxStatus @default(PENDING)
+  attempts       Int                 @default(0)
+  maxAttempts    Int                 @default(20) @map("max_attempts")
+  nextAttemptAt  DateTime            @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lockedAt       DateTime?           @map("locked_at") @db.Timestamptz(6)
+  lastError      String?             @map("last_error") @db.VarChar(1000)
+  processedAt    DateTime?           @map("processed_at") @db.Timestamptz(6)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa        Empresa             @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  guiaRemision   GuiaRemision        @relation(fields: [guiaRemisionId], references: [id], onDelete: Cascade)
+
+  @@unique([guiaRemisionId, environment])
+  @@index([status, nextAttemptAt])
+  @@index([empresaId, status])
+  @@map("billing_despatch_guide_outbox")
 }
 
 model BillingWebhookEvent {

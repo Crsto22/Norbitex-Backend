@@ -1,4 +1,6 @@
 import { Prisma } from '@prisma/client';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { SalesPdfService } from './sales-pdf.service';
 
 const decimal = (value: number) => new Prisma.Decimal(value);
@@ -98,4 +100,45 @@ describe('SalesPdfService', () => {
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
     expect(source).toMatch(/\/MediaBox \[0 0 226\.77\d* \d+(\.\d+)?\]/);
   });
+
+  it('genera la nota de venta A4 con el diseño sobrio de Billing', async () => {
+    prisma.venta.findFirst.mockResolvedValue({
+      ...sale,
+      tipoComprobante: 'nota_venta',
+      correlativo: 'NV01-000001',
+      serie: 'NV01',
+      sunatHash: null,
+      sunatEstado: 'no_aplica',
+    });
+
+    const pdf = await service.generateSalePdf(1n, 'nota-venta-prueba');
+    expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+    await saveVisual('nota-venta-a4.pdf', pdf);
+  });
+
+  it('genera la nota de venta ticket con Helvetica y sin QR', async () => {
+    prisma.venta.findFirst.mockResolvedValue({
+      ...sale,
+      tipoComprobante: 'nota_venta',
+      correlativo: 'NV01-000001',
+      serie: 'NV01',
+      sunatHash: null,
+      sunatEstado: 'no_aplica',
+    });
+
+    const pdf = await service.generateSaleTicketPdf(1n, 'nota-venta-prueba');
+    const source = pdf.toString('latin1');
+    expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(source).toContain('/BaseFont /Helvetica');
+    expect(source).not.toContain('/Courier');
+    await saveVisual('nota-venta-ticket.pdf', pdf);
+  });
 });
+
+async function saveVisual(fileName: string, body: Buffer) {
+  const output = process.env.PDF_VISUAL_QA_OUTPUT;
+  if (!output) return;
+  const directory = resolve(output);
+  await mkdir(directory, { recursive: true });
+  await writeFile(resolve(directory, fileName), body);
+}

@@ -7,9 +7,16 @@ import { CreditNotePdfService } from './credit-note-pdf.service';
 import { CreditNotesController } from './credit-notes.controller';
 import { CreditNotesService } from './credit-notes.service';
 import { CreditNoteScopeGuard } from './guards/credit-note-scope.guard';
+import { BillingIntegrationModule } from '../billing-integration/billing-integration.module';
 
 @Module({
-  imports: [PrismaModule, StorageModule, SunatEmissionModule, SalesModule],
+  imports: [
+    PrismaModule,
+    StorageModule,
+    SunatEmissionModule,
+    SalesModule,
+    BillingIntegrationModule,
+  ],
   controllers: [CreditNotesController],
   providers: [CreditNotesService, CreditNotePdfService, CreditNoteScopeGuard],
   exports: [CreditNotesService],

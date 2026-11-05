@@ -2161,7 +2161,8 @@ export class SalesService {
 
     if (
       (tipoComprobante === VentaTipoComprobante.factura ||
-        tipoComprobante === VentaTipoComprobante.nota_credito_factura) &&
+        tipoComprobante === VentaTipoComprobante.nota_credito_factura ||
+        tipoComprobante === VentaTipoComprobante.nota_debito_factura) &&
       !normalized.startsWith('F')
     ) {
       throw new BadRequestException(
@@ -2171,7 +2172,8 @@ export class SalesService {
 
     if (
       (tipoComprobante === VentaTipoComprobante.boleta ||
-        tipoComprobante === VentaTipoComprobante.nota_credito_boleta) &&
+        tipoComprobante === VentaTipoComprobante.nota_credito_boleta ||
+        tipoComprobante === VentaTipoComprobante.nota_debito_boleta) &&
       !normalized.startsWith('B')
     ) {
       throw new BadRequestException(
@@ -2221,7 +2223,12 @@ export class SalesService {
   ) {
     if (
       tipoComprobante !== VentaTipoComprobante.boleta &&
-      tipoComprobante !== VentaTipoComprobante.factura
+      tipoComprobante !== VentaTipoComprobante.factura &&
+      tipoComprobante !== VentaTipoComprobante.nota_credito_factura &&
+      tipoComprobante !== VentaTipoComprobante.nota_credito_boleta &&
+      tipoComprobante !== VentaTipoComprobante.nota_debito_factura &&
+      tipoComprobante !== VentaTipoComprobante.nota_debito_boleta &&
+      tipoComprobante !== VentaTipoComprobante.guia_remision
     ) {
       return response;
     }

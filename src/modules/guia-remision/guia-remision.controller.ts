@@ -27,6 +27,7 @@ import {
 import { GuiaScopeGuard } from './guards/guia-scope.guard';
 import {
   AnnulGuiaRemisionDto,
+  ConfirmVoidGuiaRemisionDto,
   AutocompletarGuiaVentaQueryDto,
   CreateGuiaRemisionDto,
   FindGuiasRemisionQueryDto,
@@ -94,6 +95,11 @@ export class GuiaRemisionController {
     @Param('publicId') publicId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
+    const billingArtifact = await this.guiaRemisionService.billingPdfArtifact(
+      this.getEmpresaId(user),
+      publicId,
+    );
+    if (billingArtifact) return response.redirect(billingArtifact.url);
     const pdf = await this.pdfConcurrency.run(() =>
       this.guiaRemisionPdfService.generatePdf(
         this.getEmpresaId(user),
@@ -154,6 +160,34 @@ export class GuiaRemisionController {
     return this.guiaRemisionService.consultarCdr(
       this.getEmpresaId(user),
       publicId,
+    );
+  }
+
+  @Post(':publicId/void')
+  @Throttle(rateLimits.sunat)
+  requestVoid(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: AnnulGuiaRemisionDto,
+  ) {
+    return this.guiaRemisionService.requestBillingVoid(
+      this.getEmpresaId(user),
+      publicId,
+      dto.razon,
+    );
+  }
+
+  @Post(':publicId/void/confirm')
+  @Throttle(rateLimits.sunat)
+  confirmVoid(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: ConfirmVoidGuiaRemisionDto,
+  ) {
+    return this.guiaRemisionService.confirmBillingVoid(
+      this.getEmpresaId(user),
+      publicId,
+      dto.referenciaSol,
     );
   }
 

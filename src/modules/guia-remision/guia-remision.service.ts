@@ -20,6 +20,7 @@ import {
 } from '../../common/commercial-access';
 import { SunatDocumentStorageService } from '../sunat-emission/sunat-document-storage.service';
 import { SunatJobService } from '../sunat-emission/sunat-job.service';
+import { BillingDespatchGuideService } from '../billing-integration/billing-despatch-guide.service';
 import {
   AnnulGuiaRemisionDto,
   AutocompletarGuiaVentaQueryDto,
@@ -66,10 +67,12 @@ export class GuiaRemisionService {
     private readonly configService: ConfigService,
     private readonly sunatJobService: SunatJobService,
     private readonly documentStorageService: SunatDocumentStorageService,
+    private readonly billingGuides: BillingDespatchGuideService,
   ) {}
 
   async create(empresaId: bigint, userId: string, dto: CreateGuiaRemisionDto) {
     await this.validateCompany(empresaId);
+    const billingEnabled = await this.isBillingEnabled(empresaId);
     const sucursal = await this.resolveSucursal(empresaId, dto.sucursalId);
     const partida = await this.resolvePunto(
       empresaId,
@@ -95,12 +98,16 @@ export class GuiaRemisionService {
     });
 
     const guia = await this.prisma.$transaction(async (tx) => {
-      const updatedSerie = await tx.serieComprobante.update({
-        where: { id: serie.id },
-        data: { numeroActual: { increment: 1 } },
-      });
-      const numero = updatedSerie.numeroActual;
-      const correlativo = `${serie.serie}-${numero.toString().padStart(8, '0')}`;
+      const updatedSerie = billingEnabled
+        ? null
+        : await tx.serieComprobante.update({
+            where: { id: serie.id },
+            data: { numeroActual: { increment: 1 } },
+          });
+      const numero = updatedSerie?.numeroActual ?? null;
+      const correlativo = numero
+        ? `${serie.serie}-${numero.toString().padStart(8, '0')}`
+        : null;
 
       return tx.guiaRemision.create({
         data: {
@@ -328,6 +335,11 @@ export class GuiaRemisionService {
 
     this.validateBeforeEmit(guia);
 
+    if (await this.isBillingEnabled(empresaId)) {
+      await this.billingGuides.enqueue(empresaId, guia.id);
+      return this.findOne(empresaId, publicId);
+    }
+
     await this.prisma.$transaction([
       this.prisma.guiaRemision.update({
         where: { id: guia.id },
@@ -356,6 +368,10 @@ export class GuiaRemisionService {
 
   async consultarCdr(empresaId: bigint, publicId: string) {
     const guia = await this.findEntity(empresaId, publicId);
+    if (guia.billingDocumentId && guia.billingEnvironment) {
+      await this.billingGuides.refresh(empresaId, publicId);
+      return this.findOne(empresaId, publicId);
+    }
     if (!guia.sunatTicket) {
       throw new BadRequestException(
         'La guia no tiene ticket SUNAT para consultar',
@@ -490,6 +506,8 @@ export class GuiaRemisionService {
     const guia = await this.prisma.guiaRemision.findFirst({
       where: { empresaId, publicId },
       select: {
+        billingDocumentId: true,
+        billingEnvironment: true,
         sunatXmlNombre: true,
         sunatXmlKey: true,
         sunatCdrNombre: true,
@@ -498,6 +516,15 @@ export class GuiaRemisionService {
     });
     if (!guia) {
       throw new NotFoundException('Guia de remision no encontrada');
+    }
+
+    if (guia.billingDocumentId && guia.billingEnvironment) {
+      const remote = await this.billingGuides.artifact(
+        empresaId,
+        publicId,
+        artifact === 'xml' ? 'XML' : 'CDR',
+      );
+      return { fileName: remote.fileName, url: remote.downloadUrl };
     }
 
     const key = artifact === 'xml' ? guia.sunatXmlKey : guia.sunatCdrKey;
@@ -538,7 +565,7 @@ export class GuiaRemisionService {
       detalles,
       documentosRelacionados: (dto.documentosRelacionados ?? []).map((doc) => ({
         tipoDocumento: doc.tipoDocumento,
-        serie: this.clean(doc.serie).toUpperCase(),
+        serie: this.optional(doc.serie)?.toUpperCase() ?? null,
         numero: this.clean(doc.numero),
       })),
       participantes,
@@ -672,6 +699,42 @@ export class GuiaRemisionService {
     }
   }
 
+  async billingPdfArtifact(empresaId: bigint, publicId: string) {
+    const guide = await this.prisma.guiaRemision.findFirst({
+      where: { empresaId, publicId },
+      select: { billingDocumentId: true, billingEnvironment: true },
+    });
+    if (!guide?.billingDocumentId || !guide.billingEnvironment) return null;
+    const artifact = await this.billingGuides.artifact(
+      empresaId,
+      publicId,
+      'PDF_A4',
+    );
+    return { fileName: artifact.fileName, url: artifact.downloadUrl };
+  }
+
+  async requestBillingVoid(empresaId: bigint, publicId: string, razon: string) {
+    await this.billingGuides.void(empresaId, publicId, razon);
+    return this.findOne(empresaId, publicId);
+  }
+
+  async confirmBillingVoid(
+    empresaId: bigint,
+    publicId: string,
+    referenciaSol: string,
+  ) {
+    await this.billingGuides.confirmVoid(empresaId, publicId, referenciaSol);
+    return this.findOne(empresaId, publicId);
+  }
+
+  private async isBillingEnabled(empresaId: bigint) {
+    const company = await this.prisma.empresa.findUnique({
+      where: { id: empresaId },
+      select: { billingMicroserviceEnabled: true },
+    });
+    return company?.billingMicroserviceEnabled === true;
+  }
+
   private async resolveSucursal(empresaId: bigint, sucursalId?: string) {
     const where = sucursalId
       ? {
@@ -774,10 +837,10 @@ export class GuiaRemisionService {
     }
     this.validateDestinatario(dto.destinatarioTipoDoc, dto.destinatarioNroDoc);
 
-    if (['01', '02', '03'].includes(dto.motivoTraslado ?? '04')) {
+    if (['08', '09', '19'].includes(dto.motivoTraslado ?? '04')) {
       if (!dto.documentosRelacionados?.length) {
         throw new BadRequestException(
-          'El motivo seleccionado requiere documento relacionado',
+          'El motivo seleccionado requiere documento aduanero relacionado',
         );
       }
     }
@@ -855,7 +918,7 @@ export class GuiaRemisionService {
         detalles: [],
         documentosRelacionados: guia.documentosRelacionados.map((doc) => ({
           tipoDocumento: doc.tipoDocumento,
-          serie: doc.serie,
+          serie: doc.serie ?? undefined,
           numero: doc.numero,
         })),
       },
@@ -959,12 +1022,41 @@ export class GuiaRemisionService {
         mensaje: guia.sunatMensaje,
         hash: guia.sunatHash,
         ticket: guia.sunatTicket,
-        xmlDisponible: Boolean(guia.sunatXmlKey),
-        cdrDisponible: Boolean(guia.sunatCdrKey),
-        pdfDisponible: Boolean(guia.sunatPdfKey),
+        xmlDisponible: Boolean(guia.sunatXmlKey || guia.billingDocumentId),
+        cdrDisponible: Boolean(
+          guia.sunatCdrKey ||
+          ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS', 'REJECTED'].includes(
+            guia.billingStatus ?? '',
+          ),
+        ),
+        pdfDisponible: Boolean(
+          guia.sunatPdfKey ||
+          ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS'].includes(
+            guia.billingStatus ?? '',
+          ),
+        ),
         enviadoAt: guia.sunatEnviadoAt?.toISOString() ?? null,
         respondidoAt: guia.sunatRespondidoAt?.toISOString() ?? null,
       },
+      billing: guia.billingDocumentId
+        ? {
+            documentId: guia.billingDocumentId,
+            environment: guia.billingEnvironment,
+            status: guia.billingStatus,
+            lastError: guia.billingLastError,
+            attempts: guia.billingAttempts,
+            updatedAt: guia.billingUpdatedAt?.toISOString() ?? null,
+          }
+        : null,
+      void: guia.billingVoidRequestId
+        ? {
+            requestId: guia.billingVoidRequestId,
+            status: guia.billingVoidStatus,
+            reference: guia.billingVoidReference,
+            requestedAt: guia.billingVoidRequestedAt?.toISOString() ?? null,
+            confirmedAt: guia.billingVoidConfirmedAt?.toISOString() ?? null,
+          }
+        : null,
       sucursal: {
         id: guia.sucursal.id.toString(),
         nombre: guia.sucursal.nombre,

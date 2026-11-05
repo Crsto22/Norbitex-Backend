@@ -34,6 +34,11 @@ export const userModules = [
     label: 'Nota de credito',
     route: '/facturacion/nota-credito',
   },
+  {
+    key: 'nota-debito',
+    label: 'Nota de debito',
+    route: '/facturacion/nota-debito',
+  },
   { key: 'series', label: 'Series', route: '/facturacion/series' },
   { key: 'gre-remitente', label: 'GRE Remitente', route: '/gre/remitente' },
   { key: 'conductores', label: 'Conductores', route: '/gre/conductores' },

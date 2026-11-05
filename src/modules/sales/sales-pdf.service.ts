@@ -135,6 +135,8 @@ const documentLabels: Record<VentaTipoComprobante, string> = {
   guia_remision: 'GUIA DE REMISION',
   nota_credito_factura: 'NOTA DE CREDITO ELECTRONICA',
   nota_credito_boleta: 'NOTA DE CREDITO DE BOLETA ELECTRONICA',
+  nota_debito_factura: 'NOTA DE DEBITO ELECTRONICA',
+  nota_debito_boleta: 'NOTA DE DEBITO DE BOLETA ELECTRONICA',
 };
 
 function isElectronicFiscalType(type: VentaTipoComprobante) {
@@ -163,14 +165,20 @@ export class SalesPdfService {
         },
         info: { Title: `Venta ${sale.correlativo}` },
       },
-      (doc) => this.renderSalePdf(doc, sale, assets),
+      (doc) =>
+        sale.tipoComprobante === VentaTipoComprobante.nota_venta
+          ? this.renderNoteSaleA4(doc, sale, assets)
+          : this.renderSalePdf(doc, sale, assets),
     );
   }
 
   async generateSaleTicketPdf(empresaId: bigint, publicId: string) {
     const sale = await this.findSale(empresaId, publicId);
     const assets = await this.buildAssets(sale);
-    const height = this.measureTicketHeight(sale, assets);
+    const height =
+      sale.tipoComprobante === VentaTipoComprobante.nota_venta
+        ? this.measureNoteSaleTicketHeight(sale, assets)
+        : this.measureTicketHeight(sale, assets);
 
     return this.createPdf(
       {
@@ -178,7 +186,10 @@ export class SalesPdfService {
         margin: 0,
         info: { Title: `Ticket ${sale.correlativo}` },
       },
-      (doc) => this.renderTicket(doc, sale, assets),
+      (doc) =>
+        sale.tipoComprobante === VentaTipoComprobante.nota_venta
+          ? this.renderNoteSaleTicket(doc, sale, assets)
+          : this.renderTicket(doc, sale, assets),
     );
   }
 
@@ -292,6 +303,391 @@ export class SalesPdfService {
       render(doc);
       doc.end();
     });
+  }
+
+  private renderNoteSaleA4(
+    doc: PDFKit.PDFDocument,
+    sale: SaleForPdf,
+    assets: PdfAssets,
+  ) {
+    const ink = '#111111';
+    const border = '#8A8A8A';
+    const soft = '#E6E6E6';
+    const company = this.companyName(sale);
+    const address = this.companyAddress(sale);
+    const customer =
+      sale.cliente?.razonSocial || sale.cliente?.nombre || 'CLIENTE GENERAL';
+    const customerDocument = sale.cliente?.numeroDocumento ?? '-';
+    const customerDocumentLabel = sale.cliente?.numeroDocumento
+      ? this.getClientDocumentLabel(sale.cliente.tipoDocumento)
+      : 'Documento';
+
+    if (assets.logo) {
+      doc.image(assets.logo, 42, 43, { fit: [270, 58], align: 'center' });
+    } else {
+      doc
+        .fillColor(ink)
+        .font('Helvetica-Bold')
+        .fontSize(24)
+        .text(sale.empresa.nombreComercial || company, 42, 54, {
+          width: 270,
+          align: 'center',
+        });
+    }
+    doc
+      .fillColor(ink)
+      .font('Helvetica-Bold')
+      .fontSize(9)
+      .text(company, 42, 121, { width: 270 });
+    doc
+      .font('Helvetica')
+      .fontSize(7.5)
+      .text(address || '-', 42, 137, { width: 270 });
+    doc.text(
+      `Nombre comercial: ${sale.empresa.nombreComercial || '-'}`,
+      42,
+      150,
+      { width: 270 },
+    );
+    doc.text(`Pago: ${this.buildPaymentLabel(sale)}`, 42, 171, {
+      width: 270,
+    });
+
+    doc.roundedRect(330, 38, 223, 82, 4).fillAndStroke(soft, border);
+    doc
+      .fillColor(ink)
+      .font('Helvetica-Bold')
+      .fontSize(10)
+      .text(`R.U.C. N° ${sale.empresa.ruc || '-'}`, 340, 55, {
+        width: 203,
+        align: 'center',
+      });
+    doc.fontSize(11).text('NOTA DE VENTA', 340, 76, {
+      width: 203,
+      align: 'center',
+    });
+    doc.fontSize(11).text(sale.correlativo, 340, 98, {
+      width: 203,
+      align: 'center',
+    });
+
+    doc.roundedRect(330, 132, 223, 76, 4).strokeColor(border).stroke();
+    const customerRows: Array<[string, string]> = [
+      ['Fecha emisión', this.formatDate(sale.createdAt)],
+      ['Señor(es)', customer],
+      [customerDocumentLabel, customerDocument],
+      ['Dirección', sale.cliente?.direccion || '-'],
+    ];
+    customerRows.forEach(([label, value], index) => {
+      const y = 142 + index * 15;
+      doc
+        .fillColor(ink)
+        .font('Helvetica-Bold')
+        .fontSize(7)
+        .text(label, 340, y, { width: 62 });
+      doc.font('Helvetica').text(`: ${value}`, 403, y, { width: 140 });
+    });
+
+    const drawHeader = (y: number) => {
+      doc.rect(40, y, 513, 24).fillAndStroke('#F2F2F2', border);
+      doc.fillColor(ink).font('Helvetica-Bold').fontSize(7.5);
+      const headers: Array<[string, number, number, 'center' | 'right']> = [
+        ['Cant.', 42, 45, 'center'],
+        ['Unidad', 87, 48, 'center'],
+        ['Código', 135, 65, 'center'],
+        ['Descripción', 200, 220, 'center'],
+        ['P.U.', 420, 62, 'right'],
+        ['Total', 482, 69, 'right'],
+      ];
+      headers.forEach(([label, x, width, align]) =>
+        doc.text(label, x, y + 8, { width, align }),
+      );
+      return y + 24;
+    };
+
+    let y = drawHeader(225);
+    for (const item of sale.detalles) {
+      const description = this.itemDescription(item);
+      doc.font('Helvetica').fontSize(7.5);
+      const rowHeight = Math.max(
+        22,
+        doc.heightOfString(description, { width: 220 }) + 9,
+      );
+      if (y + rowHeight > 540) {
+        doc.addPage();
+        y = drawHeader(45);
+      }
+      doc.fillColor(ink).font('Helvetica').fontSize(7.5);
+      doc.text(Number(item.cantidad).toFixed(2), 42, y + 7, {
+        width: 45,
+        align: 'center',
+      });
+      doc.text(item.unidadMedidaCodigo || 'NIU', 87, y + 7, {
+        width: 48,
+        align: 'center',
+      });
+      doc.text(item.productoVariante.sku || '-', 135, y + 7, {
+        width: 65,
+        align: 'center',
+      });
+      doc.text(description, 200, y + 6, { width: 220 });
+      doc.text(this.money(item.precioUnitario), 420, y + 7, {
+        width: 62,
+        align: 'right',
+      });
+      doc.text(this.money(item.total), 482, y + 7, {
+        width: 69,
+        align: 'right',
+      });
+      doc
+        .strokeColor(border)
+        .lineWidth(0.5)
+        .moveTo(40, y + rowHeight)
+        .lineTo(553, y + rowHeight)
+        .stroke();
+      y += rowHeight;
+    }
+
+    const totals = this.saleTotals(sale, false);
+    const totalsHeight = totals.length * 15 + 10;
+    doc.rect(40, y, 513, totalsHeight).strokeColor(border).stroke();
+    let totalY = y + 7;
+    for (const [label, value, grand] of totals) {
+      doc
+        .fillColor(ink)
+        .font(grand ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(8)
+        .text(label, 385, totalY, { width: 90, align: 'right' })
+        .text(value, 480, totalY, { width: 63, align: 'right' });
+      totalY += 15;
+    }
+    y += totalsHeight + 12;
+
+    if (y + 170 > 760) {
+      doc.addPage();
+      y = 45;
+    }
+    doc.roundedRect(40, y, 513, 100, 4).strokeColor(border).stroke();
+    doc
+      .fillColor(ink)
+      .font('Helvetica-Bold')
+      .fontSize(8)
+      .text('IMPORTE EN LETRAS:', 48, y + 12, { width: 102 });
+    doc
+      .font('Helvetica')
+      .text(this.amountToWords(sale.total), 145, y + 12, { width: 390 });
+    doc
+      .font('Helvetica-Bold')
+      .text('FORMA DE PAGO:', 48, y + 38, { width: 102 });
+    doc
+      .font('Helvetica')
+      .text(this.buildPaymentLabel(sale), 145, y + 38, { width: 390 });
+
+    doc
+      .roundedRect(40, y + 112, 513, 39, 4)
+      .strokeColor(border)
+      .stroke();
+    doc
+      .fillColor(ink)
+      .font('Helvetica-Bold')
+      .fontSize(7.5)
+      .text('OBSERVACIONES:', 48, y + 120);
+    doc
+      .font('Helvetica')
+      .text(sale.observaciones || 'Sin observaciones.', 48, y + 132, {
+        width: 495,
+      });
+
+    doc
+      .fillColor('#555555')
+      .font('Helvetica')
+      .fontSize(6.8)
+      .text(
+        'Representación impresa de la Nota de Venta. Documento comercial sin valor tributario.',
+        60,
+        782,
+        { width: 475, align: 'center', lineBreak: false },
+      );
+  }
+
+  private measureNoteSaleTicketHeight(sale: SaleForPdf, assets: PdfAssets) {
+    const doc = new PDFDocument({ size: [TICKET_WIDTH, 10000], margin: 0 });
+    doc.on('data', () => undefined);
+    const height = this.renderNoteSaleTicket(doc, sale, assets);
+    doc.end();
+    return Math.max(520, Math.ceil(height));
+  }
+
+  private renderNoteSaleTicket(
+    doc: PDFKit.PDFDocument,
+    sale: SaleForPdf,
+    assets: PdfAssets,
+  ) {
+    const width = 200.77;
+    const company = this.companyName(sale);
+    const customer =
+      sale.cliente?.razonSocial || sale.cliente?.nombre || 'CLIENTE GENERAL';
+    let y = 22;
+
+    if (assets.logo) {
+      doc.image(assets.logo, 38, y, { fit: [150, 55], align: 'center' });
+      y += 68;
+    } else {
+      doc
+        .fillColor('#111111')
+        .font('Helvetica-Bold')
+        .fontSize(18)
+        .text(sale.empresa.nombreComercial || company, 13, y, {
+          width,
+          align: 'center',
+        });
+      y = doc.y + 17;
+    }
+    doc
+      .fillColor('#111111')
+      .font('Helvetica-Bold')
+      .fontSize(8)
+      .text(company, 13, y, { width, align: 'center' });
+    doc
+      .font('Helvetica')
+      .fontSize(7.5)
+      .text(this.companyAddress(sale) || '-', 13, doc.y + 3, {
+        width,
+        align: 'center',
+      });
+    if (sale.empresa.nombreComercial) {
+      doc.text(
+        `NOMBRE COMERCIAL: ${sale.empresa.nombreComercial}`,
+        13,
+        doc.y + 3,
+        { width, align: 'center' },
+      );
+    }
+    doc.text(`R.U.C. N° ${sale.empresa.ruc || '-'}`, 13, doc.y + 4, {
+      width,
+      align: 'center',
+    });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(9)
+      .text('NOTA DE VENTA', 13, doc.y + 4, { width, align: 'center' });
+    doc.fontSize(11).text(sale.correlativo, 13, doc.y + 5, {
+      width,
+      align: 'center',
+    });
+    y = doc.y + 20;
+
+    const rule = () => {
+      doc
+        .strokeColor('#111111')
+        .lineWidth(0.7)
+        .moveTo(13, y)
+        .lineTo(213.77, y)
+        .stroke();
+      y += 7;
+    };
+    const field = (label: string, value: string) => {
+      doc.font('Helvetica-Bold').fontSize(8);
+      const labelHeight = doc.heightOfString(`${label}:`, { width: 55 });
+      doc.text(`${label}:`, 13, y, { width: 55 });
+      doc.font('Helvetica');
+      const valueHeight = doc.heightOfString(value, { width: width - 55 });
+      doc.text(value, 68, y, { width: width - 55 });
+      y += Math.max(12, labelHeight, valueHeight) + 3;
+    };
+
+    rule();
+    field('Fecha', this.formatDateTime(sale.createdAt));
+    field('Cliente', customer);
+    field(
+      sale.cliente?.numeroDocumento
+        ? this.getClientDocumentLabel(sale.cliente.tipoDocumento)
+        : 'Documento',
+      sale.cliente?.numeroDocumento || '-',
+    );
+    field('Dirección', sale.cliente?.direccion || '-');
+    y += 3;
+    rule();
+
+    doc.font('Helvetica-Bold').fontSize(7.5);
+    doc.text('CANT.', 13, y, { width: 35 });
+    doc.text('DESCRIPCIÓN', 48, y, { width: 94 });
+    doc.text('P.UNIT', 142, y, { width: 34, align: 'right' });
+    doc.text('TOTAL', 176, y, { width: 37, align: 'right' });
+    y += 12;
+    rule();
+
+    for (const item of sale.detalles) {
+      const description = this.itemDescription(item);
+      doc.font('Helvetica').fontSize(7.3);
+      const rowHeight = Math.max(
+        13,
+        doc.heightOfString(description, { width: 94 }) + 4,
+      );
+      doc.text(Number(item.cantidad).toFixed(2), 13, y, { width: 35 });
+      doc.text(description, 48, y, { width: 94 });
+      doc.text(this.money(item.precioUnitario), 142, y, {
+        width: 34,
+        align: 'right',
+      });
+      doc.text(this.money(item.total), 176, y, {
+        width: 37,
+        align: 'right',
+      });
+      y += rowHeight;
+    }
+    y += 2;
+    rule();
+
+    for (const [label, value, grand] of this.saleTotals(sale, false)) {
+      doc
+        .font(grand ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(8)
+        .text(label, 13, y, { width: 125 })
+        .text(value, 138, y, { width: 75, align: 'right' });
+      y += 13;
+    }
+    y += 15;
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(7.6)
+      .text('IMPORTE EN LETRAS', 13, y, { width });
+    doc
+      .font('Helvetica')
+      .text(this.amountToWords(sale.total), 13, y + 14, { width });
+    y = doc.y + 18;
+    doc.font('Helvetica-Bold').text('FORMA DE PAGO:', 13, y, { width: 75 });
+    doc
+      .font('Helvetica')
+      .text(this.buildPaymentLabel(sale), 88, y, { width: 125 });
+    y = Math.max(doc.y, y + 12) + 14;
+
+    if (sale.observaciones) {
+      rule();
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(7)
+        .text('OBSERVACIONES:', 13, y, { width });
+      doc.font('Helvetica').text(sale.observaciones, 13, y + 12, { width });
+      y = doc.y + 15;
+    }
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(8)
+      .text('¡Gracias por su preferencia!', 13, y, {
+        width,
+        align: 'center',
+      });
+    doc
+      .font('Helvetica')
+      .fontSize(7)
+      .text(
+        'Representación impresa de la Nota de Venta. Documento comercial sin valor tributario.',
+        13,
+        doc.y + 14,
+        { width, align: 'center' },
+      );
+    return doc.y + 18;
   }
 
   private renderSalePdf(
