@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import {
@@ -59,7 +60,7 @@ export class BillingEmissionService {
     private readonly voids: BillingVoidService,
   ) {}
 
-  @Cron('*/10 * * * * *')
+  @Cron('* * * * * *')
   async processOutbox() {
     const lockExpiredAt = new Date(Date.now() - 10 * 60_000);
     const jobs = await this.prisma.billingOutbox.findMany({
@@ -253,35 +254,90 @@ export class BillingEmissionService {
     publicId: string,
     type: 'XML' | 'CDR' | 'PDF_A4' | 'PDF_TICKET',
   ) {
-    const sale = await this.prisma.venta.findFirst({
+    const printable = type === 'PDF_A4' || type === 'PDF_TICKET';
+    let sale = await this.prisma.venta.findFirst({
       where: { empresaId, publicId },
       select: {
+        id: true,
         billingDocumentId: true,
         billingEnvironment: true,
         billingStatus: true,
       },
     });
-    if (!sale?.billingDocumentId || !sale.billingEnvironment) {
-      throw new NotFoundException('El comprobante aun no tiene artefactos');
+    if (!sale) throw new NotFoundException('Venta no encontrada');
+
+    if (!printable) {
+      if (!sale.billingDocumentId || !sale.billingEnvironment) {
+        throw new NotFoundException('El comprobante aun no tiene artefactos');
+      }
+      if (!accepted(sale.billingStatus)) {
+        throw new BadRequestException(
+          'Los archivos estaran disponibles cuando SUNAT acepte el comprobante',
+        );
+      }
+      return this.downloadArtifact(empresaId, sale, type);
     }
-    const status = sale.billingStatus ?? '';
-    const isPrintable =
-      type === 'PDF_A4' || type === 'PDF_TICKET'
-        ? [
-            'QUEUED',
-            'PROCESSING',
-            'RETRY_SCHEDULED',
-            'ACCEPTED',
-            'ACCEPTED_WITH_OBSERVATIONS',
-            'REJECTED',
-          ].includes(status)
-        : ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS'].includes(status);
-    if (!isPrintable) {
-      throw new BadRequestException(
-        type === 'PDF_A4' || type === 'PDF_TICKET'
-          ? 'La representacion impresa aun no esta disponible'
-          : 'Los archivos estaran disponibles cuando SUNAT acepte el comprobante',
-      );
+
+    // El usuario puede imprimir inmediatamente despues de cobrar. Si la cola
+    // todavia no reservo el correlativo, se procesa ahora sin esperar al cron.
+    if (!sale.billingDocumentId) {
+      const pendingJob = await this.prisma.billingOutbox.findFirst({
+        where: {
+          ventaId: sale.id,
+          operation: 'ISSUE',
+          status: { in: ['PENDING', 'RETRY'] },
+          nextAttemptAt: { lte: new Date() },
+        },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      if (pendingJob) await this.process(pendingJob.id);
+    }
+
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      sale = await this.prisma.venta.findFirst({
+        where: { empresaId, publicId },
+        select: {
+          id: true,
+          billingDocumentId: true,
+          billingEnvironment: true,
+          billingStatus: true,
+        },
+      });
+      if (!sale) throw new NotFoundException('Venta no encontrada');
+      if (sale.billingStatus === 'FAILED') {
+        throw new BadRequestException(
+          'No se pudo generar la representacion impresa del comprobante',
+        );
+      }
+      if (sale.billingDocumentId && sale.billingEnvironment) {
+        try {
+          return await this.downloadArtifact(empresaId, sale, type);
+        } catch (error) {
+          if (!(error instanceof BillingApiError) || error.status !== 404) {
+            throw error;
+          }
+        }
+      }
+      await delay(350);
+    }
+
+    throw new ServiceUnavailableException(
+      'El PDF se esta preparando. Intentalo nuevamente en unos segundos',
+    );
+  }
+
+  private async downloadArtifact(
+    empresaId: bigint,
+    sale: {
+      billingDocumentId: string | null;
+      billingEnvironment: BillingEnvironment | null;
+    },
+    type: 'XML' | 'CDR' | 'PDF_A4' | 'PDF_TICKET',
+  ) {
+    if (!sale.billingDocumentId || !sale.billingEnvironment) {
+      throw new NotFoundException('El comprobante aun no tiene artefactos');
     }
     const apiKey = await this.integration.apiKey(
       empresaId,
@@ -615,6 +671,10 @@ function safeMessage(error: unknown) {
     0,
     1000,
   );
+}
+
+function delay(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function calendarDayDifference(from: string, to: string) {
