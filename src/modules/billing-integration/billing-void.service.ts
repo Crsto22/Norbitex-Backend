@@ -414,8 +414,18 @@ export class BillingVoidService {
     if (!sale.billingEnvironment) {
       throw new BadRequestException('La venta no pertenece a Billing');
     }
-    if (sale.sunatBajaEstado !== 'error_definitivo') {
-      throw new BadRequestException('Solo una baja fallida puede reintentarse');
+    const recoverableDateRejection =
+      sale.sunatBajaEstado === 'rechazado' &&
+      /\b2336\b|IssueDate|fecha de recepci[oó]n/i.test(
+        `${sale.sunatBajaCodigo ?? ''} ${sale.sunatBajaMensaje ?? ''}`,
+      );
+    if (
+      sale.sunatBajaEstado !== 'error_definitivo' &&
+      !recoverableDateRejection
+    ) {
+      throw new BadRequestException(
+        'Solo una baja fallida o rechazada por fecha UTC puede reintentarse',
+      );
     }
     const sequence = sale.billingVoidRetrySequence + 1;
     if (!sale.billingVoidRequestId) {
