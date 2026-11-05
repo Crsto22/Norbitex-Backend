@@ -44,6 +44,7 @@ import { FindSaleProductsQueryDto } from './dto/find-sale-products-query.dto';
 import { AnnulSaleDto } from './dto/annul-sale.dto';
 import { FindSeriesQueryDto } from './dto/find-series-query.dto';
 import { resolveHistoryDateRange } from '../../common/history-date-range';
+import { availableFiscalNoteSourceWhere } from '../../common/fiscal-note-source';
 import {
   CreateSerieComprobanteDto,
   UpdateSerieComprobanteDto,
@@ -1240,6 +1241,7 @@ export class SalesService {
     const page = query.page ?? 1;
     const limit = query.limit ?? this.getDefaultPaginationLimit();
     const search = query.search?.trim();
+    const noteEligibility = query.noteEligibility;
 
     const where: Prisma.VentaWhereInput = {
       empresaId,
@@ -1252,6 +1254,33 @@ export class SalesService {
         ? query.tipoComprobante
         : { in: [VentaTipoComprobante.factura, VentaTipoComprobante.boleta] },
       ...(query.sunatEstado ? { sunatEstado: query.sunatEstado } : {}),
+      ...(noteEligibility
+        ? {
+            AND: [
+              availableFiscalNoteSourceWhere,
+              { clienteId: { not: null } },
+              noteEligibility === 'debit'
+                ? {
+                    billingStatus: {
+                      in: ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS'],
+                    },
+                  }
+                : {
+                    OR: [
+                      {
+                        billingStatus: {
+                          in: ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS'],
+                        },
+                      },
+                      {
+                        billingDocumentId: null,
+                        sunatEstado: { in: ['aceptado', 'observado'] },
+                      },
+                    ],
+                  },
+            ],
+          }
+        : {}),
       ...(search
         ? {
             OR: [

@@ -6,6 +6,10 @@ import {
 import { Prisma, SunatEstado, VentaTipoComprobante } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  availableFiscalNoteSourceWhere,
+  isFiscalNoteSourceUnavailable,
+} from '../../common/fiscal-note-source';
+import {
   scopedCreatorId,
   type CommercialScope,
 } from '../../common/commercial-access';
@@ -82,6 +86,11 @@ export class DebitNotesService {
     ) {
       throw new BadRequestException(
         'Solo se pueden modificar facturas o boletas',
+      );
+    }
+    if (isFiscalNoteSourceUnavailable(sale)) {
+      throw new BadRequestException(
+        'El comprobante esta anulado o tiene una baja SUNAT en proceso',
       );
     }
     if (
@@ -279,6 +288,7 @@ export class DebitNotesService {
     const data = await this.prisma.venta.findMany({
       where: {
         empresaId,
+        AND: [availableFiscalNoteSourceWhere],
         tipoComprobante: { in: ['factura', 'boleta'] },
         billingStatus: { in: ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS'] },
         clienteId: { not: null },

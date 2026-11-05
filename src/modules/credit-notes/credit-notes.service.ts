@@ -7,7 +7,6 @@ import {
   Prisma,
   SunatEstado,
   SunatJobTipoDocumento,
-  VentaEstado,
   VentaTipoComprobante,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -20,6 +19,7 @@ import {
   FindCreditNotesQueryDto,
 } from './dto/credit-note.dto';
 import { resolveHistoryDateRange } from '../../common/history-date-range';
+import { isFiscalNoteSourceUnavailable } from '../../common/fiscal-note-source';
 
 const creditNoteInclude = {
   ventaReferencia: {
@@ -416,8 +416,10 @@ export class CreditNotesService {
         'Solo se puede emitir nota de credito para factura o boleta',
       );
     }
-    if (venta.estado === VentaEstado.anulada) {
-      throw new BadRequestException('La venta ya esta anulada');
+    if (isFiscalNoteSourceUnavailable(venta)) {
+      throw new BadRequestException(
+        'El comprobante esta anulado o tiene una baja SUNAT en proceso',
+      );
     }
     if (!venta.cliente) {
       throw new BadRequestException('La venta debe tener cliente');

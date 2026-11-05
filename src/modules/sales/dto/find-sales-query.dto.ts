@@ -99,4 +99,9 @@ export class FindComprobantesQueryDto extends HistoryDateQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @Type(() => String)
+  @IsIn(['credit', 'debit'])
+  noteEligibility?: 'credit' | 'debit';
 }
