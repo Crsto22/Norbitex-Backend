@@ -298,7 +298,7 @@ async function findDocument(oldKey: string, newKey: string) {
       ambiente,
       platformTypeCode(platform.tipo),
       platform.serie,
-      platform.numero,
+      platform.numero ?? 0,
       null,
       platform.fechaEmision,
       platform.createdAt,

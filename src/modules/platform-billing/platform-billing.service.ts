@@ -25,8 +25,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { R2StorageService } from '../storage/r2-storage.service';
 import { SalesPdfService } from '../sales/sales-pdf.service';
+import { BillingApiClientService } from '../billing-integration/billing-api-client.service';
 import {
   CreateExtraChargeDto,
+  CreatePlatformCreditNoteDto,
   FindPlatformReceiptsDto,
   FindPlatformSeriesDto,
   IssueHistoricalReceiptDto,
@@ -35,6 +37,10 @@ import {
   UploadPlatformCertificateDto,
   UpsertPlatformSeriesDto,
 } from './platform-billing.dto';
+import {
+  PlatformBillingIntegrationService,
+  toBillingEnvironment,
+} from './platform-billing-integration.service';
 
 const receiptInclude = {
   empresa: { select: { id: true, nombreComercial: true, email: true } },
@@ -76,6 +82,7 @@ const receiptInclude = {
     },
   },
   comprobanteOrigen: { select: { id: true, serie: true, numero: true } },
+  notaCredito: { select: { id: true } },
 } satisfies Prisma.ComprobantePlataformaInclude;
 
 type Receipt = Prisma.ComprobantePlataformaGetPayload<{
@@ -96,6 +103,8 @@ export class PlatformBillingService {
     private readonly secrets: SecretsCryptoService,
     private readonly storage: R2StorageService,
     private readonly salesPdf: SalesPdfService,
+    private readonly billingIntegration: PlatformBillingIntegrationService,
+    private readonly billingApi: BillingApiClientService,
   ) {}
 
   async getIssuerConfig() {
@@ -220,10 +229,17 @@ export class PlatformBillingService {
         ? { serie: { contains: query.search, mode: 'insensitive' } }
         : {}),
     };
+    const config =
+      await this.prisma.configuracionFacturacionPlataforma.findUnique({
+        where: { id: 1 },
+        select: { ambiente: true },
+      });
+    const environment = toBillingEnvironment(config?.ambiente ?? 'BETA');
     const [rows, total, active, inactive, issued] =
       await this.prisma.$transaction([
         this.prisma.serieComprobantePlataforma.findMany({
           where,
+          include: { billingMappings: { where: { environment } } },
           orderBy: [{ tipo: 'asc' }, { serie: 'asc' }, { id: 'asc' }],
           skip: (query.page - 1) * query.limit,
           take: query.limit,
@@ -246,6 +262,11 @@ export class PlatformBillingService {
         series: row.serie,
         currentNumber: row.correlativo,
         active: row.activo,
+        billing: {
+          environment,
+          fiscalSeriesId: row.billingMappings[0]?.billingFiscalSeriesId ?? null,
+          synced: Boolean(row.billingMappings[0]),
+        },
       })),
       meta: {
         page: query.page,
@@ -265,12 +286,14 @@ export class PlatformBillingService {
     const row = await this.prisma.serieComprobantePlataforma.create({
       data: { tipo: dto.type, serie: dto.series, activo: dto.active ?? true },
     });
+    const billingSync = await this.billingIntegration.syncConfigured();
     return {
       id: row.id.toString(),
       type: row.tipo,
       series: row.serie,
       currentNumber: row.correlativo,
       active: row.activo,
+      billingSync,
     };
   }
 
@@ -279,12 +302,14 @@ export class PlatformBillingService {
       where: { id: this.id(id, 'serie') },
       data: { tipo: dto.type, serie: dto.series, activo: dto.active },
     });
+    const billingSync = await this.billingIntegration.syncConfigured();
     return {
       id: row.id.toString(),
       type: row.tipo,
       series: row.serie,
       currentNumber: row.correlativo,
       active: row.activo,
+      billingSync,
     };
   }
 
@@ -349,7 +374,7 @@ export class PlatformBillingService {
   async issueHistorical(actor: JwtPayload, dto: IssueHistoricalReceiptDto) {
     const actorId = this.id(actor.sub, 'administrador');
     const sourceId = this.id(dto.sourceId, 'origen');
-    const result = await this.serializable(async (tx) => {
+    const result = await this.serializable<Receipt>(async (tx) => {
       if (dto.sourceType === 'subscription') {
         const source = await tx.pagoSuscripcion.findUnique({
           where: { id: sourceId },
@@ -401,7 +426,7 @@ export class PlatformBillingService {
   async createExtraCharge(actor: JwtPayload, dto: CreateExtraChargeDto) {
     const actorId = this.id(actor.sub, 'administrador');
     const empresaId = this.id(dto.companyId, 'empresa');
-    const result = await this.serializable(async (tx) => {
+    const result = await this.serializable<Receipt>(async (tx) => {
       const duplicate = await tx.cobroAdicionalPlataforma.findUnique({
         where: { requestId: dto.requestId },
         include: { comprobante: { include: receiptInclude } },
@@ -462,6 +487,53 @@ export class PlatformBillingService {
     if (receipt.tipo === PlataformaComprobanteTipo.nota_venta)
       throw new BadRequestException('La nota de venta no se envia a SUNAT');
     const retryingCancellation = Boolean(receipt.sunatBajaEstado);
+    if (receipt.billingEnvironment) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.comprobantePlataforma.update({
+          where: { id: receipt.id },
+          data: {
+            estado: retryingCancellation
+              ? PlataformaComprobanteEstado.anulacion_pendiente
+              : PlataformaComprobanteEstado.pendiente,
+            billingStatus: retryingCancellation ? undefined : 'QUEUED',
+            billingLastError: null,
+            billingUpdatedAt: new Date(),
+            billingAttempts: { increment: 1 },
+          },
+        });
+        const operation = retryingCancellation ? 'VOID' : 'ISSUE';
+        await tx.platformBillingOutbox.upsert({
+          where: {
+            receiptId_environment_operation: {
+              receiptId: receipt.id,
+              environment: receipt.billingEnvironment!,
+              operation,
+            },
+          },
+          create: {
+            receiptId: receipt.id,
+            environment: receipt.billingEnvironment!,
+            operation,
+            idempotencyKey: `nuvex-platform:${receipt.billingEnvironment!.toLowerCase()}:receipt:${receipt.requestId}:${operation.toLowerCase()}`,
+          },
+          update: {
+            status: 'PENDING',
+            attempts: 0,
+            nextAttemptAt: new Date(),
+            lockedAt: null,
+            lastError: null,
+          },
+        });
+      });
+      await this.audit(
+        this.id(actor.sub, 'administrador'),
+        receipt.empresaId,
+        'platform_receipt_retried',
+        `Reintento Billing solicitado para ${receiptNumberLabel(receipt)}`,
+        { receiptId: receipt.id.toString() },
+      );
+      return { queued: true, provider: 'NUVEX_BILLING' };
+    }
     await this.prisma.comprobantePlataforma.update({
       where: { id: receipt.id },
       data: {
@@ -572,6 +644,35 @@ export class PlatformBillingService {
           include: receiptInclude,
         });
       }
+      if (source.billingDocumentId && source.billingEnvironment) {
+        if (source.estado !== PlataformaComprobanteEstado.aceptado) {
+          throw new ConflictException(
+            'Billing debe aceptar el comprobante antes de solicitar la baja',
+          );
+        }
+        const updated = await tx.comprobantePlataforma.update({
+          where: { id: source.id },
+          data: {
+            estado: PlataformaComprobanteEstado.anulacion_pendiente,
+            sunatBajaRequestId: dto.requestId,
+            sunatBajaEstado: SunatBajaEstado.pendiente_envio,
+            sunatBajaTipo: platformCancellationType(source.tipo),
+            sunatBajaMotivo: dto.reason,
+            sunatBajaMensaje: 'Solicitud de baja enviada a Nuvex Billing.',
+            sunatBajaSolicitadaAt: new Date(),
+            billingUpdatedAt: new Date(),
+            billingOutbox: {
+              create: {
+                environment: source.billingEnvironment,
+                operation: 'VOID',
+                idempotencyKey: `nuvex-platform:${source.billingEnvironment.toLowerCase()}:receipt:${source.requestId}:void`,
+              },
+            },
+          },
+          include: receiptInclude,
+        });
+        return updated;
+      }
       if (
         source.tipo !== PlataformaComprobanteTipo.boleta &&
         source.tipo !== PlataformaComprobanteTipo.factura
@@ -641,6 +742,114 @@ export class PlatformBillingService {
     return this.mapReceipt(result);
   }
 
+  async createCreditNote(
+    actor: JwtPayload,
+    id: string,
+    dto: CreatePlatformCreditNoteDto,
+  ) {
+    const actorId = this.id(actor.sub, 'administrador');
+    const sourceId = this.id(id, 'comprobante');
+    const note = await this.serializable<Receipt>(async (tx) => {
+      const duplicate = await tx.comprobantePlataforma.findUnique({
+        where: { requestId: dto.requestId },
+        include: receiptInclude,
+      });
+      if (duplicate) return duplicate;
+      await tx.$queryRaw`SELECT "id" FROM "comprobante_plataforma" WHERE "id" = ${sourceId} FOR UPDATE`;
+      const source = await tx.comprobantePlataforma.findUnique({
+        where: { id: sourceId },
+        include: receiptInclude,
+      });
+      if (!source) throw new NotFoundException('Comprobante no encontrado');
+      if (
+        source.tipo !== PlataformaComprobanteTipo.boleta &&
+        source.tipo !== PlataformaComprobanteTipo.factura
+      ) {
+        throw new BadRequestException(
+          'Solo una boleta o factura admite nota de credito',
+        );
+      }
+      if (source.estado !== PlataformaComprobanteEstado.aceptado) {
+        throw new ConflictException(
+          'El comprobante debe estar aceptado antes de emitir la nota',
+        );
+      }
+      if (source.notaCredito) {
+        throw new ConflictException('El comprobante ya tiene nota de credito');
+      }
+      const config = await this.requireElectronicConfig(tx);
+      const useBilling = config.billingMicroserviceEnabled;
+      if (useBilling && !source.billingDocumentId) {
+        throw new ConflictException(
+          'El comprobante de origen no pertenece a Nuvex Billing',
+        );
+      }
+      const sequence = useBilling
+        ? await this.activeSeries(
+            tx,
+            PlataformaComprobanteTipo.nota_credito,
+            source.tipo === PlataformaComprobanteTipo.factura ? 'F' : 'B',
+          )
+        : await this.nextNumber(tx, PlataformaComprobanteTipo.nota_credito);
+      const environment = toBillingEnvironment(config.ambiente);
+      return tx.comprobantePlataforma.create({
+        data: {
+          requestId: dto.requestId,
+          empresaId: source.empresaId,
+          creadoPorId: actorId,
+          serieId: sequence.id,
+          tipo: PlataformaComprobanteTipo.nota_credito,
+          serie: sequence.serie,
+          numero: sequence.numero,
+          comprobanteOrigenId: source.id,
+          receptorTipoDocumento: source.receptorTipoDocumento,
+          receptorDocumento: source.receptorDocumento,
+          receptorNombre: source.receptorNombre,
+          receptorDireccion: source.receptorDireccion,
+          moneda: source.moneda,
+          baseImponible: source.baseImponible,
+          igv: source.igv,
+          total: source.total,
+          estado: PlataformaComprobanteEstado.pendiente,
+          motivoNotaCredito: dto.reason,
+          detalles: {
+            create: source.detalles.map((line) => ({
+              descripcion: line.descripcion,
+              cantidad: line.cantidad,
+              precioUnitario: line.precioUnitario,
+              baseImponible: line.baseImponible,
+              igv: line.igv,
+              total: line.total,
+            })),
+          },
+          ...(useBilling
+            ? {
+                billingEnvironment: environment,
+                billingStatus: 'QUEUED' as const,
+                billingUpdatedAt: new Date(),
+                billingOutbox: {
+                  create: {
+                    environment,
+                    operation: 'ISSUE' as const,
+                    idempotencyKey: `nuvex-platform:${environment.toLowerCase()}:receipt:${dto.requestId}:issue`,
+                  },
+                },
+              }
+            : { sunatJob: { create: {} } }),
+        },
+        include: receiptInclude,
+      });
+    });
+    await this.audit(
+      actorId,
+      note.empresaId,
+      'platform_credit_note_issued',
+      `Nota de credito solicitada para ${receiptNumberLabel(note)}`,
+      { receiptId: note.id.toString(), sourceId: sourceId.toString() },
+    );
+    return this.mapReceipt(note);
+  }
+
   async finalizeAcceptedCancellation(id: bigint) {
     await this.serializable(async (tx) => {
       const receipt = await tx.comprobantePlataforma.findUnique({
@@ -664,6 +873,9 @@ export class PlatformBillingService {
 
   async downloadCancellation(id: string, kind: 'xml' | 'cdr') {
     const receipt = await this.getReceipt(id);
+    if (receipt.billingVoidRequestId && receipt.billingEnvironment) {
+      return this.billingVoidArtifact(receipt, kind);
+    }
     const key =
       kind === 'xml' ? receipt.sunatBajaXmlR2Key : receipt.sunatBajaCdrR2Key;
     if (!key)
@@ -681,6 +893,9 @@ export class PlatformBillingService {
 
   async download(id: string, kind: 'pdf' | 'xml' | 'cdr', empresaId?: bigint) {
     const receipt = await this.getReceipt(id, empresaId);
+    if (receipt.billingDocumentId && receipt.billingEnvironment) {
+      return this.billingArtifact(receipt, kind);
+    }
     if (kind === 'pdf')
       return {
         buffer: await this.buildPdf(receipt),
@@ -821,7 +1036,16 @@ export class PlatformBillingService {
         total: item.total,
       };
     });
-    const sequence = await this.nextNumber(tx, params.type);
+    const useBilling = Boolean(
+      config?.billingMicroserviceEnabled &&
+      params.type !== PlataformaComprobanteTipo.nota_venta,
+    );
+    const sequence = useBilling
+      ? await this.activeSeries(tx, params.type)
+      : await this.nextNumber(tx, params.type);
+    const billingEnvironment = config
+      ? toBillingEnvironment(config.ambiente)
+      : null;
     const receipt = await tx.comprobantePlataforma.create({
       data: {
         requestId: params.requestId,
@@ -849,9 +1073,23 @@ export class PlatformBillingService {
         detalles: {
           create: details,
         },
-        ...(params.type === PlataformaComprobanteTipo.nota_venta
+        ...(params.type === PlataformaComprobanteTipo.nota_venta || useBilling
           ? {}
           : { sunatJob: { create: {} } }),
+        ...(useBilling && billingEnvironment
+          ? {
+              billingEnvironment,
+              billingStatus: 'QUEUED' as const,
+              billingUpdatedAt: new Date(),
+              billingOutbox: {
+                create: {
+                  environment: billingEnvironment,
+                  operation: 'ISSUE' as const,
+                  idempotencyKey: `nuvex-platform:${billingEnvironment.toLowerCase()}:receipt:${params.requestId}:issue`,
+                },
+              },
+            }
+          : {}),
       },
       include: receiptInclude,
     });
@@ -862,7 +1100,7 @@ export class PlatformBillingService {
         category: 'billing',
         action: 'platform_receipt_issued',
         source: 'admin',
-        description: `${this.typeLabel(params.type)} ${sequence.serie}-${sequence.numero} emitida`,
+        description: `${this.typeLabel(params.type)} ${sequence.serie}-${'numero' in sequence ? sequence.numero : 'PENDIENTE'} emitida`,
         metadata: {
           receiptId: receipt.id.toString(),
           total: params.total.toFixed(2),
@@ -876,10 +1114,30 @@ export class PlatformBillingService {
     const config = await tx.configuracionFacturacionPlataforma.findUnique({
       where: { id: 1 },
     });
+    if (!config?.activo || !config.ruc || !config.razonSocial) {
+      throw new ConflictException({
+        code: 'PLATFORM_ISSUER_NOT_CONFIGURED',
+        message: 'Completa y activa la configuracion fiscal de Nuvex',
+      });
+    }
+    if (config.billingMicroserviceEnabled) {
+      const environment = toBillingEnvironment(config.ambiente);
+      const ready =
+        config.billingStatus === 'READY' &&
+        (environment === 'BETA'
+          ? config.billingBetaCredentialsConfigured &&
+            config.billingBetaCertificateConfigured
+          : config.billingProductionCredentialsConfigured &&
+            config.billingProductionCertificateConfigured);
+      if (!ready) {
+        throw new ConflictException({
+          code: 'PLATFORM_BILLING_NOT_CONFIGURED',
+          message: 'Completa la configuracion de Nuvex Billing',
+        });
+      }
+      return config;
+    }
     if (
-      !config?.activo ||
-      !config.ruc ||
-      !config.razonSocial ||
       !config.usuarioSolEncrypted ||
       !config.claveSolEncrypted ||
       !config.certificadoR2Key ||
@@ -891,6 +1149,80 @@ export class PlatformBillingService {
       });
     }
     return config;
+  }
+
+  private async activeSeries(
+    tx: Tx,
+    type: PlataformaComprobanteTipo,
+    prefix?: 'B' | 'F',
+  ) {
+    const current = await tx.serieComprobantePlataforma.findFirst({
+      where: {
+        tipo: type,
+        activo: true,
+        ...(prefix ? { serie: { startsWith: prefix } } : {}),
+      },
+      orderBy: { id: 'asc' },
+    });
+    if (!current) {
+      throw new ConflictException(
+        `No existe una serie activa para ${this.typeLabel(type)}`,
+      );
+    }
+    return { id: current.id, serie: current.serie, numero: null };
+  }
+
+  private async billingArtifact(receipt: Receipt, kind: 'pdf' | 'xml' | 'cdr') {
+    const apiKey = await this.billingIntegration.apiKey(
+      receipt.billingEnvironment!,
+    );
+    const artifactType =
+      kind === 'pdf' ? 'PDF_A4' : kind === 'xml' ? 'XML' : 'CDR';
+    const artifact = await this.billingApi.application<{
+      fileName: string;
+      contentType: string;
+      url: string;
+    }>(
+      `/documents/${receipt.billingDocumentId}/artifacts/${artifactType}`,
+      apiKey,
+    );
+    const downloaded = await this.billingApi.download(artifact.url);
+    return {
+      buffer: downloaded.bytes,
+      contentType: artifact.contentType || downloaded.contentType,
+      fileName: artifact.fileName,
+    };
+  }
+
+  private async billingVoidArtifact(receipt: Receipt, kind: 'xml' | 'cdr') {
+    const apiKey = await this.billingIntegration.apiKey(
+      receipt.billingEnvironment!,
+    );
+    let artifact: { fileName: string; contentType?: string; url: string };
+    if (kind === 'xml') {
+      const response = await this.billingApi.application<{
+        artifacts: {
+          xml: { fileName: string; contentType?: string; url: string };
+        };
+      }>(`/void-requests/${receipt.billingVoidRequestId}/artifacts`, apiKey, {
+        method: 'POST',
+      });
+      artifact = response.artifacts.xml;
+    } else {
+      artifact = await this.billingApi.application<{
+        fileName: string;
+        contentType?: string;
+        url: string;
+      }>(`/void-requests/${receipt.billingVoidRequestId}/cdr`, apiKey);
+    }
+    const downloaded = await this.billingApi.download(artifact.url);
+    return {
+      buffer: downloaded.bytes,
+      contentType:
+        artifact.contentType ||
+        (kind === 'xml' ? 'application/xml' : 'application/zip'),
+      fileName: artifact.fileName,
+    };
   }
 
   private receiver(
@@ -1152,7 +1484,7 @@ export class PlatformBillingService {
       },
       type,
       series: receipt.serie,
-      number: receipt.numero,
+      number: receipt.numero ?? 0,
       issuedAt: receipt.fechaEmision,
       sunatStatus: status[receipt.estado],
       sunatCode: receipt.sunatCodigo,
@@ -1180,7 +1512,9 @@ export class PlatformBillingService {
       type: row.tipo,
       series: row.serie,
       number: row.numero,
-      correlativo: `${row.serie}-${String(row.numero).padStart(8, '0')}`,
+      correlativo: row.numero
+        ? `${row.serie}-${String(row.numero).padStart(8, '0')}`
+        : null,
       issuedAt: row.fechaEmision.toISOString(),
       receiver: {
         documentType: row.receptorTipoDocumento,
@@ -1193,14 +1527,29 @@ export class PlatformBillingService {
       total: row.total.toFixed(2),
       currency: row.moneda,
       status: row.estado,
+      provider: row.billingDocumentId ? 'NUVEX_BILLING' : 'LEGACY',
+      billingDocumentId: row.billingDocumentId,
+      billingEnvironment: row.billingEnvironment,
+      billingStatus: row.billingStatus,
+      billingUpdatedAt: row.billingUpdatedAt?.toISOString() ?? null,
+      billingLastError: row.billingLastError,
       sunatCode: row.sunatCodigo,
       sunatMessage: row.sunatMensaje,
       downloads: {
-        pdf: true,
-        xml: Boolean(row.xmlR2Key),
-        cdr: Boolean(row.cdrR2Key),
-        cancellationXml: Boolean(row.sunatBajaXmlR2Key),
-        cancellationCdr: Boolean(row.sunatBajaCdrR2Key),
+        pdf: Boolean(row.numero),
+        xml: Boolean(row.xmlR2Key) || Boolean(row.billingDocumentId),
+        cdr:
+          Boolean(row.cdrR2Key) ||
+          (Boolean(row.billingDocumentId) &&
+            ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS'].includes(
+              row.billingStatus ?? '',
+            )),
+        cancellationXml:
+          Boolean(row.sunatBajaXmlR2Key) || Boolean(row.billingVoidRequestId),
+        cancellationCdr:
+          Boolean(row.sunatBajaCdrR2Key) ||
+          (Boolean(row.billingVoidRequestId) &&
+            row.sunatBajaEstado === SunatBajaEstado.aceptado),
       },
       cancellation: row.sunatBajaEstado
         ? {
@@ -1366,4 +1715,14 @@ export function platformCancellationType(tipo: PlataformaComprobanteTipo) {
   if (tipo === PlataformaComprobanteTipo.factura) return SunatBajaTipo.RA;
   if (tipo === PlataformaComprobanteTipo.boleta) return SunatBajaTipo.RC;
   return null;
+}
+
+function receiptNumberLabel(receipt: {
+  serie: string;
+  numero: number | null;
+  requestId: string;
+}) {
+  return receipt.numero
+    ? `${receipt.serie}-${String(receipt.numero).padStart(8, '0')}`
+    : receipt.requestId;
 }

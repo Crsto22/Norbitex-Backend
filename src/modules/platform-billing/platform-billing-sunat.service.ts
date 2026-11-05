@@ -64,6 +64,12 @@ export class PlatformBillingSunatService {
   @Cron('*/15 * * * * *')
   async processPending() {
     if (this.running) return;
+    const platformConfig =
+      await this.prisma.configuracionFacturacionPlataforma.findUnique({
+        where: { id: 1 },
+        select: { billingMicroserviceEnabled: true },
+      });
+    if (platformConfig?.billingMicroserviceEnabled) return;
     this.running = true;
     try {
       const job = await this.prisma.comprobantePlataformaSunatJob.findFirst({
@@ -160,7 +166,7 @@ export class PlatformBillingSunatService {
         ambiente: config.ambiente,
         tipoDoc: this.typeCode(receipt.tipo),
         serie: receipt.serie,
-        correlativo: receipt.numero.toString().padStart(8, '0'),
+        correlativo: String(receipt.numero ?? 0).padStart(8, '0'),
         ticket: null,
         estado: 'PENDIENTE' as const,
         fechaEmision: receipt.fechaEmision.toISOString().slice(0, 10),

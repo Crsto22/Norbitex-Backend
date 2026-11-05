@@ -11,7 +11,9 @@ SUNAT. La activacion es individual por empresa mediante
 BILLING_API_URL=https://billing-api.nuvex.pe/v1
 BILLING_PLATFORM_ADMIN_KEY=REEMPLAZAR
 BILLING_WEBHOOK_PUBLIC_URL=https://api.nuvex.pe/billing/webhooks
+BILLING_PLATFORM_WEBHOOK_PUBLIC_URL=https://api.nuvex.pe/billing/platform-webhooks
 BILLING_REQUEST_TIMEOUT_MS=15000
+PLATFORM_BILLING_MICROSERVICE_ENABLED=false
 ```
 
 `BILLING_PLATFORM_ADMIN_KEY`, las API keys por empresa y los secretos webhook
@@ -26,6 +28,12 @@ nunca se envian al frontend. Las credenciales por empresa se cifran con
    certificado y activar la integracion.
 4. Validar una boleta y una factura en BETA.
 5. Repetir en PRODUCTION y activar la empresa.
+
+La facturacion propia de Nuvex se provisiona desde el panel superadmin con una
+aplicacion Billing independiente (`nuvex-platform`). Solo debe cambiarse
+`PLATFORM_BILLING_MICROSERVICE_ENABLED=true` despues de validar BETA; los
+comprobantes historicos sin `billingDocumentId` continúan usando sus archivos
+locales en modo de solo lectura.
 
 La activacion se bloquea si quedan trabajos del emisor SUNAT anterior en estado
 pendiente o procesando. Esto evita que ambos emisores envien el mismo documento.

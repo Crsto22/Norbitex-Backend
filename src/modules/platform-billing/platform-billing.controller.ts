@@ -2,16 +2,20 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  ParseEnumPipe,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { BillingEnvironment } from '@prisma/client';
 import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
@@ -23,6 +27,7 @@ import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { PlatformAdminGuard } from '../platform-admin/platform-admin.guard';
 import {
   CreateExtraChargeDto,
+  CreatePlatformCreditNoteDto,
   FindPlatformReceiptsDto,
   FindPlatformSeriesDto,
   IssueHistoricalReceiptDto,
@@ -32,23 +37,80 @@ import {
   UpsertPlatformSeriesDto,
 } from './platform-billing.dto';
 import { PlatformBillingService } from './platform-billing.service';
+import { PlatformBillingIntegrationService } from './platform-billing-integration.service';
+import { UpdateBillingCredentialsDto } from '../billing-integration/dto/billing-config.dto';
 
 @UseGuards(PlatformAdminGuard)
 @Controller('platform-admin/billing')
 export class PlatformBillingAdminController {
   constructor(
     private readonly billing: PlatformBillingService,
+    private readonly integration: PlatformBillingIntegrationService,
     private readonly pdfConcurrency: PdfConcurrencyService,
   ) {}
 
-  @Get('issuer') getIssuer() {
-    return this.billing.getIssuerConfig();
+  @Get('issuer') async getIssuer() {
+    const [issuer, billing] = await Promise.all([
+      this.billing.getIssuerConfig(),
+      this.integration.status(),
+    ]);
+    return { ...issuer, billing };
   }
-  @Patch('issuer') updateIssuer(
+  @Patch('issuer') async updateIssuer(
     @CurrentUser() user: JwtPayload,
     @Body() dto: UpdatePlatformIssuerDto,
   ) {
-    return this.billing.updateIssuerConfig(user, dto);
+    const issuer = await this.billing.updateIssuerConfig(user, dto);
+    return { ...issuer, billing: await this.integration.status() };
+  }
+
+  @Post('issuer/provision')
+  provisionIssuer(
+    @Body('environment', new ParseEnumPipe(BillingEnvironment))
+    environment: BillingEnvironment,
+  ) {
+    return this.integration.provision(environment);
+  }
+
+  @Put('issuer/:environment/credentials')
+  updateIssuerCredentials(
+    @Param('environment', new ParseEnumPipe(BillingEnvironment))
+    environment: BillingEnvironment,
+    @Body() dto: UpdateBillingCredentialsDto,
+  ) {
+    return this.integration.updateCredentials(environment, dto);
+  }
+
+  @Put('issuer/:environment/certificate')
+  @UseInterceptors(
+    FileInterceptor('certificate', {
+      storage: memoryStorage(),
+      limits: { fileSize: 2 * 1024 * 1024 },
+    }),
+  )
+  uploadBillingCertificate(
+    @Param('environment', new ParseEnumPipe(BillingEnvironment))
+    environment: BillingEnvironment,
+    @Body('password') password: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('No se recibio el certificado');
+    if (!password?.trim())
+      throw new BadRequestException('Ingresa la contrasena del certificado');
+    return this.integration.uploadCertificate(environment, password, file);
+  }
+
+  @Delete('issuer/:environment/certificate')
+  deleteBillingCertificate(
+    @Param('environment', new ParseEnumPipe(BillingEnvironment))
+    environment: BillingEnvironment,
+  ) {
+    return this.integration.deleteCertificate(environment);
+  }
+
+  @Put('issuer/enabled')
+  setBillingEnabled(@Body('enabled') enabled: boolean) {
+    return this.integration.setEnabled(Boolean(enabled));
   }
 
   @Post('issuer/certificate')
@@ -103,6 +165,15 @@ export class PlatformBillingAdminController {
   ) {
     return this.billing.requestCancellation(user, id, dto);
   }
+  @Post('receipts/:id/credit-note')
+  @Throttle(rateLimits.sunat)
+  createCreditNote(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreatePlatformCreditNoteDto,
+  ) {
+    return this.billing.createCreditNote(user, id, dto);
+  }
   @Get('receipts/:id/cancellation/download/:kind')
   @Throttle(rateLimits.sunat)
   async downloadCancellation(
@@ -116,7 +187,16 @@ export class PlatformBillingAdminController {
       id,
       kind as 'xml' | 'cdr',
     );
-    response.redirect(file.url);
+    if ('url' in file && file.url) return response.redirect(file.url);
+    if (!('buffer' in file))
+      throw new BadRequestException('Archivo no disponible');
+    response.setHeader('Content-Type', file.contentType);
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${file.fileName}"`,
+    );
+    response.send(file.buffer);
   }
   @Post('extra-charges') createExtraCharge(
     @CurrentUser() user: JwtPayload,

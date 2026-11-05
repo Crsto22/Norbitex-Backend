@@ -672,24 +672,24 @@ model SunatBajaItem {
 }
 
 model Cliente {
-  id              BigInt               @id @default(autoincrement())
-  empresaId       BigInt               @map("empresa_id")
-  tipoDocumento   ClienteTipoDocumento @map("tipo_documento")
-  numeroDocumento String?              @map("numero_documento") @db.VarChar(20)
-  nombre          String?              @db.VarChar(150)
-  razonSocial     String?              @map("razon_social") @db.VarChar(200)
-  telefono        String?              @db.VarChar(30)
-  email           String?              @db.VarChar(150)
-  direccion       String?              @db.VarChar(255)
-  ubigeo          String?              @db.VarChar(6)
-  distrito        String?              @db.VarChar(80)
-  estado          ClienteEstado        @default(activo)
-  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
-  empresa         Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  ventas          Venta[]
-  notasCredito    NotaCredito[]
-  cotizaciones    Cotizacion[]
+  id               BigInt               @id @default(autoincrement())
+  empresaId        BigInt               @map("empresa_id")
+  tipoDocumento    ClienteTipoDocumento @map("tipo_documento")
+  numeroDocumento  String?              @map("numero_documento") @db.VarChar(20)
+  nombre           String?              @db.VarChar(150)
+  razonSocial      String?              @map("razon_social") @db.VarChar(200)
+  telefono         String?              @db.VarChar(30)
+  email            String?              @db.VarChar(150)
+  direccion        String?              @db.VarChar(255)
+  ubigeo           String?              @db.VarChar(6)
+  distrito         String?              @db.VarChar(80)
+  estado           ClienteEstado        @default(activo)
+  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa          Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  ventas           Venta[]
+  notasCredito     NotaCredito[]
+  cotizaciones     Cotizacion[]
   cuentasPorCobrar CuentaPorCobrar[]
 
   @@index([empresaId])
@@ -771,35 +771,35 @@ model CompraOrdenDetalle {
 }
 
 model Sucursal {
-  id                         BigInt                     @id @default(autoincrement())
-  empresaId                  BigInt                     @map("empresa_id")
-  nombre                     String                     @db.VarChar(120)
-  nombreKey                  String                     @map("nombre_key") @db.VarChar(140)
+  id                         BigInt                        @id @default(autoincrement())
+  empresaId                  BigInt                        @map("empresa_id")
+  nombre                     String                        @db.VarChar(120)
+  nombreKey                  String                        @map("nombre_key") @db.VarChar(140)
   tipo                       SucursalTipo
-  ubigeo                     String                     @db.VarChar(6)
-  distrito                   String                     @db.VarChar(80)
-  direccion                  String                     @db.VarChar(255)
-  codigoEstablecimientoSunat String?                    @map("codigo_establecimiento_sunat") @db.VarChar(10)
-  estado                     SucursalEstado             @default(activo)
-  esPrincipal                Boolean                    @default(false) @map("es_principal")
-  modoCajaHabilitado         Boolean                    @default(false) @map("modo_caja_habilitado")
-  createdAt                  DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                  DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
-  empresa                    Empresa                    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  ubigeo                     String                        @db.VarChar(6)
+  distrito                   String                        @db.VarChar(80)
+  direccion                  String                        @db.VarChar(255)
+  codigoEstablecimientoSunat String?                       @map("codigo_establecimiento_sunat") @db.VarChar(10)
+  estado                     SucursalEstado                @default(activo)
+  esPrincipal                Boolean                       @default(false) @map("es_principal")
+  modoCajaHabilitado         Boolean                       @default(false) @map("modo_caja_habilitado")
+  createdAt                  DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime                      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                    Empresa                       @relation(fields: [empresaId], references: [id], onDelete: Cascade)
   inventarios                InventarioSucursal[]
   stockMovimientos           StockMovimiento[]
-  stockTraspasosOrigen       StockTraspaso[]            @relation("StockTraspasoOrigen")
-  stockTraspasosDestino      StockTraspaso[]            @relation("StockTraspasoDestino")
-  comprasOrdenes             CompraOrden[]              @relation("CompraOrdenDestino")
+  stockTraspasosOrigen       StockTraspaso[]               @relation("StockTraspasoOrigen")
+  stockTraspasosDestino      StockTraspaso[]               @relation("StockTraspasoDestino")
+  comprasOrdenes             CompraOrden[]                 @relation("CompraOrdenDestino")
   ventas                     Venta[]
   notasCredito               NotaCredito[]
-  guiasRemision              GuiaRemision[]             @relation("GuiaRemisionSucursal")
-  guiasRemisionPartida       GuiaRemision[]             @relation("GuiaRemisionSucursalPartida")
-  guiasRemisionLlegada       GuiaRemision[]             @relation("GuiaRemisionSucursalLlegada")
+  guiasRemision              GuiaRemision[]                @relation("GuiaRemisionSucursal")
+  guiasRemisionPartida       GuiaRemision[]                @relation("GuiaRemisionSucursalPartida")
+  guiasRemisionLlegada       GuiaRemision[]                @relation("GuiaRemisionSucursalLlegada")
   cajasSesion                CajaSesion[]
   cotizaciones               Cotizacion[]
   serieComprobanteSucursales SerieComprobanteSucursal[]
-  usuariosAsignados          EmpresaUsuario[]           @relation("EmpresaUsuarioSucursal")
+  usuariosAsignados          EmpresaUsuario[]              @relation("EmpresaUsuarioSucursal")
   puntosQrAsistencia         PuntoQrAsistencia[]
   marcajesAsistencia         MarcajeAsistencia[]
   cuentasPorCobrar           CuentaPorCobrar[]
@@ -1740,40 +1740,58 @@ model LiquidacionAfiliado {
 }
 
 model ConfiguracionFacturacionPlataforma {
-  id                           Int           @id @default(1)
-  ruc                          String?       @db.VarChar(11)
-  razonSocial                  String?       @map("razon_social") @db.VarChar(200)
-  nombreComercial              String?       @map("nombre_comercial") @db.VarChar(150)
-  direccion                    String?
-  ubigeo                       String?       @db.VarChar(6)
-  ambiente                     SunatAmbiente @default(BETA)
-  usuarioSolEncrypted          String?       @map("usuario_sol_encrypted")
-  claveSolEncrypted            String?       @map("clave_sol_encrypted")
-  certificadoPasswordEncrypted String?       @map("certificado_password_encrypted")
-  certificadoR2Key             String?       @map("certificado_r2_key") @db.VarChar(600)
-  certificadoNombre            String?       @map("certificado_nombre") @db.VarChar(180)
-  certificadoMimeType          String?       @map("certificado_mime_type") @db.VarChar(80)
-  certificadoSizeBytes         Int?          @map("certificado_size_bytes")
-  certificadoUploadedAt        DateTime?     @map("certificado_uploaded_at") @db.Timestamptz(6)
-  igvPorcentaje                Decimal       @default(18) @map("igv_porcentaje") @db.Decimal(5, 2)
-  activo                       Boolean       @default(false)
-  actualizadoPorId             BigInt?       @map("actualizado_por_id")
-  createdAt                    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  actualizadoPor               Usuario?      @relation("ConfiguracionPlataformaActualizadaPor", fields: [actualizadoPorId], references: [id], onDelete: SetNull)
+  id                                      Int                      @id @default(1)
+  ruc                                     String?                  @db.VarChar(11)
+  razonSocial                             String?                  @map("razon_social") @db.VarChar(200)
+  nombreComercial                         String?                  @map("nombre_comercial") @db.VarChar(150)
+  direccion                               String?
+  ubigeo                                  String?                  @db.VarChar(6)
+  ambiente                                SunatAmbiente            @default(BETA)
+  usuarioSolEncrypted                     String?                  @map("usuario_sol_encrypted")
+  claveSolEncrypted                       String?                  @map("clave_sol_encrypted")
+  certificadoPasswordEncrypted            String?                  @map("certificado_password_encrypted")
+  certificadoR2Key                        String?                  @map("certificado_r2_key") @db.VarChar(600)
+  certificadoNombre                       String?                  @map("certificado_nombre") @db.VarChar(180)
+  certificadoMimeType                     String?                  @map("certificado_mime_type") @db.VarChar(80)
+  certificadoSizeBytes                    Int?                     @map("certificado_size_bytes")
+  certificadoUploadedAt                   DateTime?                @map("certificado_uploaded_at") @db.Timestamptz(6)
+  igvPorcentaje                           Decimal                  @default(18) @map("igv_porcentaje") @db.Decimal(5, 2)
+  activo                                  Boolean                  @default(false)
+  billingMicroserviceEnabled              Boolean                  @default(false) @map("billing_microservice_enabled")
+  billingTenantId                         String?                  @map("billing_tenant_id") @db.Uuid
+  billingApplicationId                    String?                  @map("billing_application_id") @db.Uuid
+  billingEstablishmentId                  String?                  @map("billing_establishment_id") @db.Uuid
+  billingStatus                           BillingIntegrationStatus @default(PENDING) @map("billing_status")
+  billingLastError                        String?                  @map("billing_last_error") @db.VarChar(1000)
+  billingLastSyncedAt                     DateTime?                @map("billing_last_synced_at") @db.Timestamptz(6)
+  billingBetaApiKeyEncrypted              String?                  @map("billing_beta_api_key_encrypted")
+  billingProductionApiKeyEncrypted        String?                  @map("billing_production_api_key_encrypted")
+  billingBetaWebhookEndpointId            String?                  @map("billing_beta_webhook_endpoint_id") @db.Uuid
+  billingProductionWebhookEndpointId      String?                  @map("billing_production_webhook_endpoint_id") @db.Uuid
+  billingBetaWebhookSecretEncrypted       String?                  @map("billing_beta_webhook_secret_encrypted")
+  billingProductionWebhookSecretEncrypted String?                  @map("billing_production_webhook_secret_encrypted")
+  billingBetaCredentialsConfigured        Boolean                  @default(false) @map("billing_beta_credentials_configured")
+  billingProductionCredentialsConfigured  Boolean                  @default(false) @map("billing_production_credentials_configured")
+  billingBetaCertificateConfigured        Boolean                  @default(false) @map("billing_beta_certificate_configured")
+  billingProductionCertificateConfigured  Boolean                  @default(false) @map("billing_production_certificate_configured")
+  actualizadoPorId                        BigInt?                  @map("actualizado_por_id")
+  createdAt                               DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                               DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  actualizadoPor                          Usuario?                 @relation("ConfiguracionPlataformaActualizadaPor", fields: [actualizadoPorId], references: [id], onDelete: SetNull)
 
   @@map("configuracion_facturacion_plataforma")
 }
 
 model SerieComprobantePlataforma {
-  id           BigInt                    @id @default(autoincrement())
-  tipo         PlataformaComprobanteTipo
-  serie        String                    @unique @db.VarChar(4)
-  correlativo  Int                       @default(0)
-  activo       Boolean                   @default(true)
-  createdAt    DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  comprobantes ComprobantePlataforma[]
+  id              BigInt                         @id @default(autoincrement())
+  tipo            PlataformaComprobanteTipo
+  serie           String                         @unique @db.VarChar(4)
+  correlativo     Int                            @default(0)
+  activo          Boolean                        @default(true)
+  createdAt       DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  comprobantes    ComprobantePlataforma[]
+  billingMappings PlatformBillingSeriesMapping[]
 
   @@index([tipo, activo])
   @@map("serie_comprobante_plataforma")
@@ -1818,7 +1836,7 @@ model ComprobantePlataforma {
   comprobanteOrigenId     BigInt?                        @unique @map("comprobante_origen_id")
   tipo                    PlataformaComprobanteTipo
   serie                   String                         @db.VarChar(4)
-  numero                  Int
+  numero                  Int?
   fechaEmision            DateTime                       @default(now()) @map("fecha_emision") @db.Timestamptz(6)
   receptorTipoDocumento   String?                        @map("receptor_tipo_documento") @db.VarChar(2)
   receptorDocumento       String?                        @map("receptor_documento") @db.VarChar(20)
@@ -1835,6 +1853,13 @@ model ComprobantePlataforma {
   cdrR2Key                String?                        @map("cdr_r2_key") @db.VarChar(600)
   pdfR2Key                String?                        @map("pdf_r2_key") @db.VarChar(600)
   motivoNotaCredito       String?                        @map("motivo_nota_credito") @db.VarChar(300)
+  billingDocumentId       String?                        @unique @map("billing_document_id") @db.Uuid
+  billingEnvironment      BillingEnvironment?            @map("billing_environment")
+  billingStatus           BillingDocumentStatus?         @map("billing_status")
+  billingUpdatedAt        DateTime?                      @map("billing_updated_at") @db.Timestamptz(6)
+  billingLastError        String?                        @map("billing_last_error") @db.VarChar(1000)
+  billingAttempts         Int                            @default(0) @map("billing_attempts")
+  billingVoidRequestId    String?                        @unique @map("billing_void_request_id") @db.Uuid
   sunatBajaRequestId      String?                        @unique @map("sunat_baja_request_id") @db.Uuid
   sunatBajaEstado         SunatBajaEstado?               @map("sunat_baja_estado")
   sunatBajaTipo           SunatBajaTipo?                 @map("sunat_baja_tipo")
@@ -1860,6 +1885,7 @@ model ComprobantePlataforma {
   notaCredito             ComprobantePlataforma?         @relation("NotaCreditoPlataforma")
   detalles                ComprobantePlataformaDetalle[]
   sunatJob                ComprobantePlataformaSunatJob?
+  billingOutbox           PlatformBillingOutbox[]
 
   @@unique([serie, numero])
   @@index([empresaId, fechaEmision])
@@ -2054,23 +2080,23 @@ model MetodoPago {
 }
 
 model SerieComprobante {
-  id                    BigInt                     @id @default(autoincrement())
-  empresaId             BigInt                     @map("empresa_id")
-  tipoComprobante       VentaTipoComprobante       @map("tipo_comprobante")
-  serie                 String                     @db.VarChar(4)
-  numeroActual          Int                        @default(0) @map("numero_actual")
-  numeroProvisionalActual Int                      @default(0) @map("numero_provisional_actual")
-  esPrincipal           Boolean                    @default(false) @map("es_principal")
-  aplicaTodasSucursales Boolean                    @default(true) @map("aplica_todas_sucursales")
-  activo                Boolean                    @default(true)
-  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
-  empresa               Empresa                    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  sucursales            SerieComprobanteSucursal[]
-  ventas                Venta[]
-  notasCredito          NotaCredito[]
-  guiasRemision         GuiaRemision[]
-  billingSeries         BillingSeriesMapping[]
+  id                      BigInt                     @id @default(autoincrement())
+  empresaId               BigInt                     @map("empresa_id")
+  tipoComprobante         VentaTipoComprobante       @map("tipo_comprobante")
+  serie                   String                     @db.VarChar(4)
+  numeroActual            Int                        @default(0) @map("numero_actual")
+  numeroProvisionalActual Int                        @default(0) @map("numero_provisional_actual")
+  esPrincipal             Boolean                    @default(false) @map("es_principal")
+  aplicaTodasSucursales   Boolean                    @default(true) @map("aplica_todas_sucursales")
+  activo                  Boolean                    @default(true)
+  createdAt               DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                 Empresa                    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  sucursales              SerieComprobanteSucursal[]
+  ventas                  Venta[]
+  notasCredito            NotaCredito[]
+  guiasRemision           GuiaRemision[]
+  billingSeries           BillingSeriesMapping[]
 
   @@unique([empresaId, tipoComprobante, serie])
   @@index([empresaId])
@@ -2279,90 +2305,90 @@ model CatalogoVehiculo {
 }
 
 model Venta {
-  id                    BigInt               @id @default(autoincrement())
-  publicId              String               @unique @default(cuid()) @map("public_id") @db.VarChar(30)
-  codigoInterno         String               @map("codigo_interno") @db.VarChar(20)
-  empresaId             BigInt               @map("empresa_id")
-  sucursalId            BigInt?              @map("sucursal_id")
-  clienteId             BigInt?              @map("cliente_id")
-  serieComprobanteId    BigInt               @map("serie_comprobante_id")
-  tipoComprobante       VentaTipoComprobante @map("tipo_comprobante")
-  serie                 String               @db.VarChar(4)
-  numero                Int
-  correlativo           String               @db.VarChar(15) // "NV01-000001"
-  moneda                String               @default("PEN") @db.VarChar(3)
-  formaPago             VentaFormaPago       @default(CONTADO) @map("forma_pago")
-  descuentoTipo         VentaDescuentoTipo?  @map("descuento_tipo")
-  descuentoValor        Decimal?             @map("descuento_valor") @db.Decimal(10, 2)
-  subtotal              Decimal              @db.Decimal(12, 2)
-  descuentoMonto        Decimal              @default(0) @map("descuento_monto") @db.Decimal(12, 2)
-  igvPorcentaje         Decimal              @default(18.00) @map("igv_porcentaje") @db.Decimal(5, 2)
-  opGravadas            Decimal              @default(0) @map("op_gravadas") @db.Decimal(12, 2)
-  opExoneradas          Decimal              @default(0) @map("op_exoneradas") @db.Decimal(12, 2)
-  opInafectas           Decimal              @default(0) @map("op_inafectas") @db.Decimal(12, 2)
-  igvMonto              Decimal              @default(0) @map("igv_monto") @db.Decimal(12, 2)
-  total                 Decimal              @db.Decimal(12, 2)
-  estado                VentaEstado          @default(completada)
-  recojoPosterior       Boolean              @default(false) @map("recojo_posterior")
-  recojoHasta           DateTime?            @map("recojo_hasta") @db.Date
-  estadoEntrega         VentaEntregaEstado   @default(entregada) @map("estado_entrega")
-  sunatEstado           SunatEstado          @default(no_aplica) @map("sunat_estado")
-  sunatCodigo           String?              @map("sunat_codigo") @db.VarChar(20)
-  sunatMensaje          String?              @map("sunat_mensaje") @db.VarChar(500)
-  sunatHash             String?              @map("sunat_hash") @db.VarChar(120)
-  sunatXmlNombre        String?              @map("sunat_xml_nombre") @db.VarChar(180)
-  sunatXmlKey           String?              @map("sunat_xml_key") @db.VarChar(600)
-  sunatZipNombre        String?              @map("sunat_zip_nombre") @db.VarChar(180)
-  sunatZipKey           String?              @map("sunat_zip_key") @db.VarChar(600)
-  sunatCdrNombre        String?              @map("sunat_cdr_nombre") @db.VarChar(180)
-  sunatCdrKey           String?              @map("sunat_cdr_key") @db.VarChar(600)
-  sunatEnviadoAt        DateTime?            @map("sunat_enviado_at") @db.Timestamptz(6)
-  sunatRespondidoAt     DateTime?            @map("sunat_respondido_at") @db.Timestamptz(6)
-  billingDocumentId     String?               @unique @map("billing_document_id") @db.Uuid
-  billingEnvironment    BillingEnvironment?   @map("billing_environment")
-  billingStatus         BillingDocumentStatus? @map("billing_status")
-  billingUpdatedAt      DateTime?             @map("billing_updated_at") @db.Timestamptz(6)
-  billingSunatObservations Json?              @map("billing_sunat_observations")
-  billingLastError      String?               @map("billing_last_error") @db.VarChar(1000)
-  billingAttempts       Int                   @default(0) @map("billing_attempts")
-  billingVoidRequestId  String?               @unique @map("billing_void_request_id") @db.Uuid
-  billingVoidUpdatedAt  DateTime?             @map("billing_void_updated_at") @db.Timestamptz(6)
-  billingVoidRetrySequence Int                 @default(0) @map("billing_void_retry_sequence")
-  tipoAnulacion         String?              @map("tipo_anulacion") @db.VarChar(20)
-  sunatBajaEstado       SunatBajaEstado?     @map("sunat_baja_estado")
-  sunatBajaCodigo       String?              @map("sunat_baja_codigo") @db.VarChar(20)
-  sunatBajaMensaje      String?              @map("sunat_baja_mensaje") @db.VarChar(500)
-  sunatBajaTicket       String?              @map("sunat_baja_ticket") @db.VarChar(120)
-  sunatBajaTipo         SunatBajaTipo?       @map("sunat_baja_tipo")
-  sunatBajaLoteId       BigInt?              @map("sunat_baja_lote_id")
-  sunatBajaSolicitadaAt DateTime?            @map("sunat_baja_solicitada_at") @db.Timestamptz(6)
-  sunatBajaRespondidaAt DateTime?            @map("sunat_baja_respondida_at") @db.Timestamptz(6)
-  observaciones         String?              @db.VarChar(500)
-  requestId             String?              @map("request_id") @db.Uuid
-  anuladoAt             DateTime?            @map("anulado_at") @db.Timestamptz(6)
-  anuladoRazon          String?              @map("anulado_razon") @db.VarChar(500)
-  creadoPorId           BigInt?              @map("creado_por_id")
-  cajaSesionId          BigInt?              @map("caja_sesion_id")
-  esExcedentePlan       Boolean              @default(false) @map("es_excedente_plan")
-  precioExcedentePlan   Decimal?             @map("precio_excedente_plan") @db.Decimal(12, 2)
-  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
-  empresa               Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  sucursal              Sucursal?            @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
-  cliente               Cliente?             @relation(fields: [clienteId], references: [id], onDelete: SetNull)
-  serieComprobante      SerieComprobante     @relation(fields: [serieComprobanteId], references: [id], onDelete: Restrict)
-  creadoPor             Usuario?             @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
-  cajaSesion            CajaSesion?          @relation(fields: [cajaSesionId], references: [id], onDelete: SetNull)
-  sunatBajaLote         SunatBajaLote?       @relation(fields: [sunatBajaLoteId], references: [id], onDelete: SetNull)
-  detalles              VentaDetalle[]
-  entregas              VentaEntrega[]
-  notasCredito          NotaCredito[]
-  pagos                 VentaPago[]
-  cuentaPorCobrar       CuentaPorCobrar?
-  cajaMovimientos       CajaMovimiento[]
-  cotizacionOrigen      Cotizacion?          @relation("CotizacionConvertidaVenta")
-  sunatBajaItems        SunatBajaItem[]
-  billingOutbox         BillingOutbox[]
+  id                       BigInt                 @id @default(autoincrement())
+  publicId                 String                 @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  codigoInterno            String                 @map("codigo_interno") @db.VarChar(20)
+  empresaId                BigInt                 @map("empresa_id")
+  sucursalId               BigInt?                @map("sucursal_id")
+  clienteId                BigInt?                @map("cliente_id")
+  serieComprobanteId       BigInt                 @map("serie_comprobante_id")
+  tipoComprobante          VentaTipoComprobante   @map("tipo_comprobante")
+  serie                    String                 @db.VarChar(4)
+  numero                   Int
+  correlativo              String                 @db.VarChar(15) // "NV01-000001"
+  moneda                   String                 @default("PEN") @db.VarChar(3)
+  formaPago                VentaFormaPago         @default(CONTADO) @map("forma_pago")
+  descuentoTipo            VentaDescuentoTipo?    @map("descuento_tipo")
+  descuentoValor           Decimal?               @map("descuento_valor") @db.Decimal(10, 2)
+  subtotal                 Decimal                @db.Decimal(12, 2)
+  descuentoMonto           Decimal                @default(0) @map("descuento_monto") @db.Decimal(12, 2)
+  igvPorcentaje            Decimal                @default(18.00) @map("igv_porcentaje") @db.Decimal(5, 2)
+  opGravadas               Decimal                @default(0) @map("op_gravadas") @db.Decimal(12, 2)
+  opExoneradas             Decimal                @default(0) @map("op_exoneradas") @db.Decimal(12, 2)
+  opInafectas              Decimal                @default(0) @map("op_inafectas") @db.Decimal(12, 2)
+  igvMonto                 Decimal                @default(0) @map("igv_monto") @db.Decimal(12, 2)
+  total                    Decimal                @db.Decimal(12, 2)
+  estado                   VentaEstado            @default(completada)
+  recojoPosterior          Boolean                @default(false) @map("recojo_posterior")
+  recojoHasta              DateTime?              @map("recojo_hasta") @db.Date
+  estadoEntrega            VentaEntregaEstado     @default(entregada) @map("estado_entrega")
+  sunatEstado              SunatEstado            @default(no_aplica) @map("sunat_estado")
+  sunatCodigo              String?                @map("sunat_codigo") @db.VarChar(20)
+  sunatMensaje             String?                @map("sunat_mensaje") @db.VarChar(500)
+  sunatHash                String?                @map("sunat_hash") @db.VarChar(120)
+  sunatXmlNombre           String?                @map("sunat_xml_nombre") @db.VarChar(180)
+  sunatXmlKey              String?                @map("sunat_xml_key") @db.VarChar(600)
+  sunatZipNombre           String?                @map("sunat_zip_nombre") @db.VarChar(180)
+  sunatZipKey              String?                @map("sunat_zip_key") @db.VarChar(600)
+  sunatCdrNombre           String?                @map("sunat_cdr_nombre") @db.VarChar(180)
+  sunatCdrKey              String?                @map("sunat_cdr_key") @db.VarChar(600)
+  sunatEnviadoAt           DateTime?              @map("sunat_enviado_at") @db.Timestamptz(6)
+  sunatRespondidoAt        DateTime?              @map("sunat_respondido_at") @db.Timestamptz(6)
+  billingDocumentId        String?                @unique @map("billing_document_id") @db.Uuid
+  billingEnvironment       BillingEnvironment?    @map("billing_environment")
+  billingStatus            BillingDocumentStatus? @map("billing_status")
+  billingUpdatedAt         DateTime?              @map("billing_updated_at") @db.Timestamptz(6)
+  billingSunatObservations Json?                  @map("billing_sunat_observations")
+  billingLastError         String?                @map("billing_last_error") @db.VarChar(1000)
+  billingAttempts          Int                    @default(0) @map("billing_attempts")
+  billingVoidRequestId     String?                @unique @map("billing_void_request_id") @db.Uuid
+  billingVoidUpdatedAt     DateTime?              @map("billing_void_updated_at") @db.Timestamptz(6)
+  billingVoidRetrySequence Int                    @default(0) @map("billing_void_retry_sequence")
+  tipoAnulacion            String?                @map("tipo_anulacion") @db.VarChar(20)
+  sunatBajaEstado          SunatBajaEstado?       @map("sunat_baja_estado")
+  sunatBajaCodigo          String?                @map("sunat_baja_codigo") @db.VarChar(20)
+  sunatBajaMensaje         String?                @map("sunat_baja_mensaje") @db.VarChar(500)
+  sunatBajaTicket          String?                @map("sunat_baja_ticket") @db.VarChar(120)
+  sunatBajaTipo            SunatBajaTipo?         @map("sunat_baja_tipo")
+  sunatBajaLoteId          BigInt?                @map("sunat_baja_lote_id")
+  sunatBajaSolicitadaAt    DateTime?              @map("sunat_baja_solicitada_at") @db.Timestamptz(6)
+  sunatBajaRespondidaAt    DateTime?              @map("sunat_baja_respondida_at") @db.Timestamptz(6)
+  observaciones            String?                @db.VarChar(500)
+  requestId                String?                @map("request_id") @db.Uuid
+  anuladoAt                DateTime?              @map("anulado_at") @db.Timestamptz(6)
+  anuladoRazon             String?                @map("anulado_razon") @db.VarChar(500)
+  creadoPorId              BigInt?                @map("creado_por_id")
+  cajaSesionId             BigInt?                @map("caja_sesion_id")
+  esExcedentePlan          Boolean                @default(false) @map("es_excedente_plan")
+  precioExcedentePlan      Decimal?               @map("precio_excedente_plan") @db.Decimal(12, 2)
+  createdAt                DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                  Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  sucursal                 Sucursal?              @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  cliente                  Cliente?               @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  serieComprobante         SerieComprobante       @relation(fields: [serieComprobanteId], references: [id], onDelete: Restrict)
+  creadoPor                Usuario?               @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
+  cajaSesion               CajaSesion?            @relation(fields: [cajaSesionId], references: [id], onDelete: SetNull)
+  sunatBajaLote            SunatBajaLote?         @relation(fields: [sunatBajaLoteId], references: [id], onDelete: SetNull)
+  detalles                 VentaDetalle[]
+  entregas                 VentaEntrega[]
+  notasCredito             NotaCredito[]
+  pagos                    VentaPago[]
+  cuentaPorCobrar          CuentaPorCobrar?
+  cajaMovimientos          CajaMovimiento[]
+  cotizacionOrigen         Cotizacion?            @relation("CotizacionConvertidaVenta")
+  sunatBajaItems           SunatBajaItem[]
+  billingOutbox            BillingOutbox[]
 
   @@unique([serieComprobanteId, numero])
   @@unique([empresaId, codigoInterno])
@@ -2560,23 +2586,23 @@ model NotaCreditoDetalle {
 }
 
 model VentaPago {
-  id              BigInt                       @id @default(autoincrement())
-  publicId        String                       @unique @default(cuid()) @map("public_id") @db.VarChar(30)
-  ventaId         BigInt                       @map("venta_id")
-  metodoPagoId    BigInt                       @map("metodo_pago_id")
-  creadoPorId     BigInt?                      @map("creado_por_id")
-  requestId       String?                      @map("request_id") @db.Uuid
-  origen          VentaPagoOrigen              @default(venta)
-  monto           Decimal                      @db.Decimal(12, 2)
-  montoRecibido   Decimal?                     @map("monto_recibido") @db.Decimal(12, 2)
-  vuelto          Decimal                      @default(0) @db.Decimal(12, 2)
-  referencia      String?                      @db.VarChar(200)
-  estado          VentaPagoEstado              @default(activo)
-  createdAt       DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  venta           Venta                        @relation(fields: [ventaId], references: [id], onDelete: Cascade)
-  metodoPago      MetodoPago                   @relation(fields: [metodoPagoId], references: [id], onDelete: Restrict)
-  creadoPor       Usuario?                     @relation("VentaPagoCreadoPor", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  id              BigInt                      @id @default(autoincrement())
+  publicId        String                      @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  ventaId         BigInt                      @map("venta_id")
+  metodoPagoId    BigInt                      @map("metodo_pago_id")
+  creadoPorId     BigInt?                     @map("creado_por_id")
+  requestId       String?                     @map("request_id") @db.Uuid
+  origen          VentaPagoOrigen             @default(venta)
+  monto           Decimal                     @db.Decimal(12, 2)
+  montoRecibido   Decimal?                    @map("monto_recibido") @db.Decimal(12, 2)
+  vuelto          Decimal                     @default(0) @db.Decimal(12, 2)
+  referencia      String?                     @db.VarChar(200)
+  estado          VentaPagoEstado             @default(activo)
+  createdAt       DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  venta           Venta                       @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  metodoPago      MetodoPago                  @relation(fields: [metodoPagoId], references: [id], onDelete: Restrict)
+  creadoPor       Usuario?                    @relation("VentaPagoCreadoPor", fields: [creadoPorId], references: [id], onDelete: SetNull)
   cajaMovimientos CajaMovimiento[]
   aplicaciones    CuentaPorCobrarAplicacion[]
 
@@ -2588,29 +2614,77 @@ model VentaPago {
   @@map("venta_pago")
 }
 
+model PlatformBillingSeriesMapping {
+  id                    BigInt                     @id @default(autoincrement())
+  serieId               BigInt                     @map("serie_id")
+  environment           BillingEnvironment
+  billingFiscalSeriesId String                     @map("billing_fiscal_series_id") @db.Uuid
+  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  serie                 SerieComprobantePlataforma @relation(fields: [serieId], references: [id], onDelete: Cascade)
+
+  @@unique([serieId, environment])
+  @@index([environment])
+  @@map("platform_billing_series_mapping")
+}
+
+model PlatformBillingOutbox {
+  id             String                 @id @default(uuid()) @db.Uuid
+  receiptId      BigInt                 @map("receipt_id")
+  environment    BillingEnvironment
+  operation      BillingOutboxOperation @default(ISSUE)
+  idempotencyKey String                 @unique @map("idempotency_key") @db.VarChar(140)
+  status         BillingOutboxStatus    @default(PENDING)
+  attempts       Int                    @default(0)
+  maxAttempts    Int                    @default(12) @map("max_attempts")
+  nextAttemptAt  DateTime               @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lockedAt       DateTime?              @map("locked_at") @db.Timestamptz(6)
+  lastError      String?                @map("last_error") @db.VarChar(1000)
+  processedAt    DateTime?              @map("processed_at") @db.Timestamptz(6)
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  receipt        ComprobantePlataforma  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@unique([receiptId, environment, operation])
+  @@index([status, nextAttemptAt])
+  @@map("platform_billing_outbox")
+}
+
+model PlatformBillingWebhookEvent {
+  eventId        String             @id @map("event_id") @db.Uuid
+  applicationId  String             @map("application_id") @db.Uuid
+  environment    BillingEnvironment
+  eventType      String             @map("event_type") @db.VarChar(80)
+  eventCreatedAt DateTime           @map("event_created_at") @db.Timestamptz(6)
+  processedAt    DateTime           @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@index([applicationId, processedAt])
+  @@map("platform_billing_webhook_event")
+}
+
 model CuentaPorCobrar {
-  id                 BigInt                 @id @default(autoincrement())
-  publicId           String                 @unique @default(cuid()) @map("public_id") @db.VarChar(30)
-  empresaId          BigInt                 @map("empresa_id")
-  ventaId            BigInt                 @unique @map("venta_id")
-  clienteId          BigInt                 @map("cliente_id")
-  sucursalId         BigInt?                @map("sucursal_id")
-  moneda             String                 @default("PEN") @db.VarChar(3)
-  totalVenta         Decimal                @map("total_venta") @db.Decimal(12, 2)
-  adelanto           Decimal                @default(0) @db.Decimal(12, 2)
-  saldoInicial       Decimal                @map("saldo_inicial") @db.Decimal(12, 2)
-  saldoPendiente     Decimal                @map("saldo_pendiente") @db.Decimal(12, 2)
-  saldoFavor         Decimal                @default(0) @map("saldo_favor") @db.Decimal(12, 2)
-  estado             CuentaPorCobrarEstado  @default(pendiente)
-  primerVencimiento  DateTime               @map("primer_vencimiento") @db.Date
-  ultimoPagoAt       DateTime?              @map("ultimo_pago_at") @db.Timestamptz(6)
-  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
-  empresa            Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  venta              Venta                  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
-  cliente            Cliente                @relation(fields: [clienteId], references: [id], onDelete: Restrict)
-  sucursal           Sucursal?              @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
-  cuotas             CuentaPorCobrarCuota[]
+  id                BigInt                 @id @default(autoincrement())
+  publicId          String                 @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  empresaId         BigInt                 @map("empresa_id")
+  ventaId           BigInt                 @unique @map("venta_id")
+  clienteId         BigInt                 @map("cliente_id")
+  sucursalId        BigInt?                @map("sucursal_id")
+  moneda            String                 @default("PEN") @db.VarChar(3)
+  totalVenta        Decimal                @map("total_venta") @db.Decimal(12, 2)
+  adelanto          Decimal                @default(0) @db.Decimal(12, 2)
+  saldoInicial      Decimal                @map("saldo_inicial") @db.Decimal(12, 2)
+  saldoPendiente    Decimal                @map("saldo_pendiente") @db.Decimal(12, 2)
+  saldoFavor        Decimal                @default(0) @map("saldo_favor") @db.Decimal(12, 2)
+  estado            CuentaPorCobrarEstado  @default(pendiente)
+  primerVencimiento DateTime               @map("primer_vencimiento") @db.Date
+  ultimoPagoAt      DateTime?              @map("ultimo_pago_at") @db.Timestamptz(6)
+  createdAt         DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa           Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  venta             Venta                  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  cliente           Cliente                @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  sucursal          Sucursal?              @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
+  cuotas            CuentaPorCobrarCuota[]
 
   @@index([empresaId, estado])
   @@index([empresaId, clienteId])
@@ -2620,18 +2694,18 @@ model CuentaPorCobrar {
 }
 
 model CuentaPorCobrarCuota {
-  id                 BigInt                       @id @default(autoincrement())
-  cuentaPorCobrarId  BigInt                       @map("cuenta_por_cobrar_id")
-  numero             Int
-  fechaVencimiento   DateTime                     @map("fecha_vencimiento") @db.Date
-  montoOriginal      Decimal                      @map("monto_original") @db.Decimal(12, 2)
-  montoPagado        Decimal                      @default(0) @map("monto_pagado") @db.Decimal(12, 2)
-  saldo              Decimal                      @db.Decimal(12, 2)
-  estado             CuentaPorCobrarCuotaEstado   @default(pendiente)
-  createdAt          DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  cuentaPorCobrar    CuentaPorCobrar              @relation(fields: [cuentaPorCobrarId], references: [id], onDelete: Cascade)
-  aplicaciones       CuentaPorCobrarAplicacion[]
+  id                BigInt                      @id @default(autoincrement())
+  cuentaPorCobrarId BigInt                      @map("cuenta_por_cobrar_id")
+  numero            Int
+  fechaVencimiento  DateTime                    @map("fecha_vencimiento") @db.Date
+  montoOriginal     Decimal                     @map("monto_original") @db.Decimal(12, 2)
+  montoPagado       Decimal                     @default(0) @map("monto_pagado") @db.Decimal(12, 2)
+  saldo             Decimal                     @db.Decimal(12, 2)
+  estado            CuentaPorCobrarCuotaEstado  @default(pendiente)
+  createdAt         DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  cuentaPorCobrar   CuentaPorCobrar             @relation(fields: [cuentaPorCobrarId], references: [id], onDelete: Cascade)
+  aplicaciones      CuentaPorCobrarAplicacion[]
 
   @@unique([cuentaPorCobrarId, numero])
   @@index([cuentaPorCobrarId, fechaVencimiento])
@@ -2640,13 +2714,13 @@ model CuentaPorCobrarCuota {
 }
 
 model CuentaPorCobrarAplicacion {
-  id        BigInt                 @id @default(autoincrement())
-  cuotaId   BigInt                 @map("cuota_id")
-  pagoId    BigInt                 @map("pago_id")
-  monto     Decimal                @db.Decimal(12, 2)
-  createdAt DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  cuota     CuentaPorCobrarCuota   @relation(fields: [cuotaId], references: [id], onDelete: Cascade)
-  pago      VentaPago              @relation(fields: [pagoId], references: [id], onDelete: Cascade)
+  id        BigInt               @id @default(autoincrement())
+  cuotaId   BigInt               @map("cuota_id")
+  pagoId    BigInt               @map("pago_id")
+  monto     Decimal              @db.Decimal(12, 2)
+  createdAt DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  cuota     CuentaPorCobrarCuota @relation(fields: [cuotaId], references: [id], onDelete: Cascade)
+  pago      VentaPago            @relation(fields: [pagoId], references: [id], onDelete: Cascade)
 
   @@unique([cuotaId, pagoId])
   @@index([pagoId])
@@ -2654,27 +2728,27 @@ model CuentaPorCobrarAplicacion {
 }
 
 model BillingIntegration {
-  id                                BigInt                   @id @default(autoincrement())
-  empresaId                         BigInt                   @unique @map("empresa_id")
-  tenantId                          String?                  @map("tenant_id") @db.Uuid
-  applicationId                     String?                  @map("application_id") @db.Uuid
-  environment                       BillingEnvironment       @default(BETA)
-  betaApiKeyEncrypted               String?                  @map("beta_api_key_encrypted")
-  productionApiKeyEncrypted         String?                  @map("production_api_key_encrypted")
-  betaCredentialsConfigured         Boolean                  @default(false) @map("beta_credentials_configured")
-  productionCredentialsConfigured   Boolean                  @default(false) @map("production_credentials_configured")
-  betaCertificateConfigured         Boolean                  @default(false) @map("beta_certificate_configured")
-  productionCertificateConfigured   Boolean                  @default(false) @map("production_certificate_configured")
-  betaWebhookEndpointId             String?                  @map("beta_webhook_endpoint_id") @db.Uuid
-  productionWebhookEndpointId       String?                  @map("production_webhook_endpoint_id") @db.Uuid
-  betaWebhookSecretEncrypted        String?                  @map("beta_webhook_secret_encrypted")
-  productionWebhookSecretEncrypted  String?                  @map("production_webhook_secret_encrypted")
-  status                            BillingIntegrationStatus @default(PENDING)
-  lastError                         String?                  @map("last_error") @db.VarChar(1000)
-  lastSyncedAt                      DateTime?                @map("last_synced_at") @db.Timestamptz(6)
-  createdAt                         DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                         DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
-  empresa                           Empresa                  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  id                               BigInt                   @id @default(autoincrement())
+  empresaId                        BigInt                   @unique @map("empresa_id")
+  tenantId                         String?                  @map("tenant_id") @db.Uuid
+  applicationId                    String?                  @map("application_id") @db.Uuid
+  environment                      BillingEnvironment       @default(BETA)
+  betaApiKeyEncrypted              String?                  @map("beta_api_key_encrypted")
+  productionApiKeyEncrypted        String?                  @map("production_api_key_encrypted")
+  betaCredentialsConfigured        Boolean                  @default(false) @map("beta_credentials_configured")
+  productionCredentialsConfigured  Boolean                  @default(false) @map("production_credentials_configured")
+  betaCertificateConfigured        Boolean                  @default(false) @map("beta_certificate_configured")
+  productionCertificateConfigured  Boolean                  @default(false) @map("production_certificate_configured")
+  betaWebhookEndpointId            String?                  @map("beta_webhook_endpoint_id") @db.Uuid
+  productionWebhookEndpointId      String?                  @map("production_webhook_endpoint_id") @db.Uuid
+  betaWebhookSecretEncrypted       String?                  @map("beta_webhook_secret_encrypted")
+  productionWebhookSecretEncrypted String?                  @map("production_webhook_secret_encrypted")
+  status                           BillingIntegrationStatus @default(PENDING)
+  lastError                        String?                  @map("last_error") @db.VarChar(1000)
+  lastSyncedAt                     DateTime?                @map("last_synced_at") @db.Timestamptz(6)
+  createdAt                        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                        DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                          Empresa                  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([applicationId])
@@ -2682,16 +2756,16 @@ model BillingIntegration {
 }
 
 model BillingEstablishmentMapping {
-  id                      BigInt             @id @default(autoincrement())
-  empresaId               BigInt             @map("empresa_id")
-  sucursalId              BigInt             @map("sucursal_id")
-  environment             BillingEnvironment
-  billingEstablishmentId  String             @map("billing_establishment_id") @db.Uuid
-  code                    String             @db.VarChar(10)
-  createdAt               DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt               DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
-  empresa                 Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  sucursal                Sucursal           @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  id                     BigInt             @id @default(autoincrement())
+  empresaId              BigInt             @map("empresa_id")
+  sucursalId             BigInt             @map("sucursal_id")
+  environment            BillingEnvironment
+  billingEstablishmentId String             @map("billing_establishment_id") @db.Uuid
+  code                   String             @db.VarChar(10)
+  createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa                Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  sucursal               Sucursal           @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
 
   @@unique([sucursalId, environment])
   @@unique([empresaId, environment, code])
@@ -2700,15 +2774,15 @@ model BillingEstablishmentMapping {
 }
 
 model BillingSeriesMapping {
-  id                      BigInt             @id @default(autoincrement())
-  empresaId               BigInt             @map("empresa_id")
-  serieComprobanteId      BigInt             @map("serie_comprobante_id")
-  environment             BillingEnvironment
-  billingFiscalSeriesId   String             @map("billing_fiscal_series_id") @db.Uuid
-  createdAt               DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt               DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
-  empresa                 Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  serieComprobante        SerieComprobante   @relation(fields: [serieComprobanteId], references: [id], onDelete: Cascade)
+  id                    BigInt             @id @default(autoincrement())
+  empresaId             BigInt             @map("empresa_id")
+  serieComprobanteId    BigInt             @map("serie_comprobante_id")
+  environment           BillingEnvironment
+  billingFiscalSeriesId String             @map("billing_fiscal_series_id") @db.Uuid
+  createdAt             DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa               Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  serieComprobante      SerieComprobante   @relation(fields: [serieComprobanteId], references: [id], onDelete: Cascade)
 
   @@unique([serieComprobanteId, environment])
   @@index([empresaId, environment])
@@ -2716,23 +2790,23 @@ model BillingSeriesMapping {
 }
 
 model BillingOutbox {
-  id              String                 @id @default(uuid()) @db.Uuid
-  empresaId       BigInt                 @map("empresa_id")
-  ventaId         BigInt                 @map("venta_id")
-  environment     BillingEnvironment
-  operation       BillingOutboxOperation @default(ISSUE)
-  idempotencyKey  String                 @unique @map("idempotency_key") @db.VarChar(100)
-  status          BillingOutboxStatus    @default(PENDING)
-  attempts        Int                    @default(0)
-  maxAttempts     Int                    @default(12) @map("max_attempts")
-  nextAttemptAt   DateTime               @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
-  lockedAt        DateTime?              @map("locked_at") @db.Timestamptz(6)
-  lastError       String?                @map("last_error") @db.VarChar(1000)
-  processedAt     DateTime?              @map("processed_at") @db.Timestamptz(6)
-  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
-  empresa         Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-  venta           Venta                  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  id             String                 @id @default(uuid()) @db.Uuid
+  empresaId      BigInt                 @map("empresa_id")
+  ventaId        BigInt                 @map("venta_id")
+  environment    BillingEnvironment
+  operation      BillingOutboxOperation @default(ISSUE)
+  idempotencyKey String                 @unique @map("idempotency_key") @db.VarChar(100)
+  status         BillingOutboxStatus    @default(PENDING)
+  attempts       Int                    @default(0)
+  maxAttempts    Int                    @default(12) @map("max_attempts")
+  nextAttemptAt  DateTime               @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lockedAt       DateTime?              @map("locked_at") @db.Timestamptz(6)
+  lastError      String?                @map("last_error") @db.VarChar(1000)
+  processedAt    DateTime?              @map("processed_at") @db.Timestamptz(6)
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa        Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  venta          Venta                  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
 
   @@unique([ventaId, environment, operation])
   @@index([status, nextAttemptAt])
@@ -2741,14 +2815,14 @@ model BillingOutbox {
 }
 
 model BillingWebhookEvent {
-  eventId         String             @id @map("event_id") @db.Uuid
-  empresaId       BigInt             @map("empresa_id")
-  applicationId   String             @map("application_id") @db.Uuid
-  environment     BillingEnvironment
-  eventType       String             @map("event_type") @db.VarChar(80)
-  eventCreatedAt  DateTime           @map("event_created_at") @db.Timestamptz(6)
-  processedAt     DateTime           @default(now()) @map("processed_at") @db.Timestamptz(6)
-  empresa         Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  eventId        String             @id @map("event_id") @db.Uuid
+  empresaId      BigInt             @map("empresa_id")
+  applicationId  String             @map("application_id") @db.Uuid
+  environment    BillingEnvironment
+  eventType      String             @map("event_type") @db.VarChar(80)
+  eventCreatedAt DateTime           @map("event_created_at") @db.Timestamptz(6)
+  processedAt    DateTime           @default(now()) @map("processed_at") @db.Timestamptz(6)
+  empresa        Empresa            @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 
   @@index([empresaId, processedAt])
   @@map("billing_webhook_event")

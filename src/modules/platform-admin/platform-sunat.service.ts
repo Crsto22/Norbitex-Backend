@@ -4,6 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  BillingEnvironment,
+  BillingIntegrationStatus,
   EmpresaEstado,
   PlanCodigo,
   Prisma,
@@ -15,6 +17,7 @@ import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { UpdateSunatConfigDto } from '../sunat-config/dto/update-sunat-config.dto';
 import { UploadSunatCertificateDto } from '../sunat-config/dto/upload-sunat-certificate.dto';
 import { SunatConfigService } from '../sunat-config/sunat-config.service';
+import { BillingIntegrationService } from '../billing-integration/billing-integration.service';
 import { PlansService } from '../plans/plans.service';
 import {
   FindPlatformSunatCompaniesQueryDto,
@@ -47,6 +50,24 @@ type CompanyWithSunat = {
     activo: boolean;
     updatedAt: Date;
   } | null;
+  billingMicroserviceEnabled: boolean;
+  billingIntegration: {
+    environment: BillingEnvironment;
+    status: BillingIntegrationStatus;
+    tenantId: string | null;
+    applicationId: string | null;
+    betaApiKeyEncrypted: string | null;
+    productionApiKeyEncrypted: string | null;
+    betaWebhookSecretEncrypted: string | null;
+    productionWebhookSecretEncrypted: string | null;
+    betaCredentialsConfigured: boolean;
+    productionCredentialsConfigured: boolean;
+    betaCertificateConfigured: boolean;
+    productionCertificateConfigured: boolean;
+    lastError: string | null;
+    lastSyncedAt: Date | null;
+  } | null;
+  _count: { billingEstablishments: number; billingSeries: number };
 };
 
 @Injectable()
@@ -55,6 +76,7 @@ export class PlatformSunatService {
     private readonly prisma: PrismaService,
     private readonly plansService: PlansService,
     private readonly sunatConfigService: SunatConfigService,
+    private readonly billingIntegration: BillingIntegrationService,
   ) {}
 
   async findCompanies(query: FindPlatformSunatCompaniesQueryDto) {
@@ -86,8 +108,35 @@ export class PlatformSunatService {
           ruc: true,
           dni: true,
           email: true,
+          direccion: true,
           estado: true,
           planCodigo: true,
+          billingMicroserviceEnabled: true,
+          billingIntegration: true,
+          _count: {
+            select: {
+              billingEstablishments: true,
+              billingSeries: true,
+            },
+          },
+          sunatConfig: {
+            select: {
+              ambiente: true,
+              usuarioSolEncrypted: true,
+              claveSolEncrypted: true,
+              clientIdEncrypted: true,
+              clientSecretEncrypted: true,
+              certificadoPasswordEncrypted: true,
+              certificadoR2Key: true,
+              certificadoNombre: true,
+              certificadoMimeType: true,
+              certificadoSizeBytes: true,
+              certificadoUploadedAt: true,
+              igvPorcentaje: true,
+              activo: true,
+              updatedAt: true,
+            },
+          },
         },
       }),
       this.prisma.empresa.count({ where }),
@@ -103,6 +152,7 @@ export class PlatformSunatService {
         state: company.estado,
         planCode: company.planCodigo,
         planName: this.plansService.getDefinition(company.planCodigo).name,
+        billing: this.mapBilling(company),
       })),
       meta: {
         page,
@@ -217,7 +267,28 @@ export class PlatformSunatService {
 
   async updateConfig(actor: JwtPayload, id: string, dto: UpdateSunatConfigDto) {
     const companyId = this.parseCompanyId(id);
-    await this.sunatConfigService.update(companyId, dto);
+    const environment =
+      dto.ambiente === SunatAmbiente.PRODUCCION
+        ? BillingEnvironment.PRODUCTION
+        : BillingEnvironment.BETA;
+    await this.billingIntegration.provision(companyId, environment);
+    if (dto.usuarioSol || dto.claveSol || dto.clientId || dto.clientSecret) {
+      await this.billingIntegration.updateCredentials(companyId, environment, {
+        solUsername: dto.usuarioSol,
+        solPassword: dto.claveSol,
+        clientId: dto.clientId,
+        clientSecret: dto.clientSecret,
+        active: dto.activo,
+      });
+    }
+    await this.sunatConfigService.update(companyId, {
+      ambiente: dto.ambiente,
+      igvPorcentaje: dto.igvPorcentaje,
+      activo: false,
+    });
+    if (dto.activo !== undefined) {
+      await this.billingIntegration.setEnabled(companyId, dto.activo);
+    }
     await this.audit(actor, companyId, 'sunat_config_updated');
 
     return this.findCompany(id);
@@ -230,7 +301,19 @@ export class PlatformSunatService {
     file: Express.Multer.File,
   ) {
     const companyId = this.parseCompanyId(id);
-    await this.sunatConfigService.uploadCertificate(companyId, dto, file);
+    const current = await this.prisma.billingIntegration.findUnique({
+      where: { empresaId: companyId },
+    });
+    const environment = current?.environment ?? BillingEnvironment.BETA;
+    if (!current?.tenantId) {
+      await this.billingIntegration.provision(companyId, environment);
+    }
+    await this.billingIntegration.uploadCertificate(
+      companyId,
+      environment,
+      { password: dto.certificatePassword },
+      file,
+    );
     await this.audit(actor, companyId, 'sunat_certificate_uploaded');
 
     return this.findCompany(id);
@@ -238,7 +321,14 @@ export class PlatformSunatService {
 
   async deleteCertificate(actor: JwtPayload, id: string) {
     const companyId = this.parseCompanyId(id);
-    await this.sunatConfigService.deleteCertificate(companyId);
+    const current = await this.prisma.billingIntegration.findUnique({
+      where: { empresaId: companyId },
+    });
+    if (!current) throw new BadRequestException('Empresa no provisionada');
+    await this.billingIntegration.deleteCertificate(
+      companyId,
+      current.environment,
+    );
     await this.audit(actor, companyId, 'sunat_certificate_deleted');
 
     return this.findCompany(id);
@@ -295,6 +385,7 @@ export class PlatformSunatService {
       planCode: company.planCodigo,
       planName: this.plansService.getDefinition(company.planCodigo).name,
       sunat: this.mapSunatConfig(company),
+      billing: this.mapBilling(company),
       readiness,
     };
   }
@@ -341,12 +432,53 @@ export class PlatformSunatService {
     };
   }
 
+  private mapBilling(company: CompanyWithSunat) {
+    const integration = company.billingIntegration;
+    return {
+      enabled: company.billingMicroserviceEnabled,
+      configured: integration?.status === BillingIntegrationStatus.READY,
+      environment: integration?.environment ?? BillingEnvironment.BETA,
+      status: integration?.status ?? BillingIntegrationStatus.PENDING,
+      tenantId: integration?.tenantId ?? null,
+      applicationId: integration?.applicationId ?? null,
+      lastError: integration?.lastError ?? null,
+      lastSyncedAt: integration?.lastSyncedAt?.toISOString() ?? null,
+      apiKeys: {
+        BETA: Boolean(integration?.betaApiKeyEncrypted),
+        PRODUCTION: Boolean(integration?.productionApiKeyEncrypted),
+      },
+      webhooks: {
+        BETA: Boolean(integration?.betaWebhookSecretEncrypted),
+        PRODUCTION: Boolean(integration?.productionWebhookSecretEncrypted),
+      },
+      credentials: {
+        BETA: Boolean(integration?.betaCredentialsConfigured),
+        PRODUCTION: Boolean(integration?.productionCredentialsConfigured),
+      },
+      certificates: {
+        BETA: Boolean(integration?.betaCertificateConfigured),
+        PRODUCTION: Boolean(integration?.productionCertificateConfigured),
+      },
+      establishments: company._count.billingEstablishments,
+      series: company._count.billingSeries,
+    };
+  }
+
   private buildReadiness(
     company: CompanyWithSunat,
-    endpoints: Set<SunatAmbiente>,
+    _endpoints: Set<SunatAmbiente>,
   ) {
-    const config = company.sunatConfig;
-    const ambiente = config?.ambiente ?? SunatAmbiente.BETA;
+    void _endpoints;
+    const integration = company.billingIntegration;
+    const environment = integration?.environment ?? BillingEnvironment.BETA;
+    const credentials =
+      environment === BillingEnvironment.BETA
+        ? integration?.betaCredentialsConfigured
+        : integration?.productionCredentialsConfigured;
+    const certificate =
+      environment === BillingEnvironment.BETA
+        ? integration?.betaCertificateConfigured
+        : integration?.productionCertificateConfigured;
     const checks = [
       {
         key: 'ruc',
@@ -365,33 +497,28 @@ export class PlatformSunatService {
       },
       {
         key: 'active',
-        label: 'Conexion SUNAT activa',
-        ok: Boolean(config?.activo),
+        label: 'Nuvex Billing activo',
+        ok: company.billingMicroserviceEnabled,
       },
       {
-        key: 'solUser',
-        label: 'Usuario SOL',
-        ok: Boolean(config?.usuarioSolEncrypted),
+        key: 'provisioned',
+        label: 'Tenant y aplicacion Billing',
+        ok: integration?.status === BillingIntegrationStatus.READY,
       },
       {
-        key: 'solPassword',
-        label: 'Clave SOL',
-        ok: Boolean(config?.claveSolEncrypted),
+        key: 'credentials',
+        label: `Credenciales ${environment}`,
+        ok: Boolean(credentials),
       },
       {
         key: 'certificate',
-        label: 'Certificado digital',
-        ok: Boolean(config?.certificadoR2Key),
+        label: `Certificado ${environment}`,
+        ok: Boolean(certificate),
       },
       {
-        key: 'certificatePassword',
-        label: 'Contrasena de certificado',
-        ok: Boolean(config?.certificadoPasswordEncrypted),
-      },
-      {
-        key: 'endpoint',
-        label: `Endpoint ${ambiente} activo`,
-        ok: endpoints.has(ambiente),
+        key: 'series',
+        label: 'Series fiscales sincronizadas',
+        ok: company._count.billingSeries > 0,
       },
     ];
 
@@ -423,6 +550,31 @@ export class PlatformSunatService {
       direccion: true,
       estado: true,
       planCodigo: true,
+      billingMicroserviceEnabled: true,
+      billingIntegration: {
+        select: {
+          environment: true,
+          status: true,
+          tenantId: true,
+          applicationId: true,
+          betaApiKeyEncrypted: true,
+          productionApiKeyEncrypted: true,
+          betaWebhookSecretEncrypted: true,
+          productionWebhookSecretEncrypted: true,
+          betaCredentialsConfigured: true,
+          productionCredentialsConfigured: true,
+          betaCertificateConfigured: true,
+          productionCertificateConfigured: true,
+          lastError: true,
+          lastSyncedAt: true,
+        },
+      },
+      _count: {
+        select: {
+          billingEstablishments: true,
+          billingSeries: true,
+        },
+      },
       sunatConfig: {
         select: {
           ambiente: true,

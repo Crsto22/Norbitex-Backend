@@ -13,6 +13,11 @@ import { SunatEmissionModule } from '../sunat-emission/sunat-emission.module';
 import { SunatConfigModule } from '../sunat-config/sunat-config.module';
 import { MailModule } from '../mail/mail.module';
 import { SalesModule } from '../sales/sales.module';
+import { BillingIntegrationModule } from '../billing-integration/billing-integration.module';
+import { PlatformBillingIntegrationService } from './platform-billing-integration.service';
+import { PlatformBillingEmissionService } from './platform-billing-emission.service';
+import { PlatformBillingWebhookController } from './platform-billing-webhook.controller';
+import { PlatformBillingWebhookService } from './platform-billing-webhook.service';
 
 @Module({
   imports: [
@@ -22,13 +27,21 @@ import { SalesModule } from '../sales/sales.module';
     SunatConfigModule,
     MailModule,
     SalesModule,
+    BillingIntegrationModule,
   ],
-  controllers: [PlatformBillingAdminController, CompanyBillingController],
+  controllers: [
+    PlatformBillingAdminController,
+    CompanyBillingController,
+    PlatformBillingWebhookController,
+  ],
   providers: [
     PlatformBillingService,
     PlatformBillingSunatService,
     PlatformAdminGuard,
     SecretsCryptoService,
+    PlatformBillingIntegrationService,
+    PlatformBillingEmissionService,
+    PlatformBillingWebhookService,
   ],
   exports: [PlatformBillingService],
 })

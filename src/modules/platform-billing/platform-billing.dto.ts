@@ -157,3 +157,12 @@ export class RequestPlatformCancellationDto {
   @MaxLength(300)
   reason!: string;
 }
+
+export class CreatePlatformCreditNoteDto {
+  @IsUUID('4') requestId!: string;
+  @Transform(({ value }) => String(value).trim())
+  @IsString()
+  @MinLength(3)
+  @MaxLength(250)
+  reason!: string;
+}

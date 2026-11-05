@@ -11,6 +11,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { SunatConfigModule } from '../sunat-config/sunat-config.module';
 import { PlatformSunatController } from './platform-sunat.controller';
 import { PlatformSunatService } from './platform-sunat.service';
+import { BillingIntegrationModule } from '../billing-integration/billing-integration.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { PlatformSunatService } from './platform-sunat.service';
     PlatformBillingModule,
     NotificationsModule,
     SunatConfigModule,
+    BillingIntegrationModule,
   ],
   controllers: [PlatformAdminController, PlatformSunatController],
   providers: [
