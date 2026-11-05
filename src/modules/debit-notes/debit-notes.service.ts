@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, VentaTipoComprobante } from '@prisma/client';
+import { Prisma, SunatEstado, VentaTipoComprobante } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   scopedCreatorId,
@@ -382,20 +382,57 @@ export class DebitNotesService {
           }
         : {}),
     };
-    const [data, total] = await this.prisma.$transaction([
-      this.prisma.notaDebito.findMany({
-        where,
-        include,
-        orderBy: { createdAt: 'desc' },
-        skip: ((query.page ?? 1) - 1) * (query.limit ?? 12),
-        take: query.limit ?? 12,
-      }),
-      this.prisma.notaDebito.count({ where }),
-    ]);
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 12;
+    const [data, total, grouped, acceptedTotals] =
+      await this.prisma.$transaction([
+        this.prisma.notaDebito.findMany({
+          where,
+          include,
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.prisma.notaDebito.count({ where }),
+        this.prisma.notaDebito.groupBy({
+          by: ['sunatEstado'],
+          where,
+          orderBy: { sunatEstado: 'asc' },
+          _count: { _all: true },
+        }),
+        this.prisma.notaDebito.aggregate({
+          where: { ...where, sunatEstado: SunatEstado.aceptado },
+          _sum: { total: true },
+        }),
+      ]);
+
+    const byStatus = new Map(
+      grouped.map((item) => [
+        item.sunatEstado,
+        (item._count as { _all?: number } | undefined)?._all ?? 0,
+      ]),
+    );
+
     return {
       data: data.map((item) => this.response(item)),
-      total,
-      page: query.page ?? 1,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      summary: {
+        aceptados: byStatus.get(SunatEstado.aceptado) ?? 0,
+        porEnviar:
+          (byStatus.get(SunatEstado.pendiente_envio) ?? 0) +
+          (byStatus.get(SunatEstado.enviando) ?? 0),
+        observados: byStatus.get(SunatEstado.observado) ?? 0,
+        rechazados: byStatus.get(SunatEstado.rechazado) ?? 0,
+        errores:
+          (byStatus.get(SunatEstado.error_transitorio) ?? 0) +
+          (byStatus.get(SunatEstado.error_definitivo) ?? 0),
+        montoAceptado: acceptedTotals._sum.total?.toString() ?? '0',
+      },
     };
   }
 
