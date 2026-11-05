@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import {
@@ -56,7 +57,7 @@ export class BillingDebitNoteService {
     private readonly integration: BillingIntegrationService,
   ) {}
 
-  @Cron('15/10 * * * * *')
+  @Cron('* * * * * *')
   async processOutbox() {
     const jobs = await this.prisma.billingDebitNoteOutbox.findMany({
       where: {
@@ -168,20 +169,87 @@ export class BillingDebitNoteService {
     publicId: string,
     type: 'XML' | 'CDR' | 'PDF_A4' | 'PDF_TICKET',
   ) {
-    const note = await this.prisma.notaDebito.findFirst({
+    const printable = type === 'PDF_A4' || type === 'PDF_TICKET';
+    let note = await this.prisma.notaDebito.findFirst({
       where: { empresaId, publicId },
       select: {
+        id: true,
         billingDocumentId: true,
         billingEnvironment: true,
         billingStatus: true,
       },
     });
-    if (!note?.billingDocumentId)
+    if (!note) throw new NotFoundException('Nota de debito no encontrada');
+
+    if (!printable) {
+      if (!note.billingDocumentId) {
+        throw new NotFoundException('La nota aun no tiene artefactos Billing');
+      }
+      if (!accepted(note.billingStatus)) {
+        throw new BadRequestException(
+          'Los archivos estaran disponibles cuando SUNAT acepte la nota',
+        );
+      }
+      return this.downloadArtifact(empresaId, note, type);
+    }
+
+    if (!note.billingDocumentId) {
+      const pendingJob = await this.prisma.billingDebitNoteOutbox.findFirst({
+        where: {
+          notaDebitoId: note.id,
+          status: { in: ['PENDING', 'RETRY'] },
+          nextAttemptAt: { lte: new Date() },
+        },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      if (pendingJob) await this.process(pendingJob.id);
+    }
+
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      note = await this.prisma.notaDebito.findFirst({
+        where: { empresaId, publicId },
+        select: {
+          id: true,
+          billingDocumentId: true,
+          billingEnvironment: true,
+          billingStatus: true,
+        },
+      });
+      if (!note) throw new NotFoundException('Nota de debito no encontrada');
+      if (note.billingStatus === 'FAILED') {
+        throw new BadRequestException(
+          'No se pudo generar la representacion impresa de la nota',
+        );
+      }
+      if (note.billingDocumentId) {
+        try {
+          return await this.downloadArtifact(empresaId, note, type);
+        } catch (error) {
+          if (!(error instanceof BillingApiError) || error.status !== 404) {
+            throw error;
+          }
+        }
+      }
+      await delay(350);
+    }
+
+    throw new ServiceUnavailableException(
+      'El PDF se esta preparando. Intentalo nuevamente en unos segundos',
+    );
+  }
+
+  private async downloadArtifact(
+    empresaId: bigint,
+    note: {
+      billingDocumentId: string | null;
+      billingEnvironment: BillingEnvironment;
+    },
+    type: 'XML' | 'CDR' | 'PDF_A4' | 'PDF_TICKET',
+  ) {
+    if (!note.billingDocumentId) {
       throw new NotFoundException('La nota aun no tiene artefactos Billing');
-    if (!accepted(note.billingStatus)) {
-      throw new BadRequestException(
-        'Los archivos estaran disponibles cuando SUNAT acepte la nota',
-      );
     }
     const apiKey = await this.integration.apiKey(
       empresaId,
@@ -524,4 +592,8 @@ function safeMessage(error: unknown) {
     0,
     1000,
   );
+}
+
+function delay(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
