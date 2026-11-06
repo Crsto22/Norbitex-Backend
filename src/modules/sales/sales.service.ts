@@ -1463,10 +1463,16 @@ export class SalesService {
       };
     };
 
+    const modeWhere: Prisma.VentaWhereInput =
+      query.mode === 'pickup'
+        ? { recojoPosterior: true, envio: null }
+        : query.mode === 'courier'
+          ? { envio: { isNot: null } }
+          : {
+              OR: [{ recojoPosterior: true }, { envio: { isNot: null } }],
+            };
     const commonAnd: Prisma.VentaWhereInput[] = [
-      {
-        OR: [{ recojoPosterior: true }, { envio: { isNot: null } }],
-      },
+      modeWhere,
       ...(query.courier ? [{ envio: { is: { agencia: query.courier } } }] : []),
     ];
 
@@ -1520,6 +1526,8 @@ export class SalesService {
       enTransito,
       entregados,
       incidencias,
+      recojoParciales,
+      productosRecojo,
     ] = await this.prisma.$transaction([
       this.prisma.venta.findMany({
         where,
@@ -1534,6 +1542,19 @@ export class SalesService {
       this.prisma.venta.count({ where: summaryWhere('en_transito') }),
       this.prisma.venta.count({ where: summaryWhere('entregada') }),
       this.prisma.venta.count({ where: summaryWhere('incidencia') }),
+      this.prisma.venta.count({
+        where: {
+          ...commonWhere,
+          AND: [
+            ...commonAnd,
+            { envio: null, estadoEntrega: VentaEntregaEstado.parcial },
+          ],
+        },
+      }),
+      this.prisma.ventaDetalle.aggregate({
+        where: { venta: { is: summaryWhere('pendiente') } },
+        _sum: { cantidad: true, cantidadEntregada: true },
+      }),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
@@ -1546,6 +1567,12 @@ export class SalesService {
         enTransito,
         entregados,
         incidencias,
+        recojoParciales,
+        productosPendientes: Math.max(
+          0,
+          (productosRecojo._sum.cantidad ?? 0) -
+            (productosRecojo._sum.cantidadEntregada ?? 0),
+        ),
       },
     };
   }

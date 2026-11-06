@@ -12,6 +12,11 @@ import { HistoryDateQueryDto } from '../../../common/dto/history-date-query.dto'
 export class FindDeliveriesQueryDto extends HistoryDateQueryDto {
   @IsOptional()
   @Type(() => String)
+  @IsIn(['pickup', 'courier'])
+  mode?: 'pickup' | 'courier';
+
+  @IsOptional()
+  @Type(() => String)
   @IsIn([
     'pendiente',
     'por_preparar',
