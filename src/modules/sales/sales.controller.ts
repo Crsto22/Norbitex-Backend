@@ -50,6 +50,11 @@ import {
   UpdateSerieComprobanteDto,
 } from './dto/serie-comprobante.dto';
 import { ShippingLinksService } from './shipping-links.service';
+import { ShippingLabelsService } from './shipping-labels.service';
+import {
+  PrintShippingLabelBatchDto,
+  PrintShippingLabelDto,
+} from './dto/shipping-label.dto';
 
 @UseGuards(ModuleAccessGuard, SaleScopeGuard)
 @Controller('sales')
@@ -63,6 +68,7 @@ export class SalesController {
     private readonly billingEmissionService: BillingEmissionService,
     private readonly pdfConcurrency: PdfConcurrencyService,
     private readonly shippingLinksService: ShippingLinksService,
+    private readonly shippingLabelsService: ShippingLabelsService,
   ) {}
 
   // ── Products (static route BEFORE :publicId) ────────────────────────
@@ -179,6 +185,46 @@ export class SalesController {
       getCommercialScope(user),
       query,
     );
+  }
+
+  @Post('shipping-labels/batch/pdf')
+  @RequireModule('entregas-pendientes')
+  @Throttle(rateLimits.pdf)
+  async printShippingLabelBatch(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: PrintShippingLabelBatchDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.pdfConcurrency.run(() =>
+      this.shippingLabelsService.batch(
+        this.getEmpresaId(user),
+        getCommercialScope(user),
+        this.getUserId(user),
+        dto,
+      ),
+    );
+    return this.sendPdf(response, file);
+  }
+
+  @Post(':publicId/shipping-labels/pdf')
+  @RequireModule('entregas-pendientes')
+  @Throttle(rateLimits.pdf)
+  async printShippingLabels(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: PrintShippingLabelDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.pdfConcurrency.run(() =>
+      this.shippingLabelsService.individual(
+        this.getEmpresaId(user),
+        getCommercialScope(user),
+        this.getUserId(user),
+        publicId,
+        dto,
+      ),
+    );
+    return this.sendPdf(response, file);
   }
 
   @Get(':publicId/pdf')
@@ -550,7 +596,7 @@ export class SalesController {
       throw new UnauthorizedException('Usuario no autenticado');
     }
 
-    return user.sub;
+    return BigInt(user.sub);
   }
 
   private async sendSignedArtifact(
@@ -586,5 +632,17 @@ export class SalesController {
       'Content-Length': file.buffer.length,
     });
     response.send(file.buffer);
+  }
+
+  private sendPdf(
+    response: Response,
+    file: { buffer: Buffer; filename: string },
+  ) {
+    response.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${file.filename}"`,
+      'Content-Length': file.buffer.length,
+    });
+    return new StreamableFile(file.buffer);
   }
 }

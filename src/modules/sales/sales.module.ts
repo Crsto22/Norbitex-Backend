@@ -11,6 +11,7 @@ import { BillingIntegrationModule } from '../billing-integration/billing-integra
 import { PublicShippingLinksController } from './public-shipping-links.controller';
 import { ShippingLinksService } from './shipping-links.service';
 import { CourierAgenciesModule } from '../courier-agencies/courier-agencies.module';
+import { ShippingLabelsService } from './shipping-labels.service';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { CourierAgenciesModule } from '../courier-agencies/courier-agencies.modu
     SalesPdfService,
     SaleScopeGuard,
     ShippingLinksService,
+    ShippingLabelsService,
   ],
   exports: [SalesService, SalesPdfService],
 })

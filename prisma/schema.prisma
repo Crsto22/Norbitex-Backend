@@ -1191,6 +1191,7 @@ model Usuario {
   ventaEnvioHistorial                VentaEnvioHistorial[]                @relation("VentaEnvioHistorialUsuario")
   ventaEnvioIncidenciasCreadas       VentaEnvioIncidencia[]               @relation("VentaEnvioIncidenciaCreadaPor")
   ventaEnvioIncidenciasResueltas     VentaEnvioIncidencia[]               @relation("VentaEnvioIncidenciaResueltaPor")
+  ventaEnvioEtiquetasImpresas        VentaEnvioEtiquetaImpresion[]         @relation("VentaEnvioEtiquetaImpresionUsuario")
   notasCreditoCreadas                NotaCredito[]
   notasDebitoCreadas                 NotaDebito[]
   guiasRemisionCreadas               GuiaRemision[]
@@ -2588,6 +2589,7 @@ model VentaEnvio {
   venta          Venta              @relation(fields: [ventaId], references: [id], onDelete: Cascade)
   historial      VentaEnvioHistorial[]
   incidencias    VentaEnvioIncidencia[]
+  etiquetasImpresas VentaEnvioEtiquetaImpresion[]
 
   @@index([estado])
   @@index([estadoLogistico])
@@ -2633,6 +2635,22 @@ model VentaEnvioIncidencia {
   @@index([creadaPorId])
   @@index([resueltaPorId])
   @@map("venta_envio_incidencia")
+}
+
+model VentaEnvioEtiquetaImpresion {
+  id             BigInt      @id @default(autoincrement())
+  publicId       String      @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  ventaEnvioId   BigInt      @map("venta_envio_id")
+  cantidadBultos Int         @map("cantidad_bultos")
+  snapshot       Json
+  impresoPorId   BigInt?     @map("impreso_por_id")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  ventaEnvio     VentaEnvio  @relation(fields: [ventaEnvioId], references: [id], onDelete: Cascade)
+  impresoPor     Usuario?    @relation("VentaEnvioEtiquetaImpresionUsuario", fields: [impresoPorId], references: [id], onDelete: SetNull)
+
+  @@index([ventaEnvioId, createdAt])
+  @@index([impresoPorId])
+  @@map("venta_envio_etiqueta_impresion")
 }
 
 model AgenciaCourier {
