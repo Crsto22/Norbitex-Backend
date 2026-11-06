@@ -11,6 +11,8 @@ import {
   VentaEnvioAgencia,
   VentaEnvioEstado,
   VentaEnvioEstadoLogistico,
+  VentaEntregaEstado,
+  VentaEntregaTipo,
   VentaEstado,
 } from '@prisma/client';
 import {
@@ -63,7 +65,13 @@ export class ShippingLinksService {
           ? { creadoPorId: scopedCreatorId(scope)! }
           : {}),
       },
-      select: { id: true, estado: true, envio: true },
+      select: {
+        id: true,
+        estado: true,
+        estadoEntrega: true,
+        envio: true,
+        entregas: { select: { tipo: true } },
+      },
     });
 
     if (!sale) throw new NotFoundException('Venta no encontrada');
@@ -74,6 +82,23 @@ export class ShippingLinksService {
     }
 
     if (sale.envio && !regenerate) return this.toInternalResponse(sale.envio);
+
+    const hasRecordedDelivery = sale.entregas.length > 0;
+    const hasCourierDispatch = sale.entregas.some(
+      (delivery) => delivery.tipo === VentaEntregaTipo.COURIER,
+    );
+    if (
+      (!sale.envio &&
+        hasRecordedDelivery &&
+        sale.estadoEntrega === VentaEntregaEstado.entregada) ||
+      (regenerate && hasCourierDispatch)
+    ) {
+      throw new ConflictException(
+        hasCourierDispatch
+          ? 'No se puede regenerar el enlace porque ya existen despachos al courier'
+          : 'No se puede generar un envio para una venta ya entregada',
+      );
+    }
 
     const codigoPublico = await this.uniquePublicCode();
     const envio = sale.envio
@@ -101,8 +126,23 @@ export class ShippingLinksService {
             entregadoAt: null,
           },
         })
-      : await this.prisma.ventaEnvio.create({
-          data: { ventaId: sale.id, codigoPublico },
+      : await this.prisma.$transaction(async (tx) => {
+          // Las ventas inmediatas se crean como entregadas, pero sin una
+          // VentaEntrega real. Al convertirlas en envio, sus productos deben
+          // volver a estar pendientes para poder despacharlos al courier.
+          if (!hasRecordedDelivery) {
+            await tx.ventaDetalle.updateMany({
+              where: { ventaId: sale.id },
+              data: { cantidadEntregada: 0 },
+            });
+            await tx.venta.update({
+              where: { id: sale.id },
+              data: { estadoEntrega: VentaEntregaEstado.pendiente },
+            });
+          }
+          return tx.ventaEnvio.create({
+            data: { ventaId: sale.id, codigoPublico },
+          });
         });
 
     return this.toInternalResponse(envio);

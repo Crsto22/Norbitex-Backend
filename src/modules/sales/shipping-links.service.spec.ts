@@ -1,9 +1,11 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call */
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
   VentaEnvioAgencia,
   VentaEnvioEstado,
   VentaEnvioEstadoLogistico,
+  VentaEntregaEstado,
+  VentaEntregaTipo,
   VentaEstado,
   VisibilidadOperaciones,
 } from '@prisma/client';
@@ -12,7 +14,9 @@ import { ShippingLinksService } from './shipping-links.service';
 
 describe('ShippingLinksService', () => {
   const prisma = {
-    venta: { findFirst: jest.fn() },
+    $transaction: jest.fn(),
+    venta: { findFirst: jest.fn(), update: jest.fn() },
+    ventaDetalle: { updateMany: jest.fn() },
     agenciaCourier: { findUnique: jest.fn() },
     ventaEnvio: {
       findUnique: jest.fn(),
@@ -62,7 +66,10 @@ describe('ShippingLinksService', () => {
     updatedAt: new Date(),
   };
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.$transaction.mockImplementation((callback) => callback(prisma));
+  });
 
   it('reutiliza el enlace existente mientras no se regenere', async () => {
     prisma.venta.findFirst.mockResolvedValue({
@@ -82,7 +89,9 @@ describe('ShippingLinksService', () => {
     prisma.venta.findFirst.mockResolvedValue({
       id: 20n,
       estado: VentaEstado.completada,
+      estadoEntrega: VentaEntregaEstado.entregada,
       envio: { ...pendingShipping, estado: VentaEnvioEstado.recibido },
+      entregas: [],
     });
     prisma.ventaEnvio.findUnique.mockResolvedValue(null);
     prisma.ventaEnvio.update.mockImplementation(({ data }) => ({
@@ -103,6 +112,43 @@ describe('ShippingLinksService', () => {
         }),
       }),
     );
+  });
+
+  it('convierte una venta inmediata sin entrega real en envio pendiente', async () => {
+    prisma.venta.findFirst.mockResolvedValue({
+      id: 20n,
+      estado: VentaEstado.completada,
+      estadoEntrega: VentaEntregaEstado.entregada,
+      envio: null,
+      entregas: [],
+    });
+    prisma.ventaEnvio.findUnique.mockResolvedValue(null);
+    prisma.ventaEnvio.create.mockResolvedValue(pendingShipping);
+
+    await service.generate(1n, scope, 'sale-public-id');
+
+    expect(prisma.ventaDetalle.updateMany).toHaveBeenCalledWith({
+      where: { ventaId: 20n },
+      data: { cantidadEntregada: 0 },
+    });
+    expect(prisma.venta.update).toHaveBeenCalledWith({
+      where: { id: 20n },
+      data: { estadoEntrega: VentaEntregaEstado.pendiente },
+    });
+  });
+
+  it('no regenera un enlace despues de un despacho al courier', async () => {
+    prisma.venta.findFirst.mockResolvedValue({
+      id: 20n,
+      estado: VentaEstado.completada,
+      estadoEntrega: VentaEntregaEstado.parcial,
+      envio: pendingShipping,
+      entregas: [{ tipo: VentaEntregaTipo.COURIER }],
+    });
+
+    await expect(
+      service.generate(1n, scope, 'sale-public-id', true),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('guarda los datos publicos una sola vez', async () => {
