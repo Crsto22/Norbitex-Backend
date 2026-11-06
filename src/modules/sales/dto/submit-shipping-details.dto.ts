@@ -1,4 +1,11 @@
-import { IsEnum, IsString, Length, Matches } from 'class-validator';
+import {
+  IsEnum,
+  IsString,
+  Length,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { VentaEnvioAgencia } from '@prisma/client';
 
 export class SubmitShippingDetailsDto {
@@ -18,4 +25,18 @@ export class SubmitShippingDetailsDto {
 
   @IsEnum(VentaEnvioAgencia)
   agencia: VentaEnvioAgencia;
+
+  @IsString()
+  @Length(1, 100)
+  agenciaExternalId: string;
+}
+
+export class FindPublicShippingAgenciesDto {
+  @IsEnum(VentaEnvioAgencia)
+  agencia: VentaEnvioAgencia;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  q: string;
 }

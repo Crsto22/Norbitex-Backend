@@ -12,6 +12,7 @@ import { ShippingLinksService } from './shipping-links.service';
 describe('ShippingLinksService', () => {
   const prisma = {
     venta: { findFirst: jest.fn() },
+    agenciaCourier: { findUnique: jest.fn() },
     ventaEnvio: {
       findUnique: jest.fn(),
       create: jest.fn(),
@@ -19,7 +20,11 @@ describe('ShippingLinksService', () => {
       updateMany: jest.fn(),
     },
   };
-  const service = new ShippingLinksService(prisma as unknown as PrismaService);
+  const courierAgencies = { search: jest.fn() };
+  const service = new ShippingLinksService(
+    prisma as unknown as PrismaService,
+    courierAgencies as never,
+  );
   const scope = {
     userId: 7n,
     branchId: null,
@@ -35,6 +40,15 @@ describe('ShippingLinksService', () => {
     dni: null,
     celular: null,
     agencia: null,
+    agenciaExternalId: null,
+    agenciaNombre: null,
+    agenciaDireccion: null,
+    agenciaDepartamento: null,
+    agenciaProvincia: null,
+    agenciaDistrito: null,
+    agenciaUbigeo: null,
+    agenciaLatitud: null,
+    agenciaLongitud: null,
     recibidoAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -91,6 +105,18 @@ describe('ShippingLinksService', () => {
         empresa: { nombreComercial: 'Tienda', logoUrl: null },
       },
     });
+    prisma.agenciaCourier.findUnique.mockResolvedValue({
+      externalId: '392',
+      activo: true,
+      nombre: 'Shalom Malvinas',
+      direccion: 'Av. Principal 123',
+      departamento: 'LIMA',
+      provincia: 'LIMA',
+      distrito: 'LIMA',
+      ubigeo: '150101',
+      latitud: -12.04,
+      longitud: -77.04,
+    });
     prisma.ventaEnvio.updateMany.mockResolvedValue({ count: 1 });
 
     await expect(
@@ -99,11 +125,16 @@ describe('ShippingLinksService', () => {
         dni: '12345678',
         celular: '987654321',
         agencia: VentaEnvioAgencia.SHALOM,
+        agenciaExternalId: '392',
       }),
     ).resolves.toEqual({ estado: VentaEnvioEstado.recibido });
     expect(prisma.ventaEnvio.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ nombreCompleto: 'Maria Lopez' }),
+        data: expect.objectContaining({
+          nombreCompleto: 'Maria Lopez',
+          agenciaExternalId: '392',
+          agenciaNombre: 'Shalom Malvinas',
+        }),
       }),
     );
   });
@@ -125,6 +156,7 @@ describe('ShippingLinksService', () => {
         dni: '12345678',
         celular: '987654321',
         agencia: VentaEnvioAgencia.OLVA,
+        agenciaExternalId: '1',
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
@@ -142,5 +174,25 @@ describe('ShippingLinksService', () => {
     await expect(service.getPublic('Abc234Def567')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('solo busca agencias con un enlace vigente y pendiente', async () => {
+    prisma.ventaEnvio.findUnique.mockResolvedValue({
+      ...pendingShipping,
+      venta: {
+        estado: VentaEstado.completada,
+        correlativo: 'NV01-000001',
+        empresa: { nombreComercial: 'Tienda', logoUrl: null },
+      },
+    });
+    courierAgencies.search.mockResolvedValue([{ externalId: '392' }]);
+
+    await expect(
+      service.findPublicAgencies('Abc234Def567', {
+        agencia: VentaEnvioAgencia.SHALOM,
+        q: 'lima',
+      }),
+    ).resolves.toEqual([{ externalId: '392' }]);
+    expect(courierAgencies.search).toHaveBeenCalledWith('SHALOM', 'lima');
   });
 });

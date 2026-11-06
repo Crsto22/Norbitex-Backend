@@ -332,6 +332,17 @@ enum VentaEnvioAgencia {
   OLVA
 }
 
+enum AgenciaCourierProveedor {
+  SHALOM
+  OLVA
+}
+
+enum AgenciaCourierSincronizacionEstado {
+  procesando
+  completada
+  fallida
+}
+
 enum VentaDescuentoTipo {
   porcentaje
   monto
@@ -2536,6 +2547,15 @@ model VentaEnvio {
   dni            String?            @db.VarChar(8)
   celular        String?            @db.VarChar(9)
   agencia        VentaEnvioAgencia?
+  agenciaExternalId String?         @map("agencia_external_id") @db.VarChar(100)
+  agenciaNombre  String?            @map("agencia_nombre") @db.VarChar(300)
+  agenciaDireccion String?          @map("agencia_direccion") @db.Text
+  agenciaDepartamento String?       @map("agencia_departamento") @db.VarChar(100)
+  agenciaProvincia String?          @map("agencia_provincia") @db.VarChar(100)
+  agenciaDistrito String?           @map("agencia_distrito") @db.VarChar(100)
+  agenciaUbigeo  String?            @map("agencia_ubigeo") @db.VarChar(12)
+  agenciaLatitud Float?             @map("agencia_latitud")
+  agenciaLongitud Float?            @map("agencia_longitud")
   recibidoAt     DateTime?          @map("recibido_at") @db.Timestamptz(6)
   createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -2544,6 +2564,54 @@ model VentaEnvio {
   @@index([estado])
   @@index([createdAt])
   @@map("venta_envio")
+}
+
+model AgenciaCourier {
+  id              BigInt                   @id @default(autoincrement())
+  courier         AgenciaCourierProveedor
+  externalId      String                   @map("external_id") @db.VarChar(100)
+  nombre          String                   @db.VarChar(300)
+  tipoSede        String?                  @map("tipo_sede") @db.VarChar(100)
+  direccion       String?                  @db.Text
+  referencia      String?                  @db.Text
+  telefono        String?                  @db.VarChar(100)
+  departamento    String?                  @db.VarChar(100)
+  provincia       String?                  @db.VarChar(100)
+  distrito        String?                  @db.VarChar(100)
+  ubigeo          String?                  @db.VarChar(12)
+  latitud         Float?
+  longitud        Float?
+  horario         Json?
+  servicios       Json?
+  activo          Boolean                  @default(true)
+  fuenteActualizadaAt DateTime?            @map("fuente_actualizada_at") @db.Timestamptz(6)
+  sincronizadoAt  DateTime                 @default(now()) @map("sincronizado_at") @db.Timestamptz(6)
+  rawData         Json                     @map("raw_data")
+  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([courier, externalId])
+  @@index([courier, activo])
+  @@index([courier, ubigeo])
+  @@index([courier, departamento, provincia, distrito])
+  @@index([nombre])
+  @@map("agencia_courier")
+}
+
+model AgenciaCourierSincronizacion {
+  id               BigInt                              @id @default(autoincrement())
+  courier          AgenciaCourierProveedor
+  estado           AgenciaCourierSincronizacionEstado  @default(procesando)
+  iniciadaAt       DateTime                            @default(now()) @map("iniciada_at") @db.Timestamptz(6)
+  finalizadaAt     DateTime?                           @map("finalizada_at") @db.Timestamptz(6)
+  totalRecibidas   Int                                 @default(0) @map("total_recibidas")
+  creadas          Int                                 @default(0)
+  actualizadas     Int                                 @default(0)
+  desactivadas     Int                                 @default(0)
+  error            String?                             @db.Text
+
+  @@index([courier, iniciadaAt])
+  @@map("agencia_courier_sincronizacion")
 }
 
 model NotaCredito {

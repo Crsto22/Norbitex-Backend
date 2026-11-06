@@ -4,13 +4,23 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomInt } from 'node:crypto';
-import { Prisma, VentaEnvioEstado, VentaEstado } from '@prisma/client';
+import {
+  AgenciaCourierProveedor,
+  Prisma,
+  VentaEnvioAgencia,
+  VentaEnvioEstado,
+  VentaEstado,
+} from '@prisma/client';
 import {
   scopedCreatorId,
   type CommercialScope,
 } from '../../common/commercial-access';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SubmitShippingDetailsDto } from './dto/submit-shipping-details.dto';
+import { CourierAgenciesService } from '../courier-agencies/courier-agencies.service';
+import {
+  FindPublicShippingAgenciesDto,
+  SubmitShippingDetailsDto,
+} from './dto/submit-shipping-details.dto';
 
 const publicCodeAlphabet =
   '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -31,7 +41,10 @@ type PublicShippingLink = Prisma.VentaEnvioGetPayload<{
 
 @Injectable()
 export class ShippingLinksService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly courierAgencies: CourierAgenciesService,
+  ) {}
 
   async generate(
     empresaId: bigint,
@@ -71,6 +84,15 @@ export class ShippingLinksService {
             dni: null,
             celular: null,
             agencia: null,
+            agenciaExternalId: null,
+            agenciaNombre: null,
+            agenciaDireccion: null,
+            agenciaDepartamento: null,
+            agenciaProvincia: null,
+            agenciaDistrito: null,
+            agenciaUbigeo: null,
+            agenciaLatitud: null,
+            agenciaLongitud: null,
             recibidoAt: null,
           },
         })
@@ -91,6 +113,18 @@ export class ShippingLinksService {
     if (envio.estado === VentaEnvioEstado.recibido) {
       throw new ConflictException('Los datos de envio ya fueron recibidos');
     }
+    const courier = this.toCourierProvider(dto.agencia);
+    const agency = await this.prisma.agenciaCourier.findUnique({
+      where: {
+        courier_externalId: {
+          courier,
+          externalId: dto.agenciaExternalId.trim(),
+        },
+      },
+    });
+    if (!agency || !agency.activo) {
+      throw new NotFoundException('La agencia seleccionada no esta disponible');
+    }
 
     const result = await this.prisma.ventaEnvio.updateMany({
       where: {
@@ -103,6 +137,15 @@ export class ShippingLinksService {
         dni: dto.dni,
         celular: dto.celular,
         agencia: dto.agencia,
+        agenciaExternalId: agency.externalId,
+        agenciaNombre: agency.nombre,
+        agenciaDireccion: agency.direccion,
+        agenciaDepartamento: agency.departamento,
+        agenciaProvincia: agency.provincia,
+        agenciaDistrito: agency.distrito,
+        agenciaUbigeo: agency.ubigeo,
+        agenciaLatitud: agency.latitud,
+        agenciaLongitud: agency.longitud,
         recibidoAt: new Date(),
       },
     });
@@ -112,6 +155,20 @@ export class ShippingLinksService {
     }
 
     return { estado: VentaEnvioEstado.recibido };
+  }
+
+  async findPublicAgencies(
+    code: string,
+    dto: FindPublicShippingAgenciesDto,
+  ) {
+    const envio = await this.findAvailablePublicLink(code);
+    if (envio.estado === VentaEnvioEstado.recibido) {
+      throw new ConflictException('Los datos de envio ya fueron recibidos');
+    }
+    return this.courierAgencies.search(
+      this.toCourierProvider(dto.agencia),
+      dto.q,
+    );
   }
 
   private async findAvailablePublicLink(code: string) {
@@ -154,6 +211,15 @@ export class ShippingLinksService {
     dni: string | null;
     celular: string | null;
     agencia: 'SHALOM' | 'OLVA' | null;
+    agenciaExternalId: string | null;
+    agenciaNombre: string | null;
+    agenciaDireccion: string | null;
+    agenciaDepartamento: string | null;
+    agenciaProvincia: string | null;
+    agenciaDistrito: string | null;
+    agenciaUbigeo: string | null;
+    agenciaLatitud: number | null;
+    agenciaLongitud: number | null;
     recibidoAt: Date | null;
   }) {
     return {
@@ -163,6 +229,15 @@ export class ShippingLinksService {
       dni: envio.dni,
       celular: envio.celular,
       agencia: envio.agencia,
+      agenciaExternalId: envio.agenciaExternalId,
+      agenciaNombre: envio.agenciaNombre,
+      agenciaDireccion: envio.agenciaDireccion,
+      agenciaDepartamento: envio.agenciaDepartamento,
+      agenciaProvincia: envio.agenciaProvincia,
+      agenciaDistrito: envio.agenciaDistrito,
+      agenciaUbigeo: envio.agenciaUbigeo,
+      agenciaLatitud: envio.agenciaLatitud,
+      agenciaLongitud: envio.agenciaLongitud,
       recibidoAt: envio.recibidoAt?.toISOString() ?? null,
     };
   }
@@ -173,5 +248,11 @@ export class ShippingLinksService {
       venta: { correlativo: envio.venta.correlativo },
       negocio: envio.venta.empresa,
     };
+  }
+
+  private toCourierProvider(agency: VentaEnvioAgencia) {
+    return agency === VentaEnvioAgencia.SHALOM
+      ? AgenciaCourierProveedor.SHALOM
+      : AgenciaCourierProveedor.OLVA;
   }
 }

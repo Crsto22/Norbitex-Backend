@@ -47,6 +47,7 @@ import { WorkerAuthModule } from './modules/worker-auth/worker-auth.module';
 import { WorkerModule } from './modules/worker/worker.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { StockModule } from './modules/stock/stock.module';
+import { CourierAgenciesModule } from './modules/courier-agencies/courier-agencies.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { validateEnvironment } from './config/environment';
 
@@ -112,6 +113,7 @@ import { validateEnvironment } from './config/environment';
     WorkerModule,
     NotificationsModule,
     StockModule,
+    CourierAgenciesModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

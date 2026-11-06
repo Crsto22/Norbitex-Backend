@@ -10,6 +10,7 @@ import { StockModule } from '../stock/stock.module';
 import { BillingIntegrationModule } from '../billing-integration/billing-integration.module';
 import { PublicShippingLinksController } from './public-shipping-links.controller';
 import { ShippingLinksService } from './shipping-links.service';
+import { CourierAgenciesModule } from '../courier-agencies/courier-agencies.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ShippingLinksService } from './shipping-links.service';
     SunatEmissionModule,
     StockModule,
     BillingIntegrationModule,
+    CourierAgenciesModule,
   ],
   controllers: [SalesController, PublicShippingLinksController],
   providers: [
