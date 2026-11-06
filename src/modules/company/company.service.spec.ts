@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocalPdfLogoStorageService } from '../storage/local-pdf-logo-storage.service';
 import { R2StorageService } from '../storage/r2-storage.service';
+import { BillingIntegrationService } from '../billing-integration/billing-integration.service';
 import { CompanyService } from './company.service';
 
 describe('CompanyService', () => {
@@ -44,6 +45,7 @@ describe('CompanyService', () => {
       prisma as unknown as PrismaService,
       {} as R2StorageService,
       {} as LocalPdfLogoStorageService,
+      {} as BillingIntegrationService,
     );
 
     return { service, prisma, tx };
@@ -97,5 +99,44 @@ describe('CompanyService', () => {
       hasAnyActiveBranch: true,
       requiresBranch: false,
     });
+  });
+
+  it('syncs a newly uploaded company logo with Billing', async () => {
+    const prisma = {
+      empresa: {
+        findUnique: jest.fn().mockResolvedValue({ logoPdfUrl: null }),
+        update: jest.fn().mockResolvedValue({
+          ...updatedCompany,
+          logoUrl: 'https://cdn.example/logo.webp',
+          logoPdfUrl: '/logos/logo.webp',
+        }),
+      },
+    };
+    const r2 = {
+      uploadCompanyLogo: jest
+        .fn()
+        .mockResolvedValue({ urlWebp: 'https://cdn.example/logo.webp' }),
+    };
+    const localPdfLogo = {
+      saveCompanyLogo: jest.fn().mockResolvedValue({ url: '/logos/logo.webp' }),
+    };
+    const billing = { syncCompanyLogo: jest.fn().mockResolvedValue({}) };
+    const service = new CompanyService(
+      prisma as unknown as PrismaService,
+      r2 as unknown as R2StorageService,
+      localPdfLogo as unknown as LocalPdfLogoStorageService,
+      billing as unknown as BillingIntegrationService,
+    );
+
+    await service.uploadLogo(1n, {
+      mimetype: 'image/png',
+      size: 10,
+      buffer: Buffer.from('logo'),
+    } as Express.Multer.File);
+
+    expect(billing.syncCompanyLogo).toHaveBeenCalledWith(
+      1n,
+      'https://cdn.example/logo.webp',
+    );
   });
 });

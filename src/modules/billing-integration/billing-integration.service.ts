@@ -126,6 +126,18 @@ export class BillingIntegrationService {
     return { status: 'SYNCED' as const };
   }
 
+  async syncCompanyLogo(empresaId: bigint, logoUrl: string | null) {
+    const integration = await this.prisma.billingIntegration.findUnique({
+      where: { empresaId },
+      select: { tenantId: true },
+    });
+    if (!integration?.tenantId || !logoUrl) {
+      return { status: 'SKIPPED' as const };
+    }
+    await this.syncLogo(integration.tenantId, logoUrl);
+    return { status: 'SYNCED' as const };
+  }
+
   async provision(empresaId: bigint, environment: BillingEnvironment) {
     const company = await this.companyForProvisioning(empresaId);
     if (!company.ruc || !/^\d{11}$/.test(company.ruc)) {

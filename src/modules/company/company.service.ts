@@ -7,6 +7,7 @@ import { Prisma, SucursalTipo } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocalPdfLogoStorageService } from '../storage/local-pdf-logo-storage.service';
 import { R2StorageService } from '../storage/r2-storage.service';
+import { BillingIntegrationService } from '../billing-integration/billing-integration.service';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class CompanyService {
     private readonly prisma: PrismaService,
     private readonly r2StorageService: R2StorageService,
     private readonly localPdfLogoStorageService: LocalPdfLogoStorageService,
+    private readonly billingIntegration: BillingIntegrationService,
   ) {}
 
   async findOne(empresaId: bigint) {
@@ -263,6 +265,8 @@ export class CompanyService {
         updatedAt: true,
       },
     });
+
+    await this.billingIntegration.syncCompanyLogo(empresaId, updated.logoUrl);
 
     return {
       id: updated.id.toString(),
