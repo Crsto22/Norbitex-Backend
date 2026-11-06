@@ -1,14 +1,41 @@
 import { IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsInt, Max, Min } from 'class-validator';
-import { SunatEstado, VentaEstado, VentaTipoComprobante } from '@prisma/client';
+import {
+  SunatEstado,
+  VentaEnvioAgencia,
+  VentaEstado,
+  VentaTipoComprobante,
+} from '@prisma/client';
 import { HistoryDateQueryDto } from '../../../common/dto/history-date-query.dto';
 
-export class FindDeliveriesQueryDto {
+export class FindDeliveriesQueryDto extends HistoryDateQueryDto {
   @IsOptional()
   @Type(() => String)
-  @IsIn(['pendiente', 'entregada'])
-  estado?: 'pendiente' | 'entregada';
+  @IsIn([
+    'pendiente',
+    'por_preparar',
+    'por_despachar',
+    'en_transito',
+    'entregada',
+    'incidencia',
+  ])
+  estado?:
+    | 'pendiente'
+    | 'por_preparar'
+    | 'por_despachar'
+    | 'en_transito'
+    | 'entregada'
+    | 'incidencia';
+
+  @IsOptional()
+  @Type(() => String)
+  @IsEnum(VentaEnvioAgencia)
+  courier?: VentaEnvioAgencia;
+
+  @IsOptional()
+  @IsString()
+  sucursalId?: string;
 
   @IsOptional()
   @Type(() => Number)

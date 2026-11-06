@@ -31,6 +31,12 @@ import { CreateSaleDto } from './dto/create-sale.dto';
 import { ConvertSaleDto } from './dto/convert-sale.dto';
 import { DeliverSaleDto } from './dto/deliver-sale.dto';
 import {
+  CreateShippingIncidentDto,
+  DispatchToCourierDto,
+  ResolveShippingIncidentDto,
+  UpdateShippingStatusDto,
+} from './dto/delivery-logistics.dto';
+import {
   FindDeliveriesQueryDto,
   FindComprobantesQueryDto,
   FindSalesQueryDto,
@@ -448,6 +454,68 @@ export class SalesController {
       this.getEmpresaId(user),
       getCommercialScope(user),
       publicId,
+      dto,
+    );
+  }
+
+  @Post(':publicId/dispatch-to-courier')
+  @RequireModule('entregas-pendientes')
+  dispatchToCourier(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: DispatchToCourierDto,
+  ) {
+    return this.salesService.dispatchToCourier(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+      dto,
+    );
+  }
+
+  @Patch(':publicId/shipping-status')
+  @RequireModule('entregas-pendientes')
+  updateShippingStatus(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: UpdateShippingStatusDto,
+  ) {
+    return this.salesService.updateShippingStatus(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+      dto,
+    );
+  }
+
+  @Post(':publicId/shipping-incidents')
+  @RequireModule('entregas-pendientes')
+  createShippingIncident(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: CreateShippingIncidentDto,
+  ) {
+    return this.salesService.createShippingIncident(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+      dto,
+    );
+  }
+
+  @Patch(':publicId/shipping-incidents/:incidentId/resolve')
+  @RequireModule('entregas-pendientes')
+  resolveShippingIncident(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Param('incidentId') incidentId: string,
+    @Body() dto: ResolveShippingIncidentDto,
+  ) {
+    return this.salesService.resolveShippingIncident(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+      incidentId,
       dto,
     );
   }

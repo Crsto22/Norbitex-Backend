@@ -5,7 +5,7 @@ export const userModules = [
   { key: 'cotizaciones', label: 'Cotizaciones', route: '/cotizaciones' },
   {
     key: 'entregas-pendientes',
-    label: 'Entregas pendientes',
+    label: 'Entregas y envíos',
     route: '/entregas-pendientes',
   },
   { key: 'clientes', label: 'Clientes', route: '/clientes' },

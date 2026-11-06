@@ -3,6 +3,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
   VentaEnvioAgencia,
   VentaEnvioEstado,
+  VentaEnvioEstadoLogistico,
   VentaEstado,
   VisibilidadOperaciones,
 } from '@prisma/client';
@@ -19,6 +20,7 @@ describe('ShippingLinksService', () => {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    ventaEnvioHistorial: { create: jest.fn() },
   };
   const courierAgencies = {
     search: jest.fn(),
@@ -39,6 +41,7 @@ describe('ShippingLinksService', () => {
     ventaId: 20n,
     codigoPublico: 'Abc234Def567',
     estado: VentaEnvioEstado.pendiente,
+    estadoLogistico: VentaEnvioEstadoLogistico.POR_PREPARAR,
     nombreCompleto: null,
     dni: null,
     celular: null,
@@ -53,6 +56,8 @@ describe('ShippingLinksService', () => {
     agenciaLatitud: null,
     agenciaLongitud: null,
     recibidoAt: null,
+    despachadoAt: null,
+    entregadoAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -92,6 +97,7 @@ describe('ShippingLinksService', () => {
         where: { ventaId: 20n },
         data: expect.objectContaining({
           estado: VentaEnvioEstado.pendiente,
+          estadoLogistico: VentaEnvioEstadoLogistico.POR_PREPARAR,
           nombreCompleto: null,
           recibidoAt: null,
         }),
@@ -137,9 +143,16 @@ describe('ShippingLinksService', () => {
           nombreCompleto: 'Maria Lopez',
           agenciaExternalId: '392',
           agenciaNombre: 'Shalom Malvinas',
+          estadoLogistico: VentaEnvioEstadoLogistico.POR_DESPACHAR,
         }),
       }),
     );
+    expect(prisma.ventaEnvioHistorial.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        estadoAnterior: VentaEnvioEstadoLogistico.POR_PREPARAR,
+        estadoNuevo: VentaEnvioEstadoLogistico.POR_DESPACHAR,
+      }),
+    });
   });
 
   it('rechaza un segundo envio de datos', async () => {

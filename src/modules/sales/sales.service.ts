@@ -18,6 +18,10 @@ import {
   StockMovimientoTipo,
   SucursalTipo,
   VentaEntregaEstado,
+  VentaEntregaTipo,
+  VentaEnvioEstado,
+  VentaEnvioEstadoLogistico,
+  VentaEnvioIncidenciaEstado,
   VentaEstado,
   VentaFormaPago,
   VentaPagoOrigen,
@@ -35,6 +39,12 @@ import { StockService } from '../stock/stock.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { ConvertSaleDto } from './dto/convert-sale.dto';
 import { DeliverSaleDto } from './dto/deliver-sale.dto';
+import {
+  CreateShippingIncidentDto,
+  DispatchToCourierDto,
+  ResolveShippingIncidentDto,
+  UpdateShippingStatusDto,
+} from './dto/delivery-logistics.dto';
 import {
   FindDeliveriesQueryDto,
   FindComprobantesQueryDto,
@@ -88,11 +98,27 @@ const ventaInclude = {
   },
   creadoPor: { select: { id: true, nombre: true, apellido: true } },
   entregas: {
-    select: { createdAt: true },
+    select: {
+      createdAt: true,
+      tipo: true,
+      numeroConstancia: true,
+      notas: true,
+    },
     orderBy: { createdAt: 'desc' },
     take: 1,
   },
-  envio: true,
+  envio: {
+    include: {
+      incidencias: {
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      },
+      historial: {
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      },
+    },
+  },
   detalles: {
     include: {
       productoVariante: {
@@ -1379,20 +1405,77 @@ export class SalesService {
     scope: CommercialScope,
     query: FindDeliveriesQueryDto,
   ) {
-    const estado = query.estado === 'entregada' ? 'entregada' : 'pendiente';
+    const estado = query.estado ?? 'pendiente';
     const page = query.page ?? 1;
     const limit = query.limit ?? this.getDefaultPaginationLimit();
     const search = query.search?.trim();
+    const branchId = resolveScopedBranchId(scope, query.sucursalId);
+    const hasDateFilter = Boolean(
+      query.period || query.dateFrom || query.dateTo,
+    );
 
-    const where: Prisma.VentaWhereInput = {
+    const stateWhere = (
+      requested: NonNullable<FindDeliveriesQueryDto['estado']>,
+    ): Prisma.VentaWhereInput => {
+      const localPending: Prisma.VentaWhereInput = {
+        envio: null,
+        recojoPosterior: true,
+        estadoEntrega: {
+          in: [VentaEntregaEstado.pendiente, VentaEntregaEstado.parcial],
+        },
+      };
+      const logistics = (value: VentaEnvioEstadoLogistico) => ({
+        envio: { is: { estadoLogistico: value } },
+      });
+
+      if (requested === 'por_preparar') {
+        return {
+          OR: [localPending, logistics(VentaEnvioEstadoLogistico.POR_PREPARAR)],
+        };
+      }
+      if (requested === 'por_despachar') {
+        return logistics(VentaEnvioEstadoLogistico.POR_DESPACHAR);
+      }
+      if (requested === 'en_transito') {
+        return logistics(VentaEnvioEstadoLogistico.EN_TRANSITO);
+      }
+      if (requested === 'incidencia') {
+        return logistics(VentaEnvioEstadoLogistico.INCIDENCIA);
+      }
+      if (requested === 'entregada') {
+        return {
+          OR: [
+            {
+              envio: null,
+              recojoPosterior: true,
+              estadoEntrega: VentaEntregaEstado.entregada,
+            },
+            logistics(VentaEnvioEstadoLogistico.ENTREGADO),
+          ],
+        };
+      }
+      return {
+        OR: [
+          localPending,
+          logistics(VentaEnvioEstadoLogistico.POR_PREPARAR),
+          logistics(VentaEnvioEstadoLogistico.POR_DESPACHAR),
+        ],
+      };
+    };
+
+    const commonAnd: Prisma.VentaWhereInput[] = [
+      {
+        OR: [{ recojoPosterior: true }, { envio: { isNot: null } }],
+      },
+      ...(query.courier ? [{ envio: { is: { agencia: query.courier } } }] : []),
+    ];
+
+    const commonWhere: Prisma.VentaWhereInput = {
       empresaId,
-      recojoPosterior: true,
       estado: { not: VentaEstado.anulada },
-      estadoEntrega:
-        estado === 'entregada'
-          ? VentaEntregaEstado.entregada
-          : { in: [VentaEntregaEstado.pendiente, VentaEntregaEstado.parcial] },
-      ...(scope.branchId ? { sucursalId: scope.branchId } : {}),
+      AND: commonAnd,
+      ...(hasDateFilter ? { createdAt: resolveHistoryDateRange(query) } : {}),
+      ...(branchId ? { sucursalId: branchId } : {}),
       ...(scopedCreatorId(scope)
         ? { creadoPorId: scopedCreatorId(scope)! }
         : {}),
@@ -1417,7 +1500,27 @@ export class SalesService {
         : {}),
     };
 
-    const [ventas, total] = await this.prisma.$transaction([
+    const where: Prisma.VentaWhereInput = {
+      ...commonWhere,
+      AND: [...commonAnd, stateWhere(estado)],
+    };
+
+    const summaryWhere = (
+      requested: NonNullable<FindDeliveriesQueryDto['estado']>,
+    ): Prisma.VentaWhereInput => ({
+      ...commonWhere,
+      AND: [...commonAnd, stateWhere(requested)],
+    });
+
+    const [
+      ventas,
+      total,
+      porPreparar,
+      porDespachar,
+      enTransito,
+      entregados,
+      incidencias,
+    ] = await this.prisma.$transaction([
       this.prisma.venta.findMany({
         where,
         include: ventaInclude,
@@ -1426,12 +1529,24 @@ export class SalesService {
         take: limit,
       }),
       this.prisma.venta.count({ where }),
+      this.prisma.venta.count({ where: summaryWhere('por_preparar') }),
+      this.prisma.venta.count({ where: summaryWhere('por_despachar') }),
+      this.prisma.venta.count({ where: summaryWhere('en_transito') }),
+      this.prisma.venta.count({ where: summaryWhere('entregada') }),
+      this.prisma.venta.count({ where: summaryWhere('incidencia') }),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
     return {
       data: ventas.map((v) => this.toVentaResponse(v)),
       meta: { page, limit, total, totalPages },
+      summary: {
+        porPreparar,
+        porDespachar,
+        enTransito,
+        entregados,
+        incidencias,
+      },
     };
   }
 
@@ -1447,7 +1562,7 @@ export class SalesService {
 
     const venta = await this.prisma.venta.findFirst({
       where: this.saleAccessWhere(empresaId, scope, publicId),
-      include: { detalles: true },
+      include: { detalles: true, envio: true },
     });
 
     if (!venta) {
@@ -1460,6 +1575,12 @@ export class SalesService {
 
     if (!venta.recojoPosterior) {
       throw new BadRequestException('La venta no esta marcada para recojo');
+    }
+
+    if (venta.envio) {
+      throw new BadRequestException(
+        'La venta tiene un envio por courier; use el despacho al courier',
+      );
     }
 
     if (venta.estadoEntrega === VentaEntregaEstado.entregada) {
@@ -1495,6 +1616,7 @@ export class SalesService {
         data: {
           ventaId: venta.id,
           entregadoPorId: scope.userId,
+          tipo: VentaEntregaTipo.CLIENTE,
           retiranteDni: dto.retiranteDni?.trim() || null,
           retiranteNombre: dto.retiranteNombre?.trim() || null,
           notas: dto.notas?.trim() || null,
@@ -1545,6 +1667,340 @@ export class SalesService {
   }
 
   // ── Find One Sale ──────────────────────────────────────────────────
+
+  async dispatchToCourier(
+    empresaId: bigint,
+    scope: CommercialScope,
+    publicId: string,
+    dto: DispatchToCourierDto,
+  ) {
+    if (!dto.detalles.length) {
+      throw new BadRequestException('Seleccione al menos un producto');
+    }
+
+    const now = new Date();
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        const venta = await tx.venta.findFirst({
+          where: this.saleAccessWhere(empresaId, scope, publicId),
+          include: { detalles: true, envio: true },
+        });
+        if (!venta) throw new NotFoundException('Venta no encontrada');
+        if (venta.estado === VentaEstado.anulada) {
+          throw new BadRequestException(
+            'No se puede despachar una venta anulada',
+          );
+        }
+        if (!venta.envio || venta.envio.estado !== VentaEnvioEstado.recibido) {
+          throw new BadRequestException(
+            'El cliente debe completar los datos de envio antes del despacho',
+          );
+        }
+        if (!venta.envio.agencia || !venta.envio.agenciaExternalId) {
+          throw new BadRequestException(
+            'El envio no tiene una agencia courier valida',
+          );
+        }
+        if (
+          venta.envio.estadoLogistico === VentaEnvioEstadoLogistico.ENTREGADO ||
+          venta.envio.estadoLogistico === VentaEnvioEstadoLogistico.INCIDENCIA
+        ) {
+          throw new BadRequestException(
+            venta.envio.estadoLogistico === VentaEnvioEstadoLogistico.ENTREGADO
+              ? 'El envio ya fue entregado'
+              : 'Resuelva la incidencia antes de continuar el despacho',
+          );
+        }
+
+        const detailMap = new Map(
+          venta.detalles.map((detail) => [detail.id.toString(), detail]),
+        );
+        const requested = new Map<string, number>();
+        for (const item of dto.detalles) {
+          requested.set(
+            item.ventaDetalleId,
+            (requested.get(item.ventaDetalleId) ?? 0) + item.cantidad,
+          );
+        }
+        for (const [detalleId, cantidad] of requested) {
+          const detail = detailMap.get(detalleId);
+          if (!detail) {
+            throw new BadRequestException('Producto de venta invalido');
+          }
+          const pendiente = detail.cantidad - detail.cantidadEntregada;
+          if (cantidad > pendiente) {
+            throw new BadRequestException(
+              'La cantidad a despachar supera el pendiente',
+            );
+          }
+        }
+
+        const entrega = await tx.ventaEntrega.create({
+          data: {
+            ventaId: venta.id,
+            entregadoPorId: scope.userId,
+            tipo: VentaEntregaTipo.COURIER,
+            numeroConstancia: dto.numeroConstancia?.trim() || null,
+            notas: dto.notas?.trim() || null,
+            detalles: {
+              create: Array.from(requested.entries()).map(
+                ([ventaDetalleId, cantidad]) => ({
+                  ventaDetalleId: BigInt(ventaDetalleId),
+                  cantidad,
+                }),
+              ),
+            },
+          },
+        });
+
+        for (const [ventaDetalleId, cantidad] of requested) {
+          await tx.ventaDetalle.update({
+            where: { id: BigInt(ventaDetalleId) },
+            data: { cantidadEntregada: { increment: cantidad } },
+          });
+        }
+
+        const detalles = await tx.ventaDetalle.findMany({
+          where: { ventaId: venta.id },
+          select: { cantidad: true, cantidadEntregada: true },
+        });
+        const totalPendiente = detalles.reduce(
+          (sum, detail) =>
+            sum + Math.max(0, detail.cantidad - detail.cantidadEntregada),
+          0,
+        );
+
+        await tx.venta.update({
+          where: { id: venta.id },
+          data: {
+            estadoEntrega:
+              totalPendiente === 0
+                ? VentaEntregaEstado.entregada
+                : VentaEntregaEstado.parcial,
+          },
+        });
+        await tx.ventaEnvio.update({
+          where: { id: venta.envio.id },
+          data: {
+            estadoLogistico: VentaEnvioEstadoLogistico.EN_TRANSITO,
+            despachadoAt: venta.envio.despachadoAt ?? now,
+          },
+        });
+        await tx.ventaEnvioHistorial.create({
+          data: {
+            ventaEnvioId: venta.envio.id,
+            estadoAnterior: venta.envio.estadoLogistico,
+            estadoNuevo: VentaEnvioEstadoLogistico.EN_TRANSITO,
+            detalle: dto.notas?.trim() || 'Productos entregados al courier',
+            usuarioId: scope.userId,
+          },
+        });
+
+        return entrega;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    return {
+      entrega: { publicId: result.publicId },
+      venta: await this.findOne(empresaId, scope, publicId),
+    };
+  }
+
+  async updateShippingStatus(
+    empresaId: bigint,
+    scope: CommercialScope,
+    publicId: string,
+    dto: UpdateShippingStatusDto,
+  ) {
+    const venta = await this.prisma.venta.findFirst({
+      where: this.saleAccessWhere(empresaId, scope, publicId),
+      include: { envio: true, detalles: true },
+    });
+    if (!venta) throw new NotFoundException('Venta no encontrada');
+    if (venta.estado === VentaEstado.anulada) {
+      throw new BadRequestException('No se puede actualizar una venta anulada');
+    }
+    if (!venta.envio) {
+      throw new BadRequestException('La venta no tiene un envio por courier');
+    }
+    if (venta.envio.estadoLogistico === VentaEnvioEstadoLogistico.INCIDENCIA) {
+      throw new BadRequestException(
+        'Resuelva la incidencia antes de actualizar el estado',
+      );
+    }
+
+    const target = VentaEnvioEstadoLogistico[dto.estado];
+    if (target === VentaEnvioEstadoLogistico.ENTREGADO) {
+      if (
+        venta.envio.estadoLogistico !== VentaEnvioEstadoLogistico.EN_TRANSITO
+      ) {
+        throw new BadRequestException(
+          'Solo un envio en transito puede marcarse como entregado',
+        );
+      }
+      const pendiente = venta.detalles.reduce(
+        (sum, detail) =>
+          sum + Math.max(0, detail.cantidad - detail.cantidadEntregada),
+        0,
+      );
+      if (pendiente > 0) {
+        throw new BadRequestException(
+          'Despache todos los productos antes de confirmar la entrega final',
+        );
+      }
+    } else if (
+      venta.envio.estadoLogistico !== VentaEnvioEstadoLogistico.POR_DESPACHAR &&
+      venta.envio.estadoLogistico !== VentaEnvioEstadoLogistico.EN_TRANSITO
+    ) {
+      throw new BadRequestException('Transicion de estado no permitida');
+    }
+
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.ventaEnvio.update({
+        where: { id: venta.envio.id },
+        data: {
+          estadoLogistico: target,
+          ...(target === VentaEnvioEstadoLogistico.EN_TRANSITO
+            ? { despachadoAt: venta.envio.despachadoAt ?? now }
+            : { entregadoAt: now }),
+        },
+      }),
+      this.prisma.ventaEnvioHistorial.create({
+        data: {
+          ventaEnvioId: venta.envio.id,
+          estadoAnterior: venta.envio.estadoLogistico,
+          estadoNuevo: target,
+          detalle: dto.notas?.trim() || null,
+          usuarioId: scope.userId,
+        },
+      }),
+    ]);
+
+    return this.findOne(empresaId, scope, publicId);
+  }
+
+  async createShippingIncident(
+    empresaId: bigint,
+    scope: CommercialScope,
+    publicId: string,
+    dto: CreateShippingIncidentDto,
+  ) {
+    const venta = await this.prisma.venta.findFirst({
+      where: this.saleAccessWhere(empresaId, scope, publicId),
+      include: {
+        envio: {
+          include: {
+            incidencias: {
+              where: { estado: VentaEnvioIncidenciaEstado.ABIERTA },
+            },
+          },
+        },
+      },
+    });
+    if (!venta) throw new NotFoundException('Venta no encontrada');
+    if (!venta.envio) {
+      throw new BadRequestException('La venta no tiene un envio por courier');
+    }
+    if (venta.envio.incidencias.length > 0) {
+      throw new ConflictException('El envio ya tiene una incidencia abierta');
+    }
+    if (
+      venta.envio.estadoLogistico !== VentaEnvioEstadoLogistico.POR_DESPACHAR &&
+      venta.envio.estadoLogistico !== VentaEnvioEstadoLogistico.EN_TRANSITO
+    ) {
+      throw new BadRequestException(
+        'Solo se pueden registrar incidencias antes o durante el traslado',
+      );
+    }
+
+    const incident = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.ventaEnvioIncidencia.create({
+        data: {
+          ventaEnvioId: venta.envio!.id,
+          motivo: dto.motivo.trim(),
+          descripcion: dto.descripcion.trim(),
+          estadoAnterior: venta.envio!.estadoLogistico,
+          creadaPorId: scope.userId,
+        },
+      });
+      await tx.ventaEnvio.update({
+        where: { id: venta.envio!.id },
+        data: { estadoLogistico: VentaEnvioEstadoLogistico.INCIDENCIA },
+      });
+      await tx.ventaEnvioHistorial.create({
+        data: {
+          ventaEnvioId: venta.envio!.id,
+          estadoAnterior: venta.envio!.estadoLogistico,
+          estadoNuevo: VentaEnvioEstadoLogistico.INCIDENCIA,
+          detalle: `${dto.motivo.trim()}: ${dto.descripcion.trim()}`,
+          usuarioId: scope.userId,
+        },
+      });
+      return created;
+    });
+
+    return {
+      incidencia: { publicId: incident.publicId },
+      venta: await this.findOne(empresaId, scope, publicId),
+    };
+  }
+
+  async resolveShippingIncident(
+    empresaId: bigint,
+    scope: CommercialScope,
+    publicId: string,
+    incidentPublicId: string,
+    dto: ResolveShippingIncidentDto,
+  ) {
+    const venta = await this.prisma.venta.findFirst({
+      where: this.saleAccessWhere(empresaId, scope, publicId),
+      include: { envio: true },
+    });
+    if (!venta) throw new NotFoundException('Venta no encontrada');
+    if (!venta.envio) {
+      throw new BadRequestException('La venta no tiene un envio por courier');
+    }
+    const incident = await this.prisma.ventaEnvioIncidencia.findFirst({
+      where: {
+        publicId: incidentPublicId,
+        ventaEnvioId: venta.envio.id,
+        estado: VentaEnvioIncidenciaEstado.ABIERTA,
+      },
+    });
+    if (!incident) {
+      throw new NotFoundException('Incidencia abierta no encontrada');
+    }
+
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.ventaEnvioIncidencia.update({
+        where: { id: incident.id },
+        data: {
+          estado: VentaEnvioIncidenciaEstado.RESUELTA,
+          solucion: dto.solucion.trim(),
+          resueltaPorId: scope.userId,
+          resueltaAt: now,
+        },
+      }),
+      this.prisma.ventaEnvio.update({
+        where: { id: venta.envio.id },
+        data: { estadoLogistico: incident.estadoAnterior },
+      }),
+      this.prisma.ventaEnvioHistorial.create({
+        data: {
+          ventaEnvioId: venta.envio.id,
+          estadoAnterior: VentaEnvioEstadoLogistico.INCIDENCIA,
+          estadoNuevo: incident.estadoAnterior,
+          detalle: `Incidencia resuelta: ${dto.solucion.trim()}`,
+          usuarioId: scope.userId,
+        },
+      }),
+    ]);
+
+    return this.findOne(empresaId, scope, publicId);
+  }
 
   async findOne(empresaId: bigint, scope: CommercialScope, publicId: string) {
     const venta = await this.prisma.venta.findFirst({
@@ -2401,10 +2857,19 @@ export class SalesService {
       recojoHasta: venta.recojoHasta?.toISOString() ?? null,
       fechaEntrega: venta.entregas[0]?.createdAt.toISOString() ?? null,
       estadoEntrega: venta.estadoEntrega,
+      ultimaEntrega: venta.entregas[0]
+        ? {
+            tipo: venta.entregas[0].tipo,
+            numeroConstancia: venta.entregas[0].numeroConstancia,
+            notas: venta.entregas[0].notas,
+            createdAt: venta.entregas[0].createdAt.toISOString(),
+          }
+        : null,
       envio: venta.envio
         ? {
             codigo: venta.envio.codigoPublico,
             estado: venta.envio.estado,
+            estadoLogistico: venta.envio.estadoLogistico,
             nombreCompleto: venta.envio.nombreCompleto,
             dni: venta.envio.dni,
             celular: venta.envio.celular,
@@ -2419,6 +2884,23 @@ export class SalesService {
             agenciaLatitud: venta.envio.agenciaLatitud,
             agenciaLongitud: venta.envio.agenciaLongitud,
             recibidoAt: venta.envio.recibidoAt?.toISOString() ?? null,
+            despachadoAt: venta.envio.despachadoAt?.toISOString() ?? null,
+            entregadoAt: venta.envio.entregadoAt?.toISOString() ?? null,
+            incidencias: venta.envio.incidencias.map((incidencia) => ({
+              publicId: incidencia.publicId,
+              motivo: incidencia.motivo,
+              descripcion: incidencia.descripcion,
+              estado: incidencia.estado,
+              solucion: incidencia.solucion,
+              createdAt: incidencia.createdAt.toISOString(),
+              resueltaAt: incidencia.resueltaAt?.toISOString() ?? null,
+            })),
+            historial: venta.envio.historial.map((item) => ({
+              estadoAnterior: item.estadoAnterior,
+              estadoNuevo: item.estadoNuevo,
+              detalle: item.detalle,
+              createdAt: item.createdAt.toISOString(),
+            })),
           }
         : null,
       moneda: venta.moneda,

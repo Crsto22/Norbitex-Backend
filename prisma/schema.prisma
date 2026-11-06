@@ -322,9 +322,27 @@ enum VentaEntregaEstado {
   entregada
 }
 
+enum VentaEntregaTipo {
+  CLIENTE
+  COURIER
+}
+
 enum VentaEnvioEstado {
   pendiente
   recibido
+}
+
+enum VentaEnvioEstadoLogistico {
+  POR_PREPARAR
+  POR_DESPACHAR
+  EN_TRANSITO
+  ENTREGADO
+  INCIDENCIA
+}
+
+enum VentaEnvioIncidenciaEstado {
+  ABIERTA
+  RESUELTA
 }
 
 enum VentaEnvioAgencia {
@@ -1170,6 +1188,9 @@ model Usuario {
   passwordResetTokens                PasswordResetToken[]
   ventasCreadas                      Venta[]
   ventasEntregadas                   VentaEntrega[]                       @relation("VentaEntregaUsuario")
+  ventaEnvioHistorial                VentaEnvioHistorial[]                @relation("VentaEnvioHistorialUsuario")
+  ventaEnvioIncidenciasCreadas       VentaEnvioIncidencia[]               @relation("VentaEnvioIncidenciaCreadaPor")
+  ventaEnvioIncidenciasResueltas     VentaEnvioIncidencia[]               @relation("VentaEnvioIncidenciaResueltaPor")
   notasCreditoCreadas                NotaCredito[]
   notasDebitoCreadas                 NotaDebito[]
   guiasRemisionCreadas               GuiaRemision[]
@@ -2510,6 +2531,8 @@ model VentaEntrega {
   publicId        String                @unique @default(cuid()) @map("public_id") @db.VarChar(30)
   ventaId         BigInt                @map("venta_id")
   entregadoPorId  BigInt?               @map("entregado_por_id")
+  tipo            VentaEntregaTipo      @default(CLIENTE)
+  numeroConstancia String?               @map("numero_constancia") @db.VarChar(120)
   retiranteDni    String?               @map("retirante_dni") @db.VarChar(20)
   retiranteNombre String?               @map("retirante_nombre") @db.VarChar(150)
   notas           String?               @db.VarChar(500)
@@ -2543,6 +2566,7 @@ model VentaEnvio {
   ventaId        BigInt             @unique @map("venta_id")
   codigoPublico  String             @unique @map("codigo_publico") @db.VarChar(12)
   estado         VentaEnvioEstado   @default(pendiente)
+  estadoLogistico VentaEnvioEstadoLogistico @default(POR_PREPARAR) @map("estado_logistico")
   nombreCompleto String?            @map("nombre_completo") @db.VarChar(150)
   dni            String?            @db.VarChar(8)
   celular        String?            @db.VarChar(9)
@@ -2557,13 +2581,58 @@ model VentaEnvio {
   agenciaLatitud Float?             @map("agencia_latitud")
   agenciaLongitud Float?            @map("agencia_longitud")
   recibidoAt     DateTime?          @map("recibido_at") @db.Timestamptz(6)
+  despachadoAt   DateTime?          @map("despachado_at") @db.Timestamptz(6)
+  entregadoAt    DateTime?          @map("entregado_at") @db.Timestamptz(6)
   createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   venta          Venta              @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  historial      VentaEnvioHistorial[]
+  incidencias    VentaEnvioIncidencia[]
 
   @@index([estado])
+  @@index([estadoLogistico])
   @@index([createdAt])
   @@map("venta_envio")
+}
+
+model VentaEnvioHistorial {
+  id             BigInt                       @id @default(autoincrement())
+  ventaEnvioId   BigInt                       @map("venta_envio_id")
+  estadoAnterior VentaEnvioEstadoLogistico?   @map("estado_anterior")
+  estadoNuevo    VentaEnvioEstadoLogistico    @map("estado_nuevo")
+  detalle        String?                      @db.VarChar(500)
+  usuarioId      BigInt?                      @map("usuario_id")
+  createdAt      DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  ventaEnvio     VentaEnvio                   @relation(fields: [ventaEnvioId], references: [id], onDelete: Cascade)
+  usuario        Usuario?                     @relation("VentaEnvioHistorialUsuario", fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([ventaEnvioId, createdAt])
+  @@index([usuarioId])
+  @@map("venta_envio_historial")
+}
+
+model VentaEnvioIncidencia {
+  id             BigInt                       @id @default(autoincrement())
+  publicId       String                       @unique @default(cuid()) @map("public_id") @db.VarChar(30)
+  ventaEnvioId   BigInt                       @map("venta_envio_id")
+  motivo         String                       @db.VarChar(100)
+  descripcion    String                       @db.VarChar(500)
+  estado         VentaEnvioIncidenciaEstado   @default(ABIERTA)
+  estadoAnterior VentaEnvioEstadoLogistico    @map("estado_anterior")
+  solucion       String?                      @db.VarChar(500)
+  creadaPorId    BigInt?                      @map("creada_por_id")
+  resueltaPorId  BigInt?                      @map("resuelta_por_id")
+  resueltaAt     DateTime?                    @map("resuelta_at") @db.Timestamptz(6)
+  createdAt      DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  ventaEnvio     VentaEnvio                   @relation(fields: [ventaEnvioId], references: [id], onDelete: Cascade)
+  creadaPor      Usuario?                     @relation("VentaEnvioIncidenciaCreadaPor", fields: [creadaPorId], references: [id], onDelete: SetNull)
+  resueltaPor    Usuario?                     @relation("VentaEnvioIncidenciaResueltaPor", fields: [resueltaPorId], references: [id], onDelete: SetNull)
+
+  @@index([ventaEnvioId, estado])
+  @@index([creadaPorId])
+  @@index([resueltaPorId])
+  @@map("venta_envio_incidencia")
 }
 
 model AgenciaCourier {

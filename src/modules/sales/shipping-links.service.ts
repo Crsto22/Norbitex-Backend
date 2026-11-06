@@ -10,6 +10,7 @@ import {
   Prisma,
   VentaEnvioAgencia,
   VentaEnvioEstado,
+  VentaEnvioEstadoLogistico,
   VentaEstado,
 } from '@prisma/client';
 import {
@@ -81,6 +82,7 @@ export class ShippingLinksService {
           data: {
             codigoPublico,
             estado: VentaEnvioEstado.pendiente,
+            estadoLogistico: VentaEnvioEstadoLogistico.POR_PREPARAR,
             nombreCompleto: null,
             dni: null,
             celular: null,
@@ -95,6 +97,8 @@ export class ShippingLinksService {
             agenciaLatitud: null,
             agenciaLongitud: null,
             recibidoAt: null,
+            despachadoAt: null,
+            entregadoAt: null,
           },
         })
       : await this.prisma.ventaEnvio.create({
@@ -134,6 +138,7 @@ export class ShippingLinksService {
       },
       data: {
         estado: VentaEnvioEstado.recibido,
+        estadoLogistico: VentaEnvioEstadoLogistico.POR_DESPACHAR,
         nombreCompleto: dto.nombreCompleto.trim().replace(/\s+/g, ' '),
         dni: dto.dni,
         celular: dto.celular,
@@ -155,13 +160,19 @@ export class ShippingLinksService {
       throw new ConflictException('Los datos de envio ya fueron recibidos');
     }
 
+    await this.prisma.ventaEnvioHistorial.create({
+      data: {
+        ventaEnvioId: envio.id,
+        estadoAnterior: envio.estadoLogistico,
+        estadoNuevo: VentaEnvioEstadoLogistico.POR_DESPACHAR,
+        detalle: 'Datos de envio y agencia recibidos',
+      },
+    });
+
     return { estado: VentaEnvioEstado.recibido };
   }
 
-  async findPublicAgencies(
-    code: string,
-    dto: FindPublicShippingAgenciesDto,
-  ) {
+  async findPublicAgencies(code: string, dto: FindPublicShippingAgenciesDto) {
     const envio = await this.findAvailablePublicLink(code);
     if (envio.estado === VentaEnvioEstado.recibido) {
       throw new ConflictException('Los datos de envio ya fueron recibidos');
@@ -224,6 +235,7 @@ export class ShippingLinksService {
   private toInternalResponse(envio: {
     codigoPublico: string;
     estado: VentaEnvioEstado;
+    estadoLogistico: VentaEnvioEstadoLogistico;
     nombreCompleto: string | null;
     dni: string | null;
     celular: string | null;
@@ -238,10 +250,13 @@ export class ShippingLinksService {
     agenciaLatitud: number | null;
     agenciaLongitud: number | null;
     recibidoAt: Date | null;
+    despachadoAt: Date | null;
+    entregadoAt: Date | null;
   }) {
     return {
       codigo: envio.codigoPublico,
       estado: envio.estado,
+      estadoLogistico: envio.estadoLogistico,
       nombreCompleto: envio.nombreCompleto,
       dni: envio.dni,
       celular: envio.celular,
@@ -256,6 +271,10 @@ export class ShippingLinksService {
       agenciaLatitud: envio.agenciaLatitud,
       agenciaLongitud: envio.agenciaLongitud,
       recibidoAt: envio.recibidoAt?.toISOString() ?? null,
+      despachadoAt: envio.despachadoAt?.toISOString() ?? null,
+      entregadoAt: envio.entregadoAt?.toISOString() ?? null,
+      incidencias: [],
+      historial: [],
     };
   }
 
