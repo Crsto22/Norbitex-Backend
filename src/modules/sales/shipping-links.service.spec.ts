@@ -196,7 +196,12 @@ describe('ShippingLinksService', () => {
         q: 'lima',
       }),
     ).resolves.toEqual([{ externalId: '392' }]);
-    expect(courierAgencies.search).toHaveBeenCalledWith('SHALOM', 'lima', 50);
+    expect(courierAgencies.search).toHaveBeenCalledWith(
+      'SHALOM',
+      'lima',
+      50,
+      undefined,
+    );
   });
 
   it('ordena agencias cercanas usando la ubicacion del cliente', async () => {

@@ -173,7 +173,14 @@ export class ShippingLinksService {
       );
     }
     if (dto.q?.trim()) {
-      return this.courierAgencies.search(courier, dto.q.trim(), 50);
+      return this.courierAgencies.search(
+        courier,
+        dto.q.trim(),
+        50,
+        dto.lat !== undefined && dto.lng !== undefined
+          ? { latitude: dto.lat, longitude: dto.lng }
+          : undefined,
+      );
     }
     return this.courierAgencies.browseForShipping(courier, {
       latitude: dto.lat,

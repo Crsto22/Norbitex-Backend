@@ -227,8 +227,13 @@ export class CourierAgenciesService {
     };
   }
 
-  async search(courier: AgenciaCourierProveedor, term: string, take = 20) {
-    return this.prisma.agenciaCourier.findMany({
+  async search(
+    courier: AgenciaCourierProveedor,
+    term: string,
+    take = 20,
+    location?: { latitude: number; longitude: number },
+  ) {
+    const rows = await this.prisma.agenciaCourier.findMany({
       where: {
         courier,
         activo: true,
@@ -253,8 +258,25 @@ export class CourierAgenciesService {
         { provincia: 'asc' },
         { nombre: 'asc' },
       ],
-      take,
+      take: location ? 300 : take,
     });
+    const withDistance = rows.map((agency) => ({
+      ...agency,
+      distanceKm: location
+        ? distanceInKilometers(
+            location.latitude,
+            location.longitude,
+            agency.latitud!,
+            agency.longitud!,
+          )
+        : null,
+    }));
+    if (location) {
+      withDistance.sort(
+        (left, right) => left.distanceKm! - right.distanceKm!,
+      );
+    }
+    return withDistance.slice(0, take);
   }
 
   async browseForShipping(
