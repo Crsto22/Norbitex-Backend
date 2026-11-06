@@ -8,6 +8,8 @@ import { SalesService } from './sales.service';
 import { SaleScopeGuard } from './guards/sale-scope.guard';
 import { StockModule } from '../stock/stock.module';
 import { BillingIntegrationModule } from '../billing-integration/billing-integration.module';
+import { PublicShippingLinksController } from './public-shipping-links.controller';
+import { ShippingLinksService } from './shipping-links.service';
 
 @Module({
   imports: [
@@ -17,8 +19,13 @@ import { BillingIntegrationModule } from '../billing-integration/billing-integra
     StockModule,
     BillingIntegrationModule,
   ],
-  controllers: [SalesController],
-  providers: [SalesService, SalesPdfService, SaleScopeGuard],
+  controllers: [SalesController, PublicShippingLinksController],
+  providers: [
+    SalesService,
+    SalesPdfService,
+    SaleScopeGuard,
+    ShippingLinksService,
+  ],
   exports: [SalesService, SalesPdfService],
 })
 export class SalesModule {}

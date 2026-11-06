@@ -43,6 +43,7 @@ import {
   CreateSerieComprobanteDto,
   UpdateSerieComprobanteDto,
 } from './dto/serie-comprobante.dto';
+import { ShippingLinksService } from './shipping-links.service';
 
 @UseGuards(ModuleAccessGuard, SaleScopeGuard)
 @Controller('sales')
@@ -55,6 +56,7 @@ export class SalesController {
     private readonly billingVoidService: BillingVoidService,
     private readonly billingEmissionService: BillingEmissionService,
     private readonly pdfConcurrency: PdfConcurrencyService,
+    private readonly shippingLinksService: ShippingLinksService,
   ) {}
 
   // ── Products (static route BEFORE :publicId) ────────────────────────
@@ -390,6 +392,33 @@ export class SalesController {
       this.getEmpresaId(user),
       getCommercialScope(user),
       publicId,
+    );
+  }
+
+  @Post(':publicId/shipping-link')
+  @RequireModule('historial-ventas')
+  generateShippingLink(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ) {
+    return this.shippingLinksService.generate(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+    );
+  }
+
+  @Post(':publicId/shipping-link/regenerate')
+  @RequireModule('historial-ventas')
+  regenerateShippingLink(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ) {
+    return this.shippingLinksService.generate(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      publicId,
+      true,
     );
   }
 

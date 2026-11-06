@@ -7,4 +7,5 @@ export const rateLimits = {
   reports: { default: { ttl: oneMinute, limit: 40 } },
   dashboard: { default: { ttl: oneMinute, limit: 60 } },
   workerAuth: { default: { ttl: oneMinute, limit: 20 } },
+  shippingLinks: { default: { ttl: oneMinute, limit: 30 } },
 } as const;

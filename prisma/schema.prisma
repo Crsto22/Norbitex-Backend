@@ -322,6 +322,16 @@ enum VentaEntregaEstado {
   entregada
 }
 
+enum VentaEnvioEstado {
+  pendiente
+  recibido
+}
+
+enum VentaEnvioAgencia {
+  SHALOM
+  OLVA
+}
+
 enum VentaDescuentoTipo {
   porcentaje
   monto
@@ -2404,6 +2414,7 @@ model Venta {
   sunatBajaLote            SunatBajaLote?         @relation(fields: [sunatBajaLoteId], references: [id], onDelete: SetNull)
   detalles                 VentaDetalle[]
   entregas                 VentaEntrega[]
+  envio                    VentaEnvio?
   notasCredito             NotaCredito[]
   notasDebito              NotaDebito[]
   pagos                    VentaPago[]
@@ -2514,6 +2525,25 @@ model VentaEntregaDetalle {
   @@index([entregaId])
   @@index([ventaDetalleId])
   @@map("venta_entrega_detalle")
+}
+
+model VentaEnvio {
+  id             BigInt             @id @default(autoincrement())
+  ventaId        BigInt             @unique @map("venta_id")
+  codigoPublico  String             @unique @map("codigo_publico") @db.VarChar(12)
+  estado         VentaEnvioEstado   @default(pendiente)
+  nombreCompleto String?            @map("nombre_completo") @db.VarChar(150)
+  dni            String?            @db.VarChar(8)
+  celular        String?            @db.VarChar(9)
+  agencia        VentaEnvioAgencia?
+  recibidoAt     DateTime?          @map("recibido_at") @db.Timestamptz(6)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  venta          Venta              @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+
+  @@index([estado])
+  @@index([createdAt])
+  @@map("venta_envio")
 }
 
 model NotaCredito {

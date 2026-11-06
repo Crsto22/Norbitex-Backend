@@ -68,6 +68,7 @@ const ventaInclude = {
       nombre: true,
       tipoDocumento: true,
       numeroDocumento: true,
+      telefono: true,
     },
   },
   serieComprobante: {
@@ -91,6 +92,7 @@ const ventaInclude = {
     orderBy: { createdAt: 'desc' },
     take: 1,
   },
+  envio: true,
   detalles: {
     include: {
       productoVariante: {
@@ -2399,6 +2401,17 @@ export class SalesService {
       recojoHasta: venta.recojoHasta?.toISOString() ?? null,
       fechaEntrega: venta.entregas[0]?.createdAt.toISOString() ?? null,
       estadoEntrega: venta.estadoEntrega,
+      envio: venta.envio
+        ? {
+            codigo: venta.envio.codigoPublico,
+            estado: venta.envio.estado,
+            nombreCompleto: venta.envio.nombreCompleto,
+            dni: venta.envio.dni,
+            celular: venta.envio.celular,
+            agencia: venta.envio.agencia,
+            recibidoAt: venta.envio.recibidoAt?.toISOString() ?? null,
+          }
+        : null,
       moneda: venta.moneda,
       formaPago: venta.formaPago,
       subtotal: venta.subtotal.toString(),
@@ -2455,6 +2468,7 @@ export class SalesService {
             nombre: venta.cliente.nombre,
             tipoDocumento: venta.cliente.tipoDocumento,
             numeroDocumento: venta.cliente.numeroDocumento,
+            telefono: venta.cliente.telefono,
           }
         : null,
       serieComprobante: {
