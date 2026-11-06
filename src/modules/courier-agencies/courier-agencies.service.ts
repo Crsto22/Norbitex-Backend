@@ -14,6 +14,13 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { FindCourierAgenciesDto } from './dto/courier-agencies.dto';
 
 type JsonRecord = Record<string, unknown>;
+const searchableAgencyFields = [
+  'nombre',
+  'direccion',
+  'departamento',
+  'provincia',
+  'distrito',
+] as const;
 
 type NormalizedAgency = {
   externalId: string;
@@ -193,19 +200,7 @@ export class CourierAgenciesService {
       ...(query.distrito
         ? { distrito: { equals: query.distrito.trim(), mode: 'insensitive' } }
         : {}),
-      ...(query.q?.trim()
-        ? {
-            OR: [
-              'nombre',
-              'direccion',
-              'departamento',
-              'provincia',
-              'distrito',
-            ].map((field) => ({
-              [field]: { contains: query.q!.trim(), mode: 'insensitive' },
-            })),
-          }
-        : {}),
+      ...(query.q?.trim() ? agencyTextSearch(query.q) : {}),
     };
     const [data, total] = await this.prisma.$transaction([
       this.prisma.agenciaCourier.findMany({
@@ -233,20 +228,11 @@ export class CourierAgenciesService {
   }
 
   async search(courier: AgenciaCourierProveedor, term: string, take = 20) {
-    const q = term.trim();
     return this.prisma.agenciaCourier.findMany({
       where: {
         courier,
         activo: true,
-        OR: [
-          'nombre',
-          'direccion',
-          'departamento',
-          'provincia',
-          'distrito',
-        ].map((field) => ({
-          [field]: { contains: q, mode: 'insensitive' },
-        })),
+        ...agencyTextSearch(term),
       },
       select: {
         externalId: true,
@@ -424,4 +410,15 @@ function message(error: unknown) {
 }
 function delay(milliseconds: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function agencyTextSearch(term: string): Prisma.AgenciaCourierWhereInput {
+  const terms = term.trim().split(/\s+/).filter(Boolean);
+  return {
+    AND: terms.map((value) => ({
+      OR: searchableAgencyFields.map((field) => ({
+        [field]: { contains: value, mode: 'insensitive' },
+      })),
+    })),
+  };
 }
