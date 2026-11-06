@@ -150,6 +150,41 @@ describe('CourierAgenciesService', () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ externalId: 'cerca' });
     expect(result[0].distanceKm).toBeLessThan(1);
+    expect(prisma.agenciaCourier.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          direccion: { not: null },
+          latitud: { gte: -20, lte: 1 },
+          longitud: { gte: -82, lte: -68 },
+        }),
+      }),
+    );
+  });
+
+  it('guarda coordenadas vacias de Shalom como nulas', async () => {
+    mockFetch({
+      success: true,
+      data: [
+        {
+          ter_id: 209,
+          nombre: 'CAJA DISTRIBUCION LIMA',
+          direccion: '',
+          departamento: 'LIMA',
+          provincia: 'LIMA',
+          latitud: '',
+          longitud: '',
+        },
+      ],
+    });
+
+    await service.sync(AgenciaCourierProveedor.SHALOM);
+
+    expect(prisma.agenciaCourier.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ latitud: null, longitud: null }),
+        update: expect.objectContaining({ latitud: null, longitud: null }),
+      }),
+    );
   });
 
   function mockFetch(payload: unknown): jest.SpiedFunction<typeof fetch> {

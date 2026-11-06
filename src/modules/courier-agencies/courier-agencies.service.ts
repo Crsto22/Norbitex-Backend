@@ -232,6 +232,9 @@ export class CourierAgenciesService {
       where: {
         courier,
         activo: true,
+        direccion: { not: null },
+        latitud: { gte: -20, lte: 1 },
+        longitud: { gte: -82, lte: -68 },
         ...agencyTextSearch(term),
       },
       select: {
@@ -262,8 +265,9 @@ export class CourierAgenciesService {
       where: {
         courier,
         activo: true,
-        latitud: { not: null },
-        longitud: { not: null },
+        direccion: { not: null },
+        latitud: { gte: -20, lte: 1 },
+        longitud: { gte: -82, lte: -68 },
       },
       select: {
         externalId: true,
@@ -433,6 +437,13 @@ function required(value: unknown, label: string) {
   return normalized;
 }
 function numeric(value: unknown) {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === 'string' && !value.trim())
+  ) {
+    return null;
+  }
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
