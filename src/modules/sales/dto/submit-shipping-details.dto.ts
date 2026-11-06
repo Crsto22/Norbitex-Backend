@@ -1,11 +1,16 @@
 import {
   IsEnum,
+  IsNumber,
+  IsOptional,
   IsString,
   Length,
   Matches,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { VentaEnvioAgencia } from '@prisma/client';
 
 export class SubmitShippingDetailsDto {
@@ -35,8 +40,23 @@ export class FindPublicShippingAgenciesDto {
   @IsEnum(VentaEnvioAgencia)
   agencia: VentaEnvioAgencia;
 
+  @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(100)
-  q: string;
+  q?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  lng?: number;
 }

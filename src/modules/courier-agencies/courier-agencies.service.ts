@@ -254,6 +254,58 @@ export class CourierAgenciesService {
     });
   }
 
+  async browseForShipping(
+    courier: AgenciaCourierProveedor,
+    options: { latitude?: number; longitude?: number; take?: number } = {},
+  ) {
+    const rows = await this.prisma.agenciaCourier.findMany({
+      where: {
+        courier,
+        activo: true,
+        latitud: { not: null },
+        longitud: { not: null },
+      },
+      select: {
+        externalId: true,
+        nombre: true,
+        direccion: true,
+        departamento: true,
+        provincia: true,
+        distrito: true,
+        ubigeo: true,
+        latitud: true,
+        longitud: true,
+      },
+      orderBy: [
+        { departamento: 'asc' },
+        { provincia: 'asc' },
+        { nombre: 'asc' },
+      ],
+    });
+
+    const hasLocation =
+      options.latitude !== undefined && options.longitude !== undefined;
+    const withDistance = rows.map((agency) => ({
+      ...agency,
+      distanceKm: hasLocation
+        ? distanceInKilometers(
+            options.latitude!,
+            options.longitude!,
+            agency.latitud!,
+            agency.longitud!,
+          )
+        : null,
+    }));
+
+    if (hasLocation) {
+      withDistance.sort(
+        (left, right) => left.distanceKm! - right.distanceKm!,
+      );
+    }
+
+    return withDistance.slice(0, options.take ?? (hasLocation ? 50 : 300));
+  }
+
   private async fetchAgencies(courier: AgenciaCourierProveedor) {
     if (courier === AgenciaCourierProveedor.SHALOM) {
       const payload = await this.fetchJson<{
@@ -410,6 +462,33 @@ function message(error: unknown) {
 }
 function delay(milliseconds: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function distanceInKilometers(
+  originLatitude: number,
+  originLongitude: number,
+  destinationLatitude: number,
+  destinationLongitude: number,
+) {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const latitudeDelta = radians(destinationLatitude - originLatitude);
+  const longitudeDelta = radians(destinationLongitude - originLongitude);
+  const originLatitudeRadians = radians(originLatitude);
+  const destinationLatitudeRadians = radians(destinationLatitude);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(originLatitudeRadians) *
+      Math.cos(destinationLatitudeRadians) *
+      Math.sin(longitudeDelta / 2) ** 2;
+
+  return Number(
+    (
+      2 *
+      earthRadiusKm *
+      Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
+    ).toFixed(2),
+  );
 }
 
 function agencyTextSearch(term: string): Prisma.AgenciaCourierWhereInput {

@@ -20,7 +20,10 @@ describe('ShippingLinksService', () => {
       updateMany: jest.fn(),
     },
   };
-  const courierAgencies = { search: jest.fn() };
+  const courierAgencies = {
+    search: jest.fn(),
+    browseForShipping: jest.fn(),
+  };
   const service = new ShippingLinksService(
     prisma as unknown as PrismaService,
     courierAgencies as never,
@@ -193,6 +196,31 @@ describe('ShippingLinksService', () => {
         q: 'lima',
       }),
     ).resolves.toEqual([{ externalId: '392' }]);
-    expect(courierAgencies.search).toHaveBeenCalledWith('SHALOM', 'lima');
+    expect(courierAgencies.search).toHaveBeenCalledWith('SHALOM', 'lima', 50);
+  });
+
+  it('ordena agencias cercanas usando la ubicacion del cliente', async () => {
+    prisma.ventaEnvio.findUnique.mockResolvedValue({
+      ...pendingShipping,
+      venta: {
+        estado: VentaEstado.completada,
+        correlativo: 'NV01-000001',
+        empresa: { nombreComercial: 'Tienda', logoUrl: null },
+      },
+    });
+    courierAgencies.browseForShipping.mockResolvedValue([
+      { externalId: '392', distanceKm: 1.25 },
+    ]);
+
+    await service.findPublicAgencies('Abc234Def567', {
+      agencia: VentaEnvioAgencia.SHALOM,
+      lat: -12.04,
+      lng: -77.04,
+    });
+
+    expect(courierAgencies.browseForShipping).toHaveBeenCalledWith('SHALOM', {
+      latitude: -12.04,
+      longitude: -77.04,
+    });
   });
 });

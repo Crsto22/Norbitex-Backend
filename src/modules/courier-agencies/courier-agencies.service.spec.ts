@@ -116,6 +116,42 @@ describe('CourierAgenciesService', () => {
     expect(prisma.agenciaCourierSincronizacion.update).toHaveBeenCalledTimes(1);
   });
 
+  it('ordena por distancia y limita las agencias cercanas', async () => {
+    prisma.agenciaCourier.findMany.mockResolvedValue([
+      {
+        externalId: 'lejos',
+        nombre: 'Agencia lejana',
+        direccion: null,
+        departamento: 'LIMA',
+        provincia: 'LIMA',
+        distrito: 'LIMA',
+        ubigeo: '150101',
+        latitud: -12.2,
+        longitud: -77.1,
+      },
+      {
+        externalId: 'cerca',
+        nombre: 'Agencia cercana',
+        direccion: null,
+        departamento: 'LIMA',
+        provincia: 'LIMA',
+        distrito: 'LIMA',
+        ubigeo: '150101',
+        latitud: -12.041,
+        longitud: -77.041,
+      },
+    ]);
+
+    const result = await service.browseForShipping(
+      AgenciaCourierProveedor.SHALOM,
+      { latitude: -12.04, longitude: -77.04, take: 1 },
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ externalId: 'cerca' });
+    expect(result[0].distanceKm).toBeLessThan(1);
+  });
+
   function mockFetch(payload: unknown): jest.SpiedFunction<typeof fetch> {
     return jest.spyOn(global, 'fetch').mockResolvedValue(response(payload));
   }

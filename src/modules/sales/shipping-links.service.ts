@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -165,10 +166,19 @@ export class ShippingLinksService {
     if (envio.estado === VentaEnvioEstado.recibido) {
       throw new ConflictException('Los datos de envio ya fueron recibidos');
     }
-    return this.courierAgencies.search(
-      this.toCourierProvider(dto.agencia),
-      dto.q,
-    );
+    const courier = this.toCourierProvider(dto.agencia);
+    if ((dto.lat === undefined) !== (dto.lng === undefined)) {
+      throw new BadRequestException(
+        'La latitud y longitud deben enviarse juntas',
+      );
+    }
+    if (dto.q?.trim()) {
+      return this.courierAgencies.search(courier, dto.q.trim(), 50);
+    }
+    return this.courierAgencies.browseForShipping(courier, {
+      latitude: dto.lat,
+      longitude: dto.lng,
+    });
   }
 
   private async findAvailablePublicLink(code: string) {
