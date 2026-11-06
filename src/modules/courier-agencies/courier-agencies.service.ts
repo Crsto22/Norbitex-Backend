@@ -283,6 +283,9 @@ export class CourierAgenciesService {
     courier: AgenciaCourierProveedor,
     options: { latitude?: number; longitude?: number; take?: number } = {},
   ) {
+    const hasLocation =
+      options.latitude !== undefined && options.longitude !== undefined;
+    const requestedTake = options.take ?? (hasLocation ? 50 : 20);
     const rows = await this.prisma.agenciaCourier.findMany({
       where: {
         courier,
@@ -307,10 +310,8 @@ export class CourierAgenciesService {
         { provincia: 'asc' },
         { nombre: 'asc' },
       ],
+      ...(hasLocation ? {} : { take: requestedTake }),
     });
-
-    const hasLocation =
-      options.latitude !== undefined && options.longitude !== undefined;
     const withDistance = rows.map((agency) => ({
       ...agency,
       distanceKm: hasLocation
@@ -329,7 +330,7 @@ export class CourierAgenciesService {
       );
     }
 
-    return withDistance.slice(0, options.take ?? (hasLocation ? 50 : 300));
+    return withDistance.slice(0, requestedTake);
   }
 
   private async fetchAgencies(courier: AgenciaCourierProveedor) {

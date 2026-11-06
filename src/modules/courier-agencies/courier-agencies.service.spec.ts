@@ -161,6 +161,14 @@ describe('CourierAgenciesService', () => {
     );
   });
 
+  it('limita el catalogo inicial a la primera pagina de 20 agencias', async () => {
+    await service.browseForShipping(AgenciaCourierProveedor.OLVA);
+
+    expect(prisma.agenciaCourier.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 20 }),
+    );
+  });
+
   it('guarda coordenadas vacias de Shalom como nulas', async () => {
     mockFetch({
       success: true,
