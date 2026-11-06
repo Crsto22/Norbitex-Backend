@@ -154,9 +154,22 @@ export class CourierAgenciesService {
       orderBy: { iniciadaAt: 'desc' },
       take: 20,
     });
-    return Object.values(AgenciaCourierProveedor).map(
-      (courier) => rows.find((row) => row.courier === courier) ?? null,
-    );
+    return Object.values(AgenciaCourierProveedor).map((courier) => {
+      const row = rows.find((item) => item.courier === courier);
+      return row
+        ? {
+            courier: row.courier,
+            estado: row.estado,
+            iniciadaAt: row.iniciadaAt.toISOString(),
+            finalizadaAt: row.finalizadaAt?.toISOString() ?? null,
+            totalRecibidas: row.totalRecibidas,
+            creadas: row.creadas,
+            actualizadas: row.actualizadas,
+            desactivadas: row.desactivadas,
+            error: row.error,
+          }
+        : null;
+    });
   }
 
   async findAll(query: FindCourierAgenciesDto) {
@@ -225,11 +238,15 @@ export class CourierAgenciesService {
       where: {
         courier,
         activo: true,
-        OR: ['nombre', 'direccion', 'departamento', 'provincia', 'distrito'].map(
-          (field) => ({
-            [field]: { contains: q, mode: 'insensitive' },
-          }),
-        ),
+        OR: [
+          'nombre',
+          'direccion',
+          'departamento',
+          'provincia',
+          'distrito',
+        ].map((field) => ({
+          [field]: { contains: q, mode: 'insensitive' },
+        })),
       },
       select: {
         externalId: true,
@@ -242,7 +259,11 @@ export class CourierAgenciesService {
         latitud: true,
         longitud: true,
       },
-      orderBy: [{ departamento: 'asc' }, { provincia: 'asc' }, { nombre: 'asc' }],
+      orderBy: [
+        { departamento: 'asc' },
+        { provincia: 'asc' },
+        { nombre: 'asc' },
+      ],
       take,
     });
   }
