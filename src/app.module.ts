@@ -42,6 +42,7 @@ import { SizesModule } from './modules/sizes/sizes.module';
 import { SunatConfigModule } from './modules/sunat-config/sunat-config.module';
 import { SunatEmissionModule } from './modules/sunat-emission/sunat-emission.module';
 import { CompanyModule } from './modules/company/company.module';
+import { EnviosConfigModule } from './modules/envios-config/envios-config.module';
 import { UsersModule } from './modules/users/users.module';
 import { WorkerAuthModule } from './modules/worker-auth/worker-auth.module';
 import { WorkerModule } from './modules/worker/worker.module';
@@ -106,6 +107,7 @@ import { validateEnvironment } from './config/environment';
     PlatformBillingModule,
     PaymentMethodsModule,
     CompanyModule,
+    EnviosConfigModule,
     SunatConfigModule,
     SunatEmissionModule,
     UsersModule,

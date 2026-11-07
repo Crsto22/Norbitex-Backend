@@ -222,18 +222,10 @@ export class ShippingLabelsService {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      const pages: Array<{
-        snapshot: ShippingLabelSnapshot;
-        packageNumber: number;
-        packageCount: number;
-      }> = [];
+      const pages: Array<{ snapshot: ShippingLabelSnapshot }> = [];
       for (const { snapshot, packageCount } of labels) {
-        for (
-          let packageNumber = 1;
-          packageNumber <= packageCount;
-          packageNumber += 1
-        ) {
-          pages.push({ snapshot, packageNumber, packageCount });
+        for (let index = 0; index < packageCount; index += 1) {
+          pages.push({ snapshot });
         }
       }
 
@@ -243,13 +235,7 @@ export class ShippingLabelsService {
         const pageItems = pages.slice(offset, offset + frames.length);
         for (let index = 0; index < pageItems.length; index += 1) {
           const page = pageItems[index];
-          this.drawLabelInFrame(
-            doc,
-            page.snapshot,
-            page.packageNumber,
-            page.packageCount,
-            frames[index],
-          );
+          this.drawLabelInFrame(doc, page.snapshot, frames[index]);
         }
       }
       doc.end();
@@ -279,8 +265,6 @@ export class ShippingLabelsService {
   private drawLabelInFrame(
     doc: PDFKit.PDFDocument,
     label: ShippingLabelSnapshot,
-    packageNumber: number,
-    packageCount: number,
     frame: LabelFrame,
   ) {
     const scale = Math.min(
@@ -295,16 +279,11 @@ export class ShippingLabelsService {
       frame.y + (frame.height - height) / 2,
     );
     doc.scale(scale);
-    this.drawLabel(doc, label, packageNumber, packageCount);
+    this.drawLabel(doc, label);
     doc.restore();
   }
 
-  private drawLabel(
-    doc: PDFKit.PDFDocument,
-    label: ShippingLabelSnapshot,
-    packageNumber: number,
-    packageCount: number,
-  ) {
+  private drawLabel(doc: PDFKit.PDFDocument, label: ShippingLabelSnapshot) {
     const margin = 11;
     const width = LABEL_WIDTH - margin * 2;
     let y = 10;
@@ -376,17 +355,6 @@ export class ShippingLabelsService {
       ellipsis: true,
     });
     y += 39;
-    if (packageCount > 1) {
-      this.line(doc, margin, y, width, 1);
-      y += 8;
-      doc
-        .font('Helvetica-Bold')
-        .fontSize(10)
-        .text(`BULTO ${packageNumber} DE ${packageCount}`, margin, y, {
-          width,
-          align: 'center',
-        });
-    }
 
     doc
       .rect(3, 3, LABEL_WIDTH - 6, LABEL_HEIGHT - 6)

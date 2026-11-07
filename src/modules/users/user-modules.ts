@@ -155,6 +155,11 @@ export const userModules = [
   },
   { key: 'empresa', label: 'Empresa', route: '/configuracion/empresa' },
   {
+    key: 'envios-config',
+    label: 'Envíos',
+    route: '/configuracion/envios',
+  },
+  {
     key: 'metodos-pago',
     label: 'Metodos de pago',
     route: '/configuracion/metodos-pago',

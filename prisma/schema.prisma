@@ -554,6 +554,7 @@ model Empresa {
   stockTraspasos                  StockTraspaso[]
   productoColorImagenes           ProductoColorImagen[]
   metodosPago                     MetodoPago[]
+  enviosConfig                    EmpresaEnvioConfig[]
   ventas                          Venta[]
   ventasCodigoInternoSecuencias   VentaCodigoInternoSecuencia[]
   notasCredito                    NotaCredito[]
@@ -2699,6 +2700,19 @@ model AgenciaCourierSincronizacion {
 
   @@index([courier, iniciadaAt])
   @@map("agencia_courier_sincronizacion")
+}
+
+model EmpresaEnvioConfig {
+  id        BigInt    @id @default(autoincrement())
+  empresaId BigInt    @map("empresa_id")
+  metodo    String    @db.VarChar(50)
+  activo    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa   Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@unique([empresaId, metodo])
+  @@map("empresa_envio_config")
 }
 
 model NotaCredito {

@@ -21,6 +21,7 @@ import {
 } from '../../common/commercial-access';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CourierAgenciesService } from '../courier-agencies/courier-agencies.service';
+import { EnviosConfigService } from '../envios-config/envios-config.service';
 import {
   FindPublicShippingAgenciesDto,
   SubmitShippingDetailsDto,
@@ -34,6 +35,7 @@ const publicShippingLinkInclude = {
     select: {
       estado: true,
       correlativo: true,
+      empresaId: true,
       empresa: { select: { nombreComercial: true, logoUrl: true } },
     },
   },
@@ -48,6 +50,7 @@ export class ShippingLinksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly courierAgencies: CourierAgenciesService,
+    private readonly enviosConfig: EnviosConfigService,
   ) {}
 
   async generate(
@@ -150,7 +153,10 @@ export class ShippingLinksService {
 
   async getPublic(code: string) {
     const envio = await this.findAvailablePublicLink(code);
-    return this.toPublicResponse(envio);
+    const metodosEnvio = await this.enviosConfig.enabledMetodos(
+      envio.venta.empresaId,
+    );
+    return this.toPublicResponse(envio, metodosEnvio);
   }
 
   async submitPublic(code: string, dto: SubmitShippingDetailsDto) {
@@ -159,6 +165,13 @@ export class ShippingLinksService {
       throw new ConflictException('Los datos de envio ya fueron recibidos');
     }
     const courier = this.toCourierProvider(dto.agencia);
+    const enabled = await this.enviosConfig.isEnabled(
+      envio.venta.empresaId,
+      dto.agencia,
+    );
+    if (!enabled) {
+      throw new BadRequestException('El metodo de envio no esta disponible');
+    }
     const agency = await this.prisma.agenciaCourier.findUnique({
       where: {
         courier_externalId: {
@@ -216,6 +229,13 @@ export class ShippingLinksService {
     const envio = await this.findAvailablePublicLink(code);
     if (envio.estado === VentaEnvioEstado.recibido) {
       throw new ConflictException('Los datos de envio ya fueron recibidos');
+    }
+    const enabled = await this.enviosConfig.isEnabled(
+      envio.venta.empresaId,
+      dto.agencia,
+    );
+    if (!enabled) {
+      throw new BadRequestException('El metodo de envio no esta disponible');
     }
     const courier = this.toCourierProvider(dto.agencia);
     if ((dto.lat === undefined) !== (dto.lng === undefined)) {
@@ -318,11 +338,12 @@ export class ShippingLinksService {
     };
   }
 
-  private toPublicResponse(envio: PublicShippingLink) {
+  private toPublicResponse(envio: PublicShippingLink, metodosEnvio: string[]) {
     return {
       estado: envio.estado,
       venta: { correlativo: envio.venta.correlativo },
       negocio: envio.venta.empresa,
+      metodosEnvio,
     };
   }
 

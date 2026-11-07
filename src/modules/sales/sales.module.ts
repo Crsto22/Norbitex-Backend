@@ -11,6 +11,7 @@ import { BillingIntegrationModule } from '../billing-integration/billing-integra
 import { PublicShippingLinksController } from './public-shipping-links.controller';
 import { ShippingLinksService } from './shipping-links.service';
 import { CourierAgenciesModule } from '../courier-agencies/courier-agencies.module';
+import { EnviosConfigModule } from '../envios-config/envios-config.module';
 import { ShippingLabelsService } from './shipping-labels.service';
 
 @Module({
@@ -21,6 +22,7 @@ import { ShippingLabelsService } from './shipping-labels.service';
     StockModule,
     BillingIntegrationModule,
     CourierAgenciesModule,
+    EnviosConfigModule,
   ],
   controllers: [SalesController, PublicShippingLinksController],
   providers: [
