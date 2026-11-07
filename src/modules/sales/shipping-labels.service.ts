@@ -421,50 +421,15 @@ export class ShippingLabelsService {
 
     doc
       .font('Helvetica-Bold')
-      .fontSize(10)
-      .text(`VENTA: ${label.saleCode}`, margin, y, {
-        width: width * 0.58,
-      });
-    doc
       .fontSize(12)
-      .text(
-        `BULTO ${packageNumber} DE ${packageCount}`,
-        margin + width * 0.58,
-        y - 1,
-        {
-          width: width * 0.42,
-          align: 'right',
-        },
-      );
-    y += 23;
-    doc
-      .font('Helvetica')
-      .fontSize(7)
-      .fillColor('#4b5563')
-      .text('CONTENIDO', margin, y);
-    y += 9;
-    const productLines = label.products
-      .slice(0, 4)
-      .map((product) => `${product.quantity} x ${product.description}`);
-    if (label.products.length > 4) {
-      productLines.push(`+ ${label.products.length - 4} productos adicionales`);
-    }
-    doc
-      .font('Helvetica')
-      .fontSize(8)
-      .fillColor('#111827')
-      .text(productLines.join('\n'), margin, y, {
+      .text(`BULTO ${packageNumber} DE ${packageCount}`, margin, y, {
         width,
-        height: 52,
-        ellipsis: true,
+        align: 'center',
       });
+    y += 23;
 
-    const codeY = LABEL_HEIGHT - 63;
-    this.line(doc, margin, codeY - 8, width, 1);
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(18)
-      .text(label.shippingCode, margin, codeY, { width, align: 'center' });
+    const footerY = LABEL_HEIGHT - 40;
+    this.line(doc, margin, footerY - 8, width, 1);
     doc
       .font('Helvetica')
       .fontSize(7)
@@ -474,7 +439,7 @@ export class ShippingLabelsService {
           .filter(Boolean)
           .join(' · '),
         margin,
-        codeY + 25,
+        footerY,
         { width, align: 'center' },
       );
     doc

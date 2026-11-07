@@ -24,6 +24,7 @@ export class FindDeliveriesQueryDto extends HistoryDateQueryDto {
     'en_transito',
     'entregada',
     'incidencia',
+    'enviado',
   ])
   estado?:
     | 'pendiente'
@@ -31,7 +32,8 @@ export class FindDeliveriesQueryDto extends HistoryDateQueryDto {
     | 'por_despachar'
     | 'en_transito'
     | 'entregada'
-    | 'incidencia';
+    | 'incidencia'
+    | 'enviado';
 
   @IsOptional()
   @Type(() => String)

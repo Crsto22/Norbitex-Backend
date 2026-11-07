@@ -1442,6 +1442,21 @@ export class SalesService {
       if (requested === 'incidencia') {
         return logistics(VentaEnvioEstadoLogistico.INCIDENCIA);
       }
+      if (requested === 'enviado') {
+        return {
+          envio: {
+            is: {
+              estadoLogistico: {
+                in: [
+                  VentaEnvioEstadoLogistico.EN_TRANSITO,
+                  VentaEnvioEstadoLogistico.ENTREGADO,
+                  VentaEnvioEstadoLogistico.INCIDENCIA,
+                ],
+              },
+            },
+          },
+        };
+      }
       if (requested === 'entregada') {
         return {
           OR: [
