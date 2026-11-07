@@ -5,7 +5,6 @@ import {
   IsInt,
   IsISO8601,
   IsOptional,
-  IsBoolean,
   IsString,
   IsUUID,
   Min,
@@ -99,14 +98,6 @@ export class CreateSaleDto {
   @IsOptional()
   @IsString()
   clienteId?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  recogerDespues?: boolean;
-
-  @IsOptional()
-  @IsISO8601()
-  recojoHasta?: string;
 
   @IsOptional()
   @IsEnum(VentaDescuentoTipo)

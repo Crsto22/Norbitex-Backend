@@ -153,7 +153,7 @@ export class ShippingLinksService {
 
   async getPublic(code: string) {
     const envio = await this.findAvailablePublicLink(code);
-    const metodosEnvio = await this.enviosConfig.enabledCourierMetodos(
+    const metodosEnvio = await this.enviosConfig.enabledMetodosDetalle(
       envio.venta.empresaId,
     );
     return this.toPublicResponse(envio, metodosEnvio);
@@ -164,14 +164,30 @@ export class ShippingLinksService {
     if (envio.estado === VentaEnvioEstado.recibido) {
       throw new ConflictException('Los datos de envio ya fueron recibidos');
     }
-    const courier = this.toCourierProvider(dto.agencia);
-    const enabled = await this.enviosConfig.isEnabled(
+    const metodo = await this.enviosConfig.getMetodo(
       envio.venta.empresaId,
-      dto.agencia,
+      dto.metodo,
     );
-    if (!enabled) {
+    if (!metodo?.activo) {
       throw new BadRequestException('El metodo de envio no esta disponible');
     }
+
+    const datos = {
+      nombreCompleto: dto.nombreCompleto.trim().replace(/\s+/g, ' '),
+      dni: dto.dni,
+      celular: dto.celular,
+      metodoEnvio: metodo.metodo,
+      recibidoAt: new Date(),
+    };
+
+    if (metodo.tipo === 'recojo') {
+      return this.submitPickup(envio, datos);
+    }
+
+    if (!dto.agencia || !dto.agenciaExternalId) {
+      throw new BadRequestException('Seleccione una agencia de envio');
+    }
+    const courier = this.toCourierProvider(dto.agencia);
     const agency = await this.prisma.agenciaCourier.findUnique({
       where: {
         courier_externalId: {
@@ -190,11 +206,9 @@ export class ShippingLinksService {
         estado: VentaEnvioEstado.pendiente,
       },
       data: {
+        ...datos,
         estado: VentaEnvioEstado.recibido,
         estadoLogistico: VentaEnvioEstadoLogistico.POR_DESPACHAR,
-        nombreCompleto: dto.nombreCompleto.trim().replace(/\s+/g, ' '),
-        dni: dto.dni,
-        celular: dto.celular,
         agencia: dto.agencia,
         agenciaExternalId: agency.externalId,
         agenciaNombre: agency.nombre,
@@ -205,7 +219,6 @@ export class ShippingLinksService {
         agenciaUbigeo: agency.ubigeo,
         agenciaLatitud: agency.latitud,
         agenciaLongitud: agency.longitud,
-        recibidoAt: new Date(),
       },
     });
 
@@ -221,6 +234,68 @@ export class ShippingLinksService {
         detalle: 'Datos de envio y agencia recibidos',
       },
     });
+
+    return { estado: VentaEnvioEstado.recibido };
+  }
+
+  private async submitPickup(
+    envio: PublicShippingLink,
+    datos: {
+      nombreCompleto: string;
+      dni: string;
+      celular: string;
+      metodoEnvio: string;
+      recibidoAt: Date;
+    },
+  ) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.ventaEnvio.updateMany({
+        where: {
+          id: envio.id,
+          estado: VentaEnvioEstado.pendiente,
+        },
+        data: {
+          ...datos,
+          estado: VentaEnvioEstado.recibido,
+          estadoLogistico: VentaEnvioEstadoLogistico.POR_PREPARAR,
+          agencia: null,
+          agenciaExternalId: null,
+          agenciaNombre: null,
+          agenciaDireccion: null,
+          agenciaDepartamento: null,
+          agenciaProvincia: null,
+          agenciaDistrito: null,
+          agenciaUbigeo: null,
+          agenciaLatitud: null,
+          agenciaLongitud: null,
+        },
+      });
+
+      if (updated.count !== 1) return updated;
+
+      await tx.venta.update({
+        where: { id: envio.ventaId },
+        data: {
+          recojoPosterior: true,
+          estadoEntrega: VentaEntregaEstado.pendiente,
+        },
+      });
+
+      await tx.ventaEnvioHistorial.create({
+        data: {
+          ventaEnvioId: envio.id,
+          estadoAnterior: envio.estadoLogistico,
+          estadoNuevo: VentaEnvioEstadoLogistico.POR_PREPARAR,
+          detalle: 'Recojo en tienda registrado por el cliente',
+        },
+      });
+
+      return updated;
+    });
+
+    if (result.count !== 1) {
+      throw new ConflictException('Los datos de envio ya fueron recibidos');
+    }
 
     return { estado: VentaEnvioEstado.recibido };
   }
@@ -309,6 +384,7 @@ export class ShippingLinksService {
     agenciaUbigeo: string | null;
     agenciaLatitud: number | null;
     agenciaLongitud: number | null;
+    metodoEnvio: string | null;
     recibidoAt: Date | null;
     despachadoAt: Date | null;
     entregadoAt: Date | null;
@@ -330,6 +406,7 @@ export class ShippingLinksService {
       agenciaUbigeo: envio.agenciaUbigeo,
       agenciaLatitud: envio.agenciaLatitud,
       agenciaLongitud: envio.agenciaLongitud,
+      metodoEnvio: envio.metodoEnvio,
       recibidoAt: envio.recibidoAt?.toISOString() ?? null,
       despachadoAt: envio.despachadoAt?.toISOString() ?? null,
       entregadoAt: envio.entregadoAt?.toISOString() ?? null,
@@ -338,7 +415,15 @@ export class ShippingLinksService {
     };
   }
 
-  private toPublicResponse(envio: PublicShippingLink, metodosEnvio: string[]) {
+  private toPublicResponse(
+    envio: PublicShippingLink,
+    metodosEnvio: Array<{
+      metodo: string;
+      nombre: string;
+      tipo: string;
+      direccion: string | null;
+    }>,
+  ) {
     return {
       estado: envio.estado,
       venta: { correlativo: envio.venta.correlativo },

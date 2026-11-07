@@ -518,11 +518,6 @@ export class SalesService {
       );
     }
 
-    const recogerDespues = dto.recogerDespues === true;
-    if (recogerDespues) {
-      this.validatePickupClient(cliente);
-    }
-
     if (electronicSale && !billingContext.enabled) {
       await this.validateSunatSalePrerequisites(empresaId);
     }
@@ -636,7 +631,7 @@ export class SalesService {
         productoVarianteId: line.productoVarianteId,
         descripcion: line.descripcion,
         cantidad: line.cantidad,
-        cantidadEntregada: recogerDespues ? 0 : line.cantidad,
+        cantidadEntregada: line.cantidad,
         unidadMedidaCodigo: line.unidadMedidaCodigo,
         tipoAfectacionIgvCodigo: line.tipoAfectacionIgvCodigo,
         precioUnitario: line.precioUnitario,
@@ -783,13 +778,9 @@ export class SalesService {
               igvMonto: calculated.igvMonto,
               total,
               estado: VentaEstado.completada,
-              recojoPosterior: recogerDespues,
-              recojoHasta: dto.recojoHasta
-                ? new Date(`${dto.recojoHasta.slice(0, 10)}T00:00:00.000Z`)
-                : null,
-              estadoEntrega: recogerDespues
-                ? VentaEntregaEstado.pendiente
-                : VentaEntregaEstado.entregada,
+              recojoPosterior: false,
+              recojoHasta: null,
+              estadoEntrega: VentaEntregaEstado.entregada,
               sunatEstado: electronicSale
                 ? SunatEstado.pendiente_envio
                 : SunatEstado.no_aplica,
@@ -1461,6 +1452,10 @@ export class SalesService {
         return {
           OR: [
             {
+              envio: { is: { metodoEnvio: 'RECOJO' } },
+              estadoEntrega: VentaEntregaEstado.entregada,
+            },
+            {
               envio: null,
               recojoPosterior: true,
               estadoEntrega: VentaEntregaEstado.entregada,
@@ -1480,9 +1475,23 @@ export class SalesService {
 
     const modeWhere: Prisma.VentaWhereInput =
       query.mode === 'pickup'
-        ? { recojoPosterior: true, envio: null }
+        ? {
+            OR: [
+              { envio: { is: { metodoEnvio: 'RECOJO' } } },
+              { recojoPosterior: true, envio: null },
+            ],
+          }
         : query.mode === 'courier'
-          ? { envio: { isNot: null } }
+          ? {
+              envio: {
+                is: {
+                  OR: [
+                    { metodoEnvio: null },
+                    { metodoEnvio: { not: 'RECOJO' } },
+                  ],
+                },
+              },
+            }
           : {
               OR: [{ recojoPosterior: true }, { envio: { isNot: null } }],
             };
@@ -1560,10 +1569,7 @@ export class SalesService {
       this.prisma.venta.count({
         where: {
           ...commonWhere,
-          AND: [
-            ...commonAnd,
-            { envio: null, estadoEntrega: VentaEntregaEstado.parcial },
-          ],
+          AND: [...commonAnd, { estadoEntrega: VentaEntregaEstado.parcial }],
         },
       }),
       this.prisma.ventaDetalle.aggregate({
@@ -1619,7 +1625,7 @@ export class SalesService {
       throw new BadRequestException('La venta no esta marcada para recojo');
     }
 
-    if (venta.envio) {
+    if (venta.envio && venta.envio.metodoEnvio !== 'RECOJO') {
       throw new BadRequestException(
         'La venta tiene un envio por courier; use el despacho al courier',
       );
@@ -2320,32 +2326,6 @@ export class SalesService {
 
   // ── Private Helpers ────────────────────────────────────────────────
 
-  private validatePickupClient(
-    cliente: {
-      tipoDocumento: ClienteTipoDocumento;
-      numeroDocumento: string | null;
-    } | null,
-  ) {
-    if (!cliente?.numeroDocumento) {
-      throw new BadRequestException(
-        'Para recoger despues debe seleccionar un cliente con DNI o RUC',
-      );
-    }
-
-    const validDni =
-      cliente.tipoDocumento === ClienteTipoDocumento.dni &&
-      /^\d{8}$/.test(cliente.numeroDocumento);
-    const validRuc =
-      cliente.tipoDocumento === ClienteTipoDocumento.ruc &&
-      /^\d{11}$/.test(cliente.numeroDocumento);
-
-    if (!validDni && !validRuc) {
-      throw new BadRequestException(
-        'Para recoger despues el cliente debe tener DNI o RUC valido',
-      );
-    }
-  }
-
   private async generateInternalSaleCode(
     tx: Prisma.TransactionClient,
     empresaId: bigint,
@@ -2925,6 +2905,7 @@ export class SalesService {
             agenciaUbigeo: venta.envio.agenciaUbigeo,
             agenciaLatitud: venta.envio.agenciaLatitud,
             agenciaLongitud: venta.envio.agenciaLongitud,
+            metodoEnvio: venta.envio.metodoEnvio,
             recibidoAt: venta.envio.recibidoAt?.toISOString() ?? null,
             despachadoAt: venta.envio.despachadoAt?.toISOString() ?? null,
             entregadoAt: venta.envio.entregadoAt?.toISOString() ?? null,

@@ -28,12 +28,18 @@ export class SubmitShippingDetailsDto {
   })
   celular: string;
 
-  @IsEnum(VentaEnvioAgencia)
-  agencia: VentaEnvioAgencia;
+  @IsString()
+  @Length(1, 50)
+  metodo: string;
 
+  @IsOptional()
+  @IsEnum(VentaEnvioAgencia)
+  agencia?: VentaEnvioAgencia;
+
+  @IsOptional()
   @IsString()
   @Length(1, 100)
-  agenciaExternalId: string;
+  agenciaExternalId?: string;
 }
 
 export class FindPublicShippingAgenciesDto {

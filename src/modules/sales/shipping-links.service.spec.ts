@@ -33,6 +33,8 @@ describe('ShippingLinksService', () => {
   const enviosConfig = {
     enabledMetodos: jest.fn(),
     enabledCourierMetodos: jest.fn(),
+    enabledMetodosDetalle: jest.fn(),
+    getMetodo: jest.fn(),
     isEnabled: jest.fn(),
   };
   const service = new ShippingLinksService(
@@ -78,6 +80,23 @@ describe('ShippingLinksService', () => {
     enviosConfig.isEnabled.mockResolvedValue(true);
     enviosConfig.enabledMetodos.mockResolvedValue(['SHALOM', 'OLVA']);
     enviosConfig.enabledCourierMetodos.mockResolvedValue(['SHALOM', 'OLVA']);
+    enviosConfig.enabledMetodosDetalle.mockResolvedValue([
+      {
+        metodo: 'RECOJO',
+        nombre: 'Recojo en tienda',
+        tipo: 'recojo',
+        direccion: null,
+      },
+      { metodo: 'SHALOM', nombre: 'Shalom', tipo: 'courier', direccion: null },
+      { metodo: 'OLVA', nombre: 'Olva', tipo: 'courier', direccion: null },
+    ]);
+    enviosConfig.getMetodo.mockResolvedValue({
+      metodo: 'SHALOM',
+      nombre: 'Shalom',
+      tipo: 'courier',
+      activo: true,
+      direccion: null,
+    });
   });
 
   it('reutiliza el enlace existente mientras no se regenere', async () => {
@@ -188,6 +207,7 @@ describe('ShippingLinksService', () => {
         nombreCompleto: '  Maria   Lopez ',
         dni: '12345678',
         celular: '987654321',
+        metodo: 'SHALOM',
         agencia: VentaEnvioAgencia.SHALOM,
         agenciaExternalId: '392',
       }),
@@ -226,6 +246,7 @@ describe('ShippingLinksService', () => {
         nombreCompleto: 'Maria Lopez',
         dni: '12345678',
         celular: '987654321',
+        metodo: 'OLVA',
         agencia: VentaEnvioAgencia.OLVA,
         agenciaExternalId: '1',
       }),

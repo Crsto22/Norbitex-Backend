@@ -35,6 +35,7 @@ export class EnviosConfigController {
       this.getEmpresaId(user),
       metodo.trim().toUpperCase(),
       dto.activo,
+      dto.direccion,
     );
   }
 

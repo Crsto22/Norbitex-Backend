@@ -17,32 +17,58 @@ export class EnviosConfigService {
   async findAll(empresaId: bigint) {
     const configs = await this.prisma.empresaEnvioConfig.findMany({
       where: { empresaId },
-      select: { metodo: true, activo: true },
+      select: { metodo: true, activo: true, direccion: true },
     });
-    const activoByMetodo = new Map(
-      configs.map((config) => [config.metodo, config.activo]),
+    const configByMetodo = new Map(
+      configs.map((config) => [config.metodo, config]),
     );
 
-    return ENVIO_METODOS.map(({ metodo, nombre, tipo }) => ({
-      metodo,
-      nombre,
-      tipo,
-      activo: activoByMetodo.get(metodo) ?? true,
-    }));
+    return ENVIO_METODOS.map(({ metodo, nombre, tipo }) => {
+      const config = configByMetodo.get(metodo);
+      return {
+        metodo,
+        nombre,
+        tipo,
+        activo: config?.activo ?? true,
+        direccion: config?.direccion ?? null,
+      };
+    });
   }
 
-  async update(empresaId: bigint, metodo: string, activo: boolean) {
+  async update(
+    empresaId: bigint,
+    metodo: string,
+    activo: boolean,
+    direccion?: string | null,
+  ) {
     const known = ENVIO_METODOS.find((item) => item.metodo === metodo);
     if (!known) {
       throw new BadRequestException('Metodo de envio no valido');
     }
 
+    const direccionNormalizada =
+      direccion === undefined
+        ? undefined
+        : direccion?.trim()
+          ? direccion.trim()
+          : null;
+
     const config = await this.prisma.empresaEnvioConfig.upsert({
       where: {
         empresaId_metodo: { empresaId, metodo },
       },
-      update: { activo },
-      create: { empresaId, metodo, activo },
+      update: {
+        activo,
+        ...(direccionNormalizada !== undefined
+          ? { direccion: direccionNormalizada }
+          : {}),
+      },
+      create: {
+        empresaId,
+        metodo,
+        activo,
+        direccion: direccionNormalizada ?? null,
+      },
     });
 
     return {
@@ -50,6 +76,7 @@ export class EnviosConfigService {
       nombre: known.nombre,
       tipo: known.tipo,
       activo: config.activo,
+      direccion: config.direccion,
     };
   }
 
@@ -63,6 +90,16 @@ export class EnviosConfigService {
     return (await this.findAll(empresaId))
       .filter((item) => item.activo && item.tipo === 'courier')
       .map((item) => item.metodo);
+  }
+
+  async enabledMetodosDetalle(empresaId: bigint) {
+    return (await this.findAll(empresaId)).filter((item) => item.activo);
+  }
+
+  async getMetodo(empresaId: bigint, metodo: string) {
+    return (await this.findAll(empresaId)).find(
+      (item) => item.metodo === metodo,
+    );
   }
 
   async isEnabled(empresaId: bigint, metodo: string) {
