@@ -11,13 +11,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-export const shippingLabelPaperFormats = ['THERMAL', 'A4'] as const;
-export const shippingLabelOrientations = ['PORTRAIT', 'LANDSCAPE'] as const;
-
-export type ShippingLabelPaperFormat =
-  (typeof shippingLabelPaperFormats)[number];
-export type ShippingLabelOrientation =
-  (typeof shippingLabelOrientations)[number];
+export const shippingLabelColumns = [1, 2] as const;
+export type ShippingLabelColumns = (typeof shippingLabelColumns)[number];
 
 export class PrintShippingLabelDto {
   @Type(() => Number)
@@ -26,16 +21,10 @@ export class PrintShippingLabelDto {
   @Max(50)
   packageCount: number;
 
-  @IsIn(shippingLabelPaperFormats)
-  paperFormat: ShippingLabelPaperFormat;
-
   @Type(() => Number)
   @IsInt()
-  @IsIn([1, 2, 4])
-  labelsPerPage: 1 | 2 | 4;
-
-  @IsIn(shippingLabelOrientations)
-  orientation: ShippingLabelOrientation;
+  @IsIn(shippingLabelColumns)
+  columns: ShippingLabelColumns;
 }
 
 export class BatchShippingLabelItemDto {
@@ -57,14 +46,8 @@ export class PrintShippingLabelBatchDto {
   @Type(() => BatchShippingLabelItemDto)
   sales: BatchShippingLabelItemDto[];
 
-  @IsIn(shippingLabelPaperFormats)
-  paperFormat: ShippingLabelPaperFormat;
-
   @Type(() => Number)
   @IsInt()
-  @IsIn([1, 2, 4])
-  labelsPerPage: 1 | 2 | 4;
-
-  @IsIn(shippingLabelOrientations)
-  orientation: ShippingLabelOrientation;
+  @IsIn(shippingLabelColumns)
+  columns: ShippingLabelColumns;
 }

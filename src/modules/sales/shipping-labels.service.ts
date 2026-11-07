@@ -14,20 +14,17 @@ import {
   BatchShippingLabelItemDto,
   PrintShippingLabelBatchDto,
   PrintShippingLabelDto,
-  type ShippingLabelOrientation,
-  type ShippingLabelPaperFormat,
+  type ShippingLabelColumns,
 } from './dto/shipping-label.dto';
 
-const LABEL_WIDTH = 100 * 2.834645669;
-const LABEL_HEIGHT = 150 * 2.834645669;
+const LABEL_WIDTH = 115 * 2.834645669;
+const LABEL_HEIGHT = 60 * 2.834645669;
 const A4_WIDTH = 210 * 2.834645669;
 const A4_HEIGHT = 297 * 2.834645669;
 const MAX_LABELS_PER_BATCH = 100;
 
 type RenderOptions = {
-  paperFormat: ShippingLabelPaperFormat;
-  labelsPerPage: 1 | 2 | 4;
-  orientation: ShippingLabelOrientation;
+  columns: ShippingLabelColumns;
 };
 
 type LabelFrame = { x: number; y: number; width: number; height: number };
@@ -199,15 +196,10 @@ export class ShippingLabelsService {
   }
 
   private options(
-    dto: Pick<
-      PrintShippingLabelDto | PrintShippingLabelBatchDto,
-      'paperFormat' | 'labelsPerPage' | 'orientation'
-    >,
+    dto: Pick<PrintShippingLabelDto | PrintShippingLabelBatchDto, 'columns'>,
   ): RenderOptions {
     return {
-      paperFormat: dto.paperFormat,
-      labelsPerPage: dto.paperFormat === 'THERMAL' ? 1 : dto.labelsPerPage,
-      orientation: dto.orientation,
+      columns: dto.columns,
     };
   }
 
@@ -221,10 +213,7 @@ export class ShippingLabelsService {
     return new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({
         autoFirstPage: false,
-        size:
-          options.paperFormat === 'THERMAL'
-            ? [LABEL_WIDTH, LABEL_HEIGHT]
-            : [A4_WIDTH, A4_HEIGHT],
+        size: [A4_WIDTH, A4_HEIGHT],
         margin: 0,
         compress: true,
       });
@@ -248,37 +237,19 @@ export class ShippingLabelsService {
         }
       }
 
-      if (options.paperFormat === 'THERMAL') {
-        for (const page of pages) {
-          doc.addPage({ size: [LABEL_WIDTH, LABEL_HEIGHT], margin: 0 });
-          this.drawLabel(
+      const frames = this.a4Frames(options);
+      for (let offset = 0; offset < pages.length; offset += frames.length) {
+        doc.addPage({ size: [A4_WIDTH, A4_HEIGHT], margin: 0 });
+        const pageItems = pages.slice(offset, offset + frames.length);
+        for (let index = 0; index < pageItems.length; index += 1) {
+          const page = pageItems[index];
+          this.drawLabelInFrame(
             doc,
             page.snapshot,
             page.packageNumber,
             page.packageCount,
+            frames[index],
           );
-        }
-      } else {
-        const frames = this.a4Frames(options);
-        for (let offset = 0; offset < pages.length; offset += frames.length) {
-          doc.addPage({
-            size: [A4_WIDTH, A4_HEIGHT],
-            layout: options.orientation.toLowerCase() as
-              | 'portrait'
-              | 'landscape',
-            margin: 0,
-          });
-          const pageItems = pages.slice(offset, offset + frames.length);
-          for (let index = 0; index < pageItems.length; index += 1) {
-            const page = pageItems[index];
-            this.drawLabelInFrame(
-              doc,
-              page.snapshot,
-              page.packageNumber,
-              page.packageCount,
-              frames[index],
-            );
-          }
         }
       }
       doc.end();
@@ -286,25 +257,14 @@ export class ShippingLabelsService {
   }
 
   private a4Frames(options: RenderOptions): LabelFrame[] {
-    const isLandscape = options.orientation === 'LANDSCAPE';
-    const pageWidth = isLandscape ? A4_HEIGHT : A4_WIDTH;
-    const pageHeight = isLandscape ? A4_WIDTH : A4_HEIGHT;
     const margin = 18;
     const gap = 10;
-    const columns =
-      options.labelsPerPage === 1
-        ? 1
-        : options.labelsPerPage === 2
-          ? isLandscape
-            ? 2
-            : 1
-          : 2;
-    const rows =
-      options.labelsPerPage === 1 ? 1 : options.labelsPerPage / columns;
-    const width = (pageWidth - margin * 2 - gap * (columns - 1)) / columns;
-    const height = (pageHeight - margin * 2 - gap * (rows - 1)) / rows;
+    const columns = options.columns;
+    const rows = columns === 1 ? 3 : 5;
+    const width = (A4_WIDTH - margin * 2 - gap * (columns - 1)) / columns;
+    const height = (A4_HEIGHT - margin * 2 - gap * (rows - 1)) / rows;
 
-    return Array.from({ length: options.labelsPerPage }, (_, index) => {
+    return Array.from({ length: columns * rows }, (_, index) => {
       const column = index % columns;
       const row = Math.floor(index / columns);
       return {
@@ -345,39 +305,39 @@ export class ShippingLabelsService {
     packageNumber: number,
     packageCount: number,
   ) {
-    const margin = 16;
+    const margin = 11;
     const width = LABEL_WIDTH - margin * 2;
-    let y = 14;
+    let y = 10;
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(9)
+      .fillColor('#111827')
+      .text(label.businessName, margin, y, { width: width * 0.62 });
+    doc.fontSize(11).text(label.courier, margin + width * 0.62, y - 1, {
+      width: width * 0.38,
+      align: 'right',
+    });
+    y += 17;
+    this.line(doc, margin, y, width, 1.2);
+    y += 5;
+
+    doc
+      .font('Helvetica')
+      .fontSize(5.5)
+      .fillColor('#4b5563')
+      .text('DESTINATARIO', margin, y);
+    y += 7;
     doc
       .font('Helvetica-Bold')
       .fontSize(11)
       .fillColor('#111827')
-      .text(label.businessName, margin, y, { width: width * 0.62 });
-    doc.fontSize(15).text(label.courier, margin + width * 0.62, y - 2, {
-      width: width * 0.38,
-      align: 'right',
-    });
-    y += 27;
-    this.line(doc, margin, y, width, 2);
-    y += 9;
-
-    doc
-      .font('Helvetica')
-      .fontSize(7)
-      .fillColor('#4b5563')
-      .text('DESTINATARIO', margin, y);
-    y += 10;
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(15)
-      .fillColor('#111827')
       .text(label.recipientName.toUpperCase(), margin, y, {
         width,
-        height: 38,
+        height: 15,
         ellipsis: true,
       });
-    y += 40;
-    doc.font('Helvetica').fontSize(9);
+    y += 17;
+    doc.font('Helvetica').fontSize(6.5);
     doc.text(
       [
         label.recipientDocument ? `DOC: ${label.recipientDocument}` : null,
@@ -389,9 +349,9 @@ export class ShippingLabelsService {
       y,
       { width },
     );
-    y += 19;
+    y += 12;
     this.line(doc, margin, y, width, 1);
-    y += 9;
+    y += 5;
 
     doc
       .font('Helvetica')
@@ -416,32 +376,18 @@ export class ShippingLabelsService {
       ellipsis: true,
     });
     y += 39;
-    this.line(doc, margin, y, width, 1);
-    y += 9;
+    if (packageCount > 1) {
+      this.line(doc, margin, y, width, 1);
+      y += 8;
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(10)
+        .text(`BULTO ${packageNumber} DE ${packageCount}`, margin, y, {
+          width,
+          align: 'center',
+        });
+    }
 
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(12)
-      .text(`BULTO ${packageNumber} DE ${packageCount}`, margin, y, {
-        width,
-        align: 'center',
-      });
-    y += 23;
-
-    const footerY = LABEL_HEIGHT - 40;
-    this.line(doc, margin, footerY - 8, width, 1);
-    doc
-      .font('Helvetica')
-      .fontSize(7)
-      .fillColor('#4b5563')
-      .text(
-        [label.branchName, 'Etiqueta generada por Nuvex']
-          .filter(Boolean)
-          .join(' · '),
-        margin,
-        footerY,
-        { width, align: 'center' },
-      );
     doc
       .rect(3, 3, LABEL_WIDTH - 6, LABEL_HEIGHT - 6)
       .lineWidth(1)
