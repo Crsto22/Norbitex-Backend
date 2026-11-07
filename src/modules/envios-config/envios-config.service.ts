@@ -2,11 +2,13 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export const ENVIO_METODOS = [
-  { metodo: 'SHALOM', nombre: 'Shalom' },
-  { metodo: 'OLVA', nombre: 'Olva' },
+  { metodo: 'RECOJO', nombre: 'Recojo en tienda', tipo: 'recojo' },
+  { metodo: 'SHALOM', nombre: 'Shalom', tipo: 'courier' },
+  { metodo: 'OLVA', nombre: 'Olva', tipo: 'courier' },
 ] as const;
 
 export type EnvioMetodo = (typeof ENVIO_METODOS)[number]['metodo'];
+export type EnvioMetodoTipo = (typeof ENVIO_METODOS)[number]['tipo'];
 
 @Injectable()
 export class EnviosConfigService {
@@ -21,9 +23,10 @@ export class EnviosConfigService {
       configs.map((config) => [config.metodo, config.activo]),
     );
 
-    return ENVIO_METODOS.map(({ metodo, nombre }) => ({
+    return ENVIO_METODOS.map(({ metodo, nombre, tipo }) => ({
       metodo,
       nombre,
+      tipo,
       activo: activoByMetodo.get(metodo) ?? true,
     }));
   }
@@ -45,6 +48,7 @@ export class EnviosConfigService {
     return {
       metodo: config.metodo,
       nombre: known.nombre,
+      tipo: known.tipo,
       activo: config.activo,
     };
   }
@@ -52,6 +56,12 @@ export class EnviosConfigService {
   async enabledMetodos(empresaId: bigint) {
     return (await this.findAll(empresaId))
       .filter((item) => item.activo)
+      .map((item) => item.metodo);
+  }
+
+  async enabledCourierMetodos(empresaId: bigint) {
+    return (await this.findAll(empresaId))
+      .filter((item) => item.activo && item.tipo === 'courier')
       .map((item) => item.metodo);
   }
 

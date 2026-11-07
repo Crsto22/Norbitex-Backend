@@ -32,6 +32,7 @@ describe('ShippingLinksService', () => {
   };
   const enviosConfig = {
     enabledMetodos: jest.fn(),
+    enabledCourierMetodos: jest.fn(),
     isEnabled: jest.fn(),
   };
   const service = new ShippingLinksService(
@@ -76,6 +77,7 @@ describe('ShippingLinksService', () => {
     prisma.$transaction.mockImplementation((callback) => callback(prisma));
     enviosConfig.isEnabled.mockResolvedValue(true);
     enviosConfig.enabledMetodos.mockResolvedValue(['SHALOM', 'OLVA']);
+    enviosConfig.enabledCourierMetodos.mockResolvedValue(['SHALOM', 'OLVA']);
   });
 
   it('reutiliza el enlace existente mientras no se regenere', async () => {

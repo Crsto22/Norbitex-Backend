@@ -153,7 +153,7 @@ export class ShippingLinksService {
 
   async getPublic(code: string) {
     const envio = await this.findAvailablePublicLink(code);
-    const metodosEnvio = await this.enviosConfig.enabledMetodos(
+    const metodosEnvio = await this.enviosConfig.enabledCourierMetodos(
       envio.venta.empresaId,
     );
     return this.toPublicResponse(envio, metodosEnvio);
