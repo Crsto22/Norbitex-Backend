@@ -14,11 +14,23 @@ import {
   BatchShippingLabelItemDto,
   PrintShippingLabelBatchDto,
   PrintShippingLabelDto,
+  type ShippingLabelOrientation,
+  type ShippingLabelPaperFormat,
 } from './dto/shipping-label.dto';
 
 const LABEL_WIDTH = 100 * 2.834645669;
 const LABEL_HEIGHT = 150 * 2.834645669;
+const A4_WIDTH = 210 * 2.834645669;
+const A4_HEIGHT = 297 * 2.834645669;
 const MAX_LABELS_PER_BATCH = 100;
+
+type RenderOptions = {
+  paperFormat: ShippingLabelPaperFormat;
+  labelsPerPage: 1 | 2 | 4;
+  orientation: ShippingLabelOrientation;
+};
+
+type LabelFrame = { x: number; y: number; width: number; height: number };
 
 type ShippingLabelSnapshot = {
   shippingId: bigint;
@@ -49,10 +61,10 @@ export class ShippingLabelsService {
     dto: PrintShippingLabelDto,
   ) {
     const snapshot = await this.snapshot(empresaId, scope, publicId);
-    const buffer = await this.render([
-      { snapshot, packageCount: dto.packageCount },
-    ]);
-    await this.audit(userId, [{ snapshot, packageCount: dto.packageCount }]);
+    const options = this.options(dto);
+    const labels = [{ snapshot, packageCount: dto.packageCount }];
+    const buffer = await this.render(labels, options);
+    await this.audit(userId, labels, options);
     return {
       buffer,
       filename: `etiquetas-${safeFileName(snapshot.saleCode)}.pdf`,
@@ -78,8 +90,9 @@ export class ShippingLabelsService {
         packageCount: item.packageCount,
       })),
     );
-    const buffer = await this.render(snapshots);
-    await this.audit(userId, snapshots);
+    const options = this.options(dto);
+    const buffer = await this.render(snapshots, options);
+    await this.audit(userId, snapshots, options);
     return { buffer, filename: 'etiquetas-envios.pdf' };
   }
 
@@ -169,6 +182,7 @@ export class ShippingLabelsService {
       snapshot: ShippingLabelSnapshot;
       packageCount: number;
     }>,
+    options: RenderOptions,
   ) {
     return this.prisma.ventaEnvioEtiquetaImpresion.createMany({
       data: labels.map(({ snapshot, packageCount }) => ({
@@ -177,10 +191,24 @@ export class ShippingLabelsService {
         snapshot: {
           ...snapshot,
           shippingId: snapshot.shippingId.toString(),
+          print: options,
         },
         impresoPorId: userId,
       })),
     });
+  }
+
+  private options(
+    dto: Pick<
+      PrintShippingLabelDto | PrintShippingLabelBatchDto,
+      'paperFormat' | 'labelsPerPage' | 'orientation'
+    >,
+  ): RenderOptions {
+    return {
+      paperFormat: dto.paperFormat,
+      labelsPerPage: dto.paperFormat === 'THERMAL' ? 1 : dto.labelsPerPage,
+      orientation: dto.orientation,
+    };
   }
 
   private render(
@@ -188,11 +216,15 @@ export class ShippingLabelsService {
       snapshot: ShippingLabelSnapshot;
       packageCount: number;
     }>,
+    options: RenderOptions,
   ) {
     return new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({
         autoFirstPage: false,
-        size: [LABEL_WIDTH, LABEL_HEIGHT],
+        size:
+          options.paperFormat === 'THERMAL'
+            ? [LABEL_WIDTH, LABEL_HEIGHT]
+            : [A4_WIDTH, A4_HEIGHT],
         margin: 0,
         compress: true,
       });
@@ -201,18 +233,110 @@ export class ShippingLabelsService {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
+      const pages: Array<{
+        snapshot: ShippingLabelSnapshot;
+        packageNumber: number;
+        packageCount: number;
+      }> = [];
       for (const { snapshot, packageCount } of labels) {
         for (
           let packageNumber = 1;
           packageNumber <= packageCount;
           packageNumber += 1
         ) {
+          pages.push({ snapshot, packageNumber, packageCount });
+        }
+      }
+
+      if (options.paperFormat === 'THERMAL') {
+        for (const page of pages) {
           doc.addPage({ size: [LABEL_WIDTH, LABEL_HEIGHT], margin: 0 });
-          this.drawLabel(doc, snapshot, packageNumber, packageCount);
+          this.drawLabel(
+            doc,
+            page.snapshot,
+            page.packageNumber,
+            page.packageCount,
+          );
+        }
+      } else {
+        const frames = this.a4Frames(options);
+        for (let offset = 0; offset < pages.length; offset += frames.length) {
+          doc.addPage({
+            size: [A4_WIDTH, A4_HEIGHT],
+            layout: options.orientation.toLowerCase() as
+              | 'portrait'
+              | 'landscape',
+            margin: 0,
+          });
+          const pageItems = pages.slice(offset, offset + frames.length);
+          for (let index = 0; index < pageItems.length; index += 1) {
+            const page = pageItems[index];
+            this.drawLabelInFrame(
+              doc,
+              page.snapshot,
+              page.packageNumber,
+              page.packageCount,
+              frames[index],
+            );
+          }
         }
       }
       doc.end();
     });
+  }
+
+  private a4Frames(options: RenderOptions): LabelFrame[] {
+    const isLandscape = options.orientation === 'LANDSCAPE';
+    const pageWidth = isLandscape ? A4_HEIGHT : A4_WIDTH;
+    const pageHeight = isLandscape ? A4_WIDTH : A4_HEIGHT;
+    const margin = 18;
+    const gap = 10;
+    const columns =
+      options.labelsPerPage === 1
+        ? 1
+        : options.labelsPerPage === 2
+          ? isLandscape
+            ? 2
+            : 1
+          : 2;
+    const rows =
+      options.labelsPerPage === 1 ? 1 : options.labelsPerPage / columns;
+    const width = (pageWidth - margin * 2 - gap * (columns - 1)) / columns;
+    const height = (pageHeight - margin * 2 - gap * (rows - 1)) / rows;
+
+    return Array.from({ length: options.labelsPerPage }, (_, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      return {
+        x: margin + column * (width + gap),
+        y: margin + row * (height + gap),
+        width,
+        height,
+      };
+    });
+  }
+
+  private drawLabelInFrame(
+    doc: PDFKit.PDFDocument,
+    label: ShippingLabelSnapshot,
+    packageNumber: number,
+    packageCount: number,
+    frame: LabelFrame,
+  ) {
+    const scale = Math.min(
+      frame.width / LABEL_WIDTH,
+      frame.height / LABEL_HEIGHT,
+    );
+    const width = LABEL_WIDTH * scale;
+    const height = LABEL_HEIGHT * scale;
+    doc.save();
+    doc.translate(
+      frame.x + (frame.width - width) / 2,
+      frame.y + (frame.height - height) / 2,
+    );
+    doc.scale(scale);
+    this.drawLabel(doc, label, packageNumber, packageCount);
+    doc.restore();
   }
 
   private drawLabel(
