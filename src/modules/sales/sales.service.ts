@@ -1405,6 +1405,25 @@ export class SalesService {
     const hasDateFilter = Boolean(
       query.period || query.dateFrom || query.dateTo,
     );
+    const hasFechaEnvioFilter = Boolean(
+      query.fechaEnvioDesde || query.fechaEnvioHasta,
+    );
+    let fechaEnvioRange: Prisma.DateTimeFilter | undefined;
+    if (hasFechaEnvioFilter) {
+      const desde = query.fechaEnvioDesde ?? query.fechaEnvioHasta!;
+      const hasta = query.fechaEnvioHasta ?? query.fechaEnvioDesde!;
+      if (desde > hasta) {
+        throw new BadRequestException(
+          'fechaEnvioDesde no puede ser posterior a fechaEnvioHasta',
+        );
+      }
+      const fechaLimite = new Date(`${hasta}T00:00:00.000Z`);
+      fechaLimite.setUTCDate(fechaLimite.getUTCDate() + 1);
+      fechaEnvioRange = {
+        gte: new Date(`${desde}T00:00:00.000Z`),
+        lt: fechaLimite,
+      };
+    }
 
     const stateWhere = (
       requested: NonNullable<FindDeliveriesQueryDto['estado']>,
@@ -1496,8 +1515,30 @@ export class SalesService {
           : {
               OR: [{ recojoPosterior: true }, { envio: { isNot: null } }],
             };
+    const readyWhere: Prisma.VentaWhereInput = {
+      OR: [
+        { envio: { is: { estado: VentaEnvioEstado.recibido } } },
+        { envio: null, recojoPosterior: true },
+      ],
+    };
+    const servicioWhere: Prisma.VentaWhereInput | null = query.servicio
+      ? query.servicio === 'SHALOM' || query.servicio === 'OLVA'
+        ? {
+            envio: {
+              is: {
+                OR: [
+                  { metodoEnvio: query.servicio },
+                  { agencia: query.servicio },
+                ],
+              },
+            },
+          }
+        : { envio: { is: { metodoEnvio: query.servicio } } }
+      : null;
     const commonAnd: Prisma.VentaWhereInput[] = [
       modeWhere,
+      readyWhere,
+      ...(servicioWhere ? [servicioWhere] : []),
       ...(query.courier ? [{ envio: { is: { agencia: query.courier } } }] : []),
     ];
 
@@ -1506,6 +1547,9 @@ export class SalesService {
       estado: { not: VentaEstado.anulada },
       AND: commonAnd,
       ...(hasDateFilter ? { createdAt: resolveHistoryDateRange(query) } : {}),
+      ...(fechaEnvioRange
+        ? { envio: { is: { fechaEnvio: fechaEnvioRange } } }
+        : {}),
       ...(branchId ? { sucursalId: branchId } : {}),
       ...(scopedCreatorId(scope)
         ? { creadoPorId: scopedCreatorId(scope)! }
@@ -1557,7 +1601,9 @@ export class SalesService {
       this.prisma.venta.findMany({
         where,
         include: ventaInclude,
-        orderBy: { createdAt: 'desc' },
+        orderBy: hasFechaEnvioFilter
+          ? [{ envio: { fechaEnvio: 'asc' } }, { createdAt: 'desc' }]
+          : { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
       }),

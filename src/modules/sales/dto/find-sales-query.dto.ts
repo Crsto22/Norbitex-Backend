@@ -1,4 +1,4 @@
-import { IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsString, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsInt, Max, Min } from 'class-validator';
 import {
@@ -41,8 +41,21 @@ export class FindDeliveriesQueryDto extends HistoryDateQueryDto {
   courier?: VentaEnvioAgencia;
 
   @IsOptional()
+  @Type(() => String)
+  @IsIn(['SHALOM', 'OLVA', 'MOTORIZADO', 'DOMICILIO'])
+  servicio?: 'SHALOM' | 'OLVA' | 'MOTORIZADO' | 'DOMICILIO';
+
+  @IsOptional()
   @IsString()
   sucursalId?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  fechaEnvioDesde?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  fechaEnvioHasta?: string;
 
   @IsOptional()
   @Type(() => Number)
