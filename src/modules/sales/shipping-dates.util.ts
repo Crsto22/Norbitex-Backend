@@ -47,16 +47,19 @@ function utcDate(year: number, month: number, day: number) {
 
 /**
  * Calcula las próximas fechas de despacho disponibles según los días de la
- * semana habilitados y la hora de corte (zona America/Lima).
+ * semana habilitados, la hora de corte y los días de anticipación
+ * (zona America/Lima).
  *
  * - Si hoy es día de despacho y aún no pasó la hora de corte, hoy está
- *   disponible.
- * - Si ya pasó la hora de corte (o hoy no es día de despacho), la primera
- *   fecha disponible es el siguiente día habilitado.
+ *   disponible (cuando la anticipación es 0).
+ * - Si ya pasó la hora de corte, se suma un día.
+ * - La anticipación se suma como días calendario adicionales; luego la fecha
+ *   se ajusta al siguiente día de despacho habilitado.
  */
 export function calcularFechasDespacho(
   diasSemana: number[],
   horaCorte: string,
+  anticipacionDias = 0,
   cantidad = 14,
 ): string[] {
   const dias = new Set(diasSemana);
@@ -66,9 +69,13 @@ export function calcularFechasDespacho(
   const ahora = getLimaParts(new Date());
   const pasoCorte = hora * 60 + minuto <= ahora.hour * 60 + ahora.minute;
 
+  const offsetDias =
+    (Number.isFinite(anticipacionDias)
+      ? Math.max(0, Math.trunc(anticipacionDias))
+      : 0) + (pasoCorte ? 1 : 0);
   let cursor = utcDate(ahora.year, ahora.month, ahora.day);
-  if (pasoCorte) {
-    cursor = new Date(cursor.getTime() + 86_400_000);
+  if (offsetDias > 0) {
+    cursor = new Date(cursor.getTime() + offsetDias * 86_400_000);
   }
 
   const fechas: string[] = [];

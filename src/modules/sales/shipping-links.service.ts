@@ -193,6 +193,7 @@ export class ShippingLinksService {
     const fechasDisponibles = calcularFechasDespacho(
       despacho.diasSemana,
       despacho.horaCorte,
+      despacho.anticipacionDias,
     );
     if (!fechasDisponibles.includes(dto.fechaEnvio)) {
       throw new BadRequestException('La fecha de envio no esta disponible');
@@ -545,9 +546,11 @@ export class ShippingLinksService {
     return {
       diasSemana: config.diasSemana,
       horaCorte: config.horaCorte,
+      anticipacionDias: config.anticipacionDias,
       fechasDisponibles: calcularFechasDespacho(
         config.diasSemana,
         config.horaCorte,
+        config.anticipacionDias,
       ),
     };
   }

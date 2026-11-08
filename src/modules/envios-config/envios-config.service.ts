@@ -89,12 +89,13 @@ export class EnviosConfigService {
   async getDespacho(empresaId: bigint) {
     const config = await this.prisma.empresaDespachoConfig.findUnique({
       where: { empresaId },
-      select: { diasSemana: true, horaCorte: true },
+      select: { diasSemana: true, horaCorte: true, anticipacionDias: true },
     });
 
     return {
       diasSemana: config?.diasSemana ?? [],
       horaCorte: config?.horaCorte ?? '',
+      anticipacionDias: config?.anticipacionDias ?? 0,
       configurado: config !== null,
     };
   }
@@ -103,18 +104,25 @@ export class EnviosConfigService {
     empresaId: bigint,
     diasSemana: number[],
     horaCorte: string,
+    anticipacionDias = 0,
   ) {
     const diasNormalizados = [...new Set(diasSemana)].sort((a, b) => a - b);
 
     const config = await this.prisma.empresaDespachoConfig.upsert({
       where: { empresaId },
-      update: { diasSemana: diasNormalizados, horaCorte },
-      create: { empresaId, diasSemana: diasNormalizados, horaCorte },
+      update: { diasSemana: diasNormalizados, horaCorte, anticipacionDias },
+      create: {
+        empresaId,
+        diasSemana: diasNormalizados,
+        horaCorte,
+        anticipacionDias,
+      },
     });
 
     return {
       diasSemana: config.diasSemana,
       horaCorte: config.horaCorte,
+      anticipacionDias: config.anticipacionDias,
       configurado: true,
     };
   }

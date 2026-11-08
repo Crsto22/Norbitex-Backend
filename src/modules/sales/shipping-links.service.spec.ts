@@ -106,6 +106,7 @@ describe('ShippingLinksService', () => {
     enviosConfig.getDespacho.mockResolvedValue({
       diasSemana: [0, 1, 2, 3, 4, 5, 6],
       horaCorte: '23:59',
+      anticipacionDias: 0,
       configurado: true,
     });
   });
@@ -282,6 +283,7 @@ describe('ShippingLinksService', () => {
     enviosConfig.getDespacho.mockResolvedValue({
       diasSemana: [1, 2, 3, 4, 5],
       horaCorte: '23:59',
+      anticipacionDias: 0,
       configurado: true,
     });
 
@@ -308,6 +310,7 @@ describe('ShippingLinksService', () => {
     enviosConfig.getDespacho.mockResolvedValue({
       diasSemana: [],
       horaCorte: '',
+      anticipacionDias: 0,
       configurado: false,
     });
 

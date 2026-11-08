@@ -40,6 +40,7 @@ export class EnviosConfigController {
       this.getEmpresaId(user),
       dto.diasSemana,
       dto.horaCorte,
+      dto.anticipacionDias ?? 0,
     );
   }
 
