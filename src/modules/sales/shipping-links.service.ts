@@ -181,7 +181,10 @@ export class ShippingLinksService {
     };
 
     if (metodo.tipo === 'recojo') {
-      return this.submitPickup(envio, datos);
+      return this.submitPickup(envio, {
+        ...datos,
+        direccion: metodo.direccion ?? null,
+      });
     }
 
     if (!dto.agencia || !dto.agenciaExternalId) {
@@ -246,8 +249,10 @@ export class ShippingLinksService {
       celular: string;
       metodoEnvio: string;
       recibidoAt: Date;
+      direccion: string | null;
     },
   ) {
+    const { direccion, ...envioData } = datos;
     const result = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.ventaEnvio.updateMany({
         where: {
@@ -255,13 +260,13 @@ export class ShippingLinksService {
           estado: VentaEnvioEstado.pendiente,
         },
         data: {
-          ...datos,
+          ...envioData,
           estado: VentaEnvioEstado.recibido,
           estadoLogistico: VentaEnvioEstadoLogistico.POR_PREPARAR,
           agencia: null,
           agenciaExternalId: null,
-          agenciaNombre: null,
-          agenciaDireccion: null,
+          agenciaNombre: 'Recojo en tienda',
+          agenciaDireccion: direccion,
           agenciaDepartamento: null,
           agenciaProvincia: null,
           agenciaDistrito: null,
