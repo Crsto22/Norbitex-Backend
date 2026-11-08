@@ -203,7 +203,7 @@ export class ShippingLinksService {
       dni: dto.dni,
       celular: dto.celular,
       metodoEnvio: metodo.metodo,
-      fechaEnvio: dto.fechaEnvio,
+      fechaEnvio: new Date(`${dto.fechaEnvio}T00:00:00.000Z`),
       recibidoAt: new Date(),
     };
 
@@ -279,7 +279,7 @@ export class ShippingLinksService {
       dni: string;
       celular: string;
       metodoEnvio: string;
-      fechaEnvio: string;
+      fechaEnvio: Date;
       recibidoAt: Date;
     },
     dto: SubmitShippingDetailsDto,
@@ -336,7 +336,7 @@ export class ShippingLinksService {
       dni: string;
       celular: string;
       metodoEnvio: string;
-      fechaEnvio: string;
+      fechaEnvio: Date;
       recibidoAt: Date;
       direccion: string | null;
     },
