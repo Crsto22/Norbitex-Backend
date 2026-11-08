@@ -40,6 +40,16 @@ export class SubmitShippingDetailsDto {
   @IsString()
   @Length(1, 100)
   agenciaExternalId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(5, 500)
+  direccionEntrega?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  referenciaEntrega?: string;
 }
 
 export class FindPublicShippingAgenciesDto {

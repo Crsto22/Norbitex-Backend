@@ -36,6 +36,7 @@ import {
 import { parseUnitPrice } from '../../common/unit-price';
 import { PlansService } from '../plans/plans.service';
 import { StockService } from '../stock/stock.service';
+import { getEnvioMetodo } from '../envios-config/envios-config.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { ConvertSaleDto } from './dto/convert-sale.dto';
 import { DeliverSaleDto } from './dto/deliver-sale.dto';
@@ -1744,7 +1745,12 @@ export class SalesService {
             'El cliente debe completar los datos de envio antes del despacho',
           );
         }
-        if (!venta.envio.agencia || !venta.envio.agenciaExternalId) {
+        const esDomicilio =
+          getEnvioMetodo(venta.envio.metodoEnvio)?.tipo === 'domicilio';
+        if (
+          !esDomicilio &&
+          (!venta.envio.agencia || !venta.envio.agenciaExternalId)
+        ) {
           throw new BadRequestException(
             'El envio no tiene una agencia courier valida',
           );
@@ -2906,6 +2912,8 @@ export class SalesService {
             agenciaLatitud: venta.envio.agenciaLatitud,
             agenciaLongitud: venta.envio.agenciaLongitud,
             metodoEnvio: venta.envio.metodoEnvio,
+            direccionEntrega: venta.envio.direccionEntrega,
+            referenciaEntrega: venta.envio.referenciaEntrega,
             recibidoAt: venta.envio.recibidoAt?.toISOString() ?? null,
             despachadoAt: venta.envio.despachadoAt?.toISOString() ?? null,
             entregadoAt: venta.envio.entregadoAt?.toISOString() ?? null,

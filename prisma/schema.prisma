@@ -2583,6 +2583,8 @@ model VentaEnvio {
   agenciaLatitud Float?             @map("agencia_latitud")
   agenciaLongitud Float?            @map("agencia_longitud")
   metodoEnvio    String?            @map("metodo_envio") @db.VarChar(50)
+  direccionEntrega String?          @map("direccion_entrega") @db.Text
+  referenciaEntrega String?         @map("referencia_entrega") @db.VarChar(300)
   recibidoAt     DateTime?          @map("recibido_at") @db.Timestamptz(6)
   despachadoAt   DateTime?          @map("despachado_at") @db.Timestamptz(6)
   entregadoAt    DateTime?          @map("entregado_at") @db.Timestamptz(6)

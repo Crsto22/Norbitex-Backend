@@ -3,12 +3,18 @@ import { PrismaService } from '../../prisma/prisma.service';
 
 export const ENVIO_METODOS = [
   { metodo: 'RECOJO', nombre: 'Recojo en tienda', tipo: 'recojo' },
+  { metodo: 'MOTORIZADO', nombre: 'Motorizado', tipo: 'domicilio' },
+  { metodo: 'DOMICILIO', nombre: 'Envío a domicilio', tipo: 'domicilio' },
   { metodo: 'SHALOM', nombre: 'Shalom', tipo: 'courier' },
   { metodo: 'OLVA', nombre: 'Olva', tipo: 'courier' },
 ] as const;
 
 export type EnvioMetodo = (typeof ENVIO_METODOS)[number]['metodo'];
 export type EnvioMetodoTipo = (typeof ENVIO_METODOS)[number]['tipo'];
+
+export function getEnvioMetodo(metodo: string | null | undefined) {
+  return ENVIO_METODOS.find((item) => item.metodo === metodo) ?? null;
+}
 
 @Injectable()
 export class EnviosConfigService {

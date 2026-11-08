@@ -187,6 +187,10 @@ export class ShippingLinksService {
       });
     }
 
+    if (metodo.tipo === 'domicilio') {
+      return this.submitDelivery(envio, datos, dto);
+    }
+
     if (!dto.agencia || !dto.agenciaExternalId) {
       throw new BadRequestException('Seleccione una agencia de envio');
     }
@@ -235,6 +239,62 @@ export class ShippingLinksService {
         estadoAnterior: envio.estadoLogistico,
         estadoNuevo: VentaEnvioEstadoLogistico.POR_DESPACHAR,
         detalle: 'Datos de envio y agencia recibidos',
+      },
+    });
+
+    return { estado: VentaEnvioEstado.recibido };
+  }
+
+  private async submitDelivery(
+    envio: PublicShippingLink,
+    datos: {
+      nombreCompleto: string;
+      dni: string;
+      celular: string;
+      metodoEnvio: string;
+      recibidoAt: Date;
+    },
+    dto: SubmitShippingDetailsDto,
+  ) {
+    const direccionEntrega = dto.direccionEntrega?.trim();
+    if (!direccionEntrega) {
+      throw new BadRequestException('Ingrese la direccion de entrega');
+    }
+
+    const result = await this.prisma.ventaEnvio.updateMany({
+      where: {
+        id: envio.id,
+        estado: VentaEnvioEstado.pendiente,
+      },
+      data: {
+        ...datos,
+        estado: VentaEnvioEstado.recibido,
+        estadoLogistico: VentaEnvioEstadoLogistico.POR_DESPACHAR,
+        direccionEntrega,
+        referenciaEntrega: dto.referenciaEntrega?.trim() || null,
+        agencia: null,
+        agenciaExternalId: null,
+        agenciaNombre: null,
+        agenciaDireccion: null,
+        agenciaDepartamento: null,
+        agenciaProvincia: null,
+        agenciaDistrito: null,
+        agenciaUbigeo: null,
+        agenciaLatitud: null,
+        agenciaLongitud: null,
+      },
+    });
+
+    if (result.count !== 1) {
+      throw new ConflictException('Los datos de envio ya fueron recibidos');
+    }
+
+    await this.prisma.ventaEnvioHistorial.create({
+      data: {
+        ventaEnvioId: envio.id,
+        estadoAnterior: envio.estadoLogistico,
+        estadoNuevo: VentaEnvioEstadoLogistico.POR_DESPACHAR,
+        detalle: 'Datos y direccion de entrega recibidos',
       },
     });
 
@@ -390,6 +450,8 @@ export class ShippingLinksService {
     agenciaLatitud: number | null;
     agenciaLongitud: number | null;
     metodoEnvio: string | null;
+    direccionEntrega: string | null;
+    referenciaEntrega: string | null;
     recibidoAt: Date | null;
     despachadoAt: Date | null;
     entregadoAt: Date | null;
@@ -412,6 +474,8 @@ export class ShippingLinksService {
       agenciaLatitud: envio.agenciaLatitud,
       agenciaLongitud: envio.agenciaLongitud,
       metodoEnvio: envio.metodoEnvio,
+      direccionEntrega: envio.direccionEntrega,
+      referenciaEntrega: envio.referenciaEntrega,
       recibidoAt: envio.recibidoAt?.toISOString() ?? null,
       despachadoAt: envio.despachadoAt?.toISOString() ?? null,
       entregadoAt: envio.entregadoAt?.toISOString() ?? null,
