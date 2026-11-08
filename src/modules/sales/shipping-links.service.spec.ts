@@ -42,6 +42,7 @@ describe('ShippingLinksService', () => {
     getMetodo: jest.fn(),
     isEnabled: jest.fn(),
     getDespacho: jest.fn(),
+    getRecojo: jest.fn(),
   };
   const service = new ShippingLinksService(
     prisma as unknown as PrismaService,
@@ -108,6 +109,13 @@ describe('ShippingLinksService', () => {
       horaCorte: '23:59',
       anticipacionDias: 0,
       configurado: true,
+    });
+    enviosConfig.getRecojo.mockResolvedValue({
+      diasSemana: [0, 1, 2, 3, 4, 5, 6],
+      horaCorte: '23:59',
+      anticipacionDias: 0,
+      configurado: true,
+      usaDespacho: true,
     });
   });
 
@@ -245,6 +253,48 @@ describe('ShippingLinksService', () => {
         estadoNuevo: VentaEnvioEstadoLogistico.POR_DESPACHAR,
       }),
     });
+  });
+
+  it('calcula la fecha lista para recojo sin que el cliente la envie', async () => {
+    enviosConfig.getMetodo.mockResolvedValue({
+      metodo: 'RECOJO',
+      nombre: 'Recojo en tienda',
+      tipo: 'recojo',
+      activo: true,
+      direccion: 'Av. Tienda 123',
+    });
+    prisma.ventaEnvio.findUnique.mockResolvedValue({
+      ...pendingShipping,
+      venta: {
+        estado: VentaEstado.completada,
+        correlativo: 'NV01-000001',
+        empresa: { nombreComercial: 'Tienda', logoUrl: null },
+      },
+    });
+    prisma.ventaEnvio.updateMany.mockResolvedValue({ count: 1 });
+    const fechaListo = calcularFechasDespacho(
+      [0, 1, 2, 3, 4, 5, 6],
+      '23:59',
+      0,
+    )[0];
+
+    await expect(
+      service.submitPublic('Abc234Def567', {
+        nombreCompleto: 'Maria Lopez',
+        dni: '12345678',
+        celular: '987654321',
+        metodo: 'RECOJO',
+      }),
+    ).resolves.toEqual({ estado: VentaEnvioEstado.recibido });
+    expect(prisma.ventaEnvio.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metodoEnvio: 'RECOJO',
+          fechaEnvio: new Date(`${fechaListo}T00:00:00.000Z`),
+          agenciaNombre: 'Recojo en tienda',
+        }),
+      }),
+    );
   });
 
   it('rechaza un segundo envio de datos', async () => {

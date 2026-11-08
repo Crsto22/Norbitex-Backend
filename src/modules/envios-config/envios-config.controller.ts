@@ -13,6 +13,7 @@ import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { UpdateDespachoConfigDto } from './dto/update-despacho-config.dto';
 import { UpdateEnvioConfigDto } from './dto/update-envio-config.dto';
+import { UpdateRecojoConfigDto } from './dto/update-recojo-config.dto';
 import { EnviosConfigService } from './envios-config.service';
 
 @UseGuards(ModuleAccessGuard)
@@ -38,6 +39,25 @@ export class EnviosConfigController {
   ) {
     return this.enviosConfigService.updateDespacho(
       this.getEmpresaId(user),
+      dto.diasSemana,
+      dto.horaCorte,
+      dto.anticipacionDias ?? 0,
+    );
+  }
+
+  @Get('recojo')
+  findRecojo(@CurrentUser() user: JwtPayload) {
+    return this.enviosConfigService.getRecojo(this.getEmpresaId(user));
+  }
+
+  @Patch('recojo')
+  updateRecojo(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateRecojoConfigDto,
+  ) {
+    return this.enviosConfigService.updateRecojo(
+      this.getEmpresaId(user),
+      dto.usarDespacho,
       dto.diasSemana,
       dto.horaCorte,
       dto.anticipacionDias ?? 0,

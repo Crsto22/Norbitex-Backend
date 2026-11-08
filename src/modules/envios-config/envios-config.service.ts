@@ -127,6 +127,74 @@ export class EnviosConfigService {
     };
   }
 
+  async getRecojo(empresaId: bigint) {
+    const recojo = await this.prisma.empresaRecojoConfig.findUnique({
+      where: { empresaId },
+      select: { diasSemana: true, horaCorte: true, anticipacionDias: true },
+    });
+
+    if (recojo) {
+      return {
+        diasSemana: recojo.diasSemana,
+        horaCorte: recojo.horaCorte,
+        anticipacionDias: recojo.anticipacionDias,
+        configurado: true,
+        usaDespacho: false,
+      };
+    }
+
+    const despacho = await this.getDespacho(empresaId);
+    return {
+      diasSemana: despacho.diasSemana,
+      horaCorte: despacho.horaCorte,
+      anticipacionDias: despacho.anticipacionDias,
+      configurado: despacho.configurado,
+      usaDespacho: true,
+    };
+  }
+
+  async updateRecojo(
+    empresaId: bigint,
+    usarDespacho: boolean,
+    diasSemana?: number[],
+    horaCorte?: string,
+    anticipacionDias = 0,
+  ) {
+    if (usarDespacho) {
+      await this.prisma.empresaRecojoConfig.deleteMany({
+        where: { empresaId },
+      });
+      return this.getRecojo(empresaId);
+    }
+
+    if (!diasSemana?.length) {
+      throw new BadRequestException('Selecciona al menos un día de recojo');
+    }
+    if (!horaCorte) {
+      throw new BadRequestException('Ingresa una hora de corte válida');
+    }
+
+    const diasNormalizados = [...new Set(diasSemana)].sort((a, b) => a - b);
+    const config = await this.prisma.empresaRecojoConfig.upsert({
+      where: { empresaId },
+      update: { diasSemana: diasNormalizados, horaCorte, anticipacionDias },
+      create: {
+        empresaId,
+        diasSemana: diasNormalizados,
+        horaCorte,
+        anticipacionDias,
+      },
+    });
+
+    return {
+      diasSemana: config.diasSemana,
+      horaCorte: config.horaCorte,
+      anticipacionDias: config.anticipacionDias,
+      configurado: true,
+      usaDespacho: false,
+    };
+  }
+
   async enabledMetodos(empresaId: bigint) {
     return (await this.findAll(empresaId))
       .filter((item) => item.activo)

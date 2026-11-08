@@ -85,11 +85,25 @@ export class ShippingLinksService {
       );
     }
 
-    const despacho = await this.enviosConfig.getDespacho(empresaId);
-    if (!despacho.configurado) {
-      throw new ConflictException(
-        'Configura los días de despacho y la hora de corte antes de generar el enlace de envío',
-      );
+    const metodos = await this.enviosConfig.enabledMetodosDetalle(empresaId);
+    const hasDespachoMethods = metodos.some((item) => item.tipo !== 'recojo');
+    const hasRecojo = metodos.some((item) => item.tipo === 'recojo');
+
+    if (hasDespachoMethods) {
+      const despacho = await this.enviosConfig.getDespacho(empresaId);
+      if (!despacho.configurado) {
+        throw new ConflictException(
+          'Configura los días de despacho y la hora de corte antes de generar el enlace de envío',
+        );
+      }
+    }
+    if (hasRecojo) {
+      const recojo = await this.enviosConfig.getRecojo(empresaId);
+      if (!recojo.configurado) {
+        throw new ConflictException(
+          'Configura los días de recojo y la hora de corte antes de generar el enlace de envío',
+        );
+      }
     }
 
     if (sale.envio && !regenerate) return this.toInternalResponse(sale.envio);
@@ -165,7 +179,8 @@ export class ShippingLinksService {
       envio.venta.empresaId,
     );
     const despacho = await this.getDespachoPublico(envio.venta.empresaId);
-    return this.toPublicResponse(envio, metodosEnvio, despacho);
+    const recojo = await this.getRecojoPublico(envio.venta.empresaId);
+    return this.toPublicResponse(envio, metodosEnvio, despacho, recojo);
   }
 
   async submitPublic(code: string, dto: SubmitShippingDetailsDto) {
@@ -181,22 +196,36 @@ export class ShippingLinksService {
       throw new BadRequestException('El metodo de envio no esta disponible');
     }
 
-    const despacho = await this.enviosConfig.getDespacho(envio.venta.empresaId);
-    if (!despacho.configurado) {
-      throw new BadRequestException(
-        'El negocio aun no configuro los dias de despacho',
+    let fechaEnvio: Date;
+    if (metodo.tipo === 'recojo') {
+      const recojo = await this.getRecojoPublico(envio.venta.empresaId);
+      if (!recojo || !recojo.fechaListo) {
+        throw new BadRequestException(
+          'El negocio aun no configuro los dias de recojo',
+        );
+      }
+      fechaEnvio = new Date(`${recojo.fechaListo}T00:00:00.000Z`);
+    } else {
+      const despacho = await this.enviosConfig.getDespacho(
+        envio.venta.empresaId,
       );
-    }
-    if (!dto.fechaEnvio) {
-      throw new BadRequestException('Seleccione la fecha de envio');
-    }
-    const fechasDisponibles = calcularFechasDespacho(
-      despacho.diasSemana,
-      despacho.horaCorte,
-      despacho.anticipacionDias,
-    );
-    if (!fechasDisponibles.includes(dto.fechaEnvio)) {
-      throw new BadRequestException('La fecha de envio no esta disponible');
+      if (!despacho.configurado) {
+        throw new BadRequestException(
+          'El negocio aun no configuro los dias de despacho',
+        );
+      }
+      if (!dto.fechaEnvio) {
+        throw new BadRequestException('Seleccione la fecha de envio');
+      }
+      const fechasDisponibles = calcularFechasDespacho(
+        despacho.diasSemana,
+        despacho.horaCorte,
+        despacho.anticipacionDias,
+      );
+      if (!fechasDisponibles.includes(dto.fechaEnvio)) {
+        throw new BadRequestException('La fecha de envio no esta disponible');
+      }
+      fechaEnvio = new Date(`${dto.fechaEnvio}T00:00:00.000Z`);
     }
 
     const datos = {
@@ -204,7 +233,7 @@ export class ShippingLinksService {
       dni: dto.dni,
       celular: dto.celular,
       metodoEnvio: metodo.metodo,
-      fechaEnvio: new Date(`${dto.fechaEnvio}T00:00:00.000Z`),
+      fechaEnvio,
       recibidoAt: new Date(),
     };
 
@@ -529,6 +558,14 @@ export class ShippingLinksService {
       horaCorte: string;
       fechasDisponibles: string[];
     } | null,
+    recojo: {
+      diasSemana: number[];
+      horaCorte: string;
+      anticipacionDias: number;
+      usaDespacho: boolean;
+      fechasDisponibles: string[];
+      fechaListo: string | null;
+    } | null,
   ) {
     return {
       estado: envio.estado,
@@ -536,6 +573,7 @@ export class ShippingLinksService {
       negocio: envio.venta.empresa,
       metodosEnvio,
       despacho,
+      recojo,
     };
   }
 
@@ -552,6 +590,26 @@ export class ShippingLinksService {
         config.horaCorte,
         config.anticipacionDias,
       ),
+    };
+  }
+
+  private async getRecojoPublico(empresaId: bigint) {
+    const config = await this.enviosConfig.getRecojo(empresaId);
+    if (!config.configurado) return null;
+
+    const fechasDisponibles = calcularFechasDespacho(
+      config.diasSemana,
+      config.horaCorte,
+      config.anticipacionDias,
+    );
+
+    return {
+      diasSemana: config.diasSemana,
+      horaCorte: config.horaCorte,
+      anticipacionDias: config.anticipacionDias,
+      usaDespacho: config.usaDespacho,
+      fechasDisponibles,
+      fechaListo: fechasDisponibles[0] ?? null,
     };
   }
 

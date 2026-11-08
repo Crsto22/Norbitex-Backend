@@ -556,6 +556,7 @@ model Empresa {
   metodosPago                     MetodoPago[]
   enviosConfig               EmpresaEnvioConfig[]
   despachoConfig             EmpresaDespachoConfig?
+  recojoConfig               EmpresaRecojoConfig?
   ventas                          Venta[]
   ventasCodigoInternoSecuencias   VentaCodigoInternoSecuencia[]
   notasCredito                    NotaCredito[]
@@ -2732,6 +2733,19 @@ model EmpresaDespachoConfig {
   empresa    Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 
   @@map("empresa_despacho_config")
+}
+
+model EmpresaRecojoConfig {
+  id         BigInt    @id @default(autoincrement())
+  empresaId  BigInt    @unique @map("empresa_id")
+  diasSemana Int[]     @map("dias_semana")
+  horaCorte  String    @map("hora_corte") @db.VarChar(5)
+  anticipacionDias Int @default(0) @map("anticipacion_dias")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa    Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@map("empresa_recojo_config")
 }
 
 model NotaCredito {
