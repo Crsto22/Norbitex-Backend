@@ -32,6 +32,12 @@ export class SubmitShippingDetailsDto {
   @Length(1, 50)
   metodo: string;
 
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'La fecha de envio debe tener el formato YYYY-MM-DD',
+  })
+  fechaEnvio: string;
+
   @IsOptional()
   @IsEnum(VentaEnvioAgencia)
   agencia?: VentaEnvioAgencia;

@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call */
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   VentaEnvioAgencia,
   VentaEnvioEstado,
@@ -11,6 +15,7 @@ import {
 } from '@prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { ShippingLinksService } from './shipping-links.service';
+import { calcularFechasDespacho } from './shipping-dates.util';
 
 describe('ShippingLinksService', () => {
   const prisma = {
@@ -36,6 +41,7 @@ describe('ShippingLinksService', () => {
     enabledMetodosDetalle: jest.fn(),
     getMetodo: jest.fn(),
     isEnabled: jest.fn(),
+    getDespacho: jest.fn(),
   };
   const service = new ShippingLinksService(
     prisma as unknown as PrismaService,
@@ -96,6 +102,11 @@ describe('ShippingLinksService', () => {
       tipo: 'courier',
       activo: true,
       direccion: null,
+    });
+    enviosConfig.getDespacho.mockResolvedValue({
+      diasSemana: [0, 1, 2, 3, 4, 5, 6],
+      horaCorte: '23:59',
+      configurado: true,
     });
   });
 
@@ -201,6 +212,10 @@ describe('ShippingLinksService', () => {
       longitud: -77.04,
     });
     prisma.ventaEnvio.updateMany.mockResolvedValue({ count: 1 });
+    const fechaEnvio = calcularFechasDespacho(
+      [0, 1, 2, 3, 4, 5, 6],
+      '23:59',
+    )[0];
 
     await expect(
       service.submitPublic('Abc234Def567', {
@@ -208,6 +223,7 @@ describe('ShippingLinksService', () => {
         dni: '12345678',
         celular: '987654321',
         metodo: 'SHALOM',
+        fechaEnvio,
         agencia: VentaEnvioAgencia.SHALOM,
         agenciaExternalId: '392',
       }),
@@ -247,10 +263,58 @@ describe('ShippingLinksService', () => {
         dni: '12345678',
         celular: '987654321',
         metodo: 'OLVA',
+        fechaEnvio: '2026-11-10',
         agencia: VentaEnvioAgencia.OLVA,
         agenciaExternalId: '1',
       }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rechaza una fecha de envio no disponible', async () => {
+    prisma.ventaEnvio.findUnique.mockResolvedValue({
+      ...pendingShipping,
+      venta: {
+        estado: VentaEstado.completada,
+        correlativo: 'NV01-000001',
+        empresa: { nombreComercial: 'Tienda', logoUrl: null },
+      },
+    });
+    enviosConfig.getDespacho.mockResolvedValue({
+      diasSemana: [1, 2, 3, 4, 5],
+      horaCorte: '23:59',
+      configurado: true,
+    });
+
+    await expect(
+      service.submitPublic('Abc234Def567', {
+        nombreCompleto: 'Maria Lopez',
+        dni: '12345678',
+        celular: '987654321',
+        metodo: 'SHALOM',
+        fechaEnvio: '1999-01-01',
+        agencia: VentaEnvioAgencia.SHALOM,
+        agenciaExternalId: '392',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('bloquea la generacion del enlace sin config de despacho', async () => {
+    prisma.venta.findFirst.mockResolvedValue({
+      id: 20n,
+      estado: VentaEstado.completada,
+      envio: null,
+      entregas: [],
+    });
+    enviosConfig.getDespacho.mockResolvedValue({
+      diasSemana: [],
+      horaCorte: '',
+      configurado: false,
+    });
+
+    await expect(
+      service.generate(1n, scope, 'sale-public-id'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.ventaEnvio.create).not.toHaveBeenCalled();
   });
 
   it('oculta enlaces de ventas anuladas', async () => {

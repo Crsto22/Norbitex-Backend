@@ -86,6 +86,39 @@ export class EnviosConfigService {
     };
   }
 
+  async getDespacho(empresaId: bigint) {
+    const config = await this.prisma.empresaDespachoConfig.findUnique({
+      where: { empresaId },
+      select: { diasSemana: true, horaCorte: true },
+    });
+
+    return {
+      diasSemana: config?.diasSemana ?? [],
+      horaCorte: config?.horaCorte ?? '',
+      configurado: config !== null,
+    };
+  }
+
+  async updateDespacho(
+    empresaId: bigint,
+    diasSemana: number[],
+    horaCorte: string,
+  ) {
+    const diasNormalizados = [...new Set(diasSemana)].sort((a, b) => a - b);
+
+    const config = await this.prisma.empresaDespachoConfig.upsert({
+      where: { empresaId },
+      update: { diasSemana: diasNormalizados, horaCorte },
+      create: { empresaId, diasSemana: diasNormalizados, horaCorte },
+    });
+
+    return {
+      diasSemana: config.diasSemana,
+      horaCorte: config.horaCorte,
+      configurado: true,
+    };
+  }
+
   async enabledMetodos(empresaId: bigint) {
     return (await this.findAll(empresaId))
       .filter((item) => item.activo)

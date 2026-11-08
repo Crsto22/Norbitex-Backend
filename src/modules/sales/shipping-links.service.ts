@@ -26,6 +26,7 @@ import {
   FindPublicShippingAgenciesDto,
   SubmitShippingDetailsDto,
 } from './dto/submit-shipping-details.dto';
+import { calcularFechasDespacho } from './shipping-dates.util';
 
 const publicCodeAlphabet =
   '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -81,6 +82,13 @@ export class ShippingLinksService {
     if (sale.estado === VentaEstado.anulada) {
       throw new ConflictException(
         'No se puede generar un enlace para una venta anulada',
+      );
+    }
+
+    const despacho = await this.enviosConfig.getDespacho(empresaId);
+    if (!despacho.configurado) {
+      throw new ConflictException(
+        'Configura los días de despacho y la hora de corte antes de generar el enlace de envío',
       );
     }
 
@@ -156,7 +164,8 @@ export class ShippingLinksService {
     const metodosEnvio = await this.enviosConfig.enabledMetodosDetalle(
       envio.venta.empresaId,
     );
-    return this.toPublicResponse(envio, metodosEnvio);
+    const despacho = await this.getDespachoPublico(envio.venta.empresaId);
+    return this.toPublicResponse(envio, metodosEnvio, despacho);
   }
 
   async submitPublic(code: string, dto: SubmitShippingDetailsDto) {
@@ -172,11 +181,29 @@ export class ShippingLinksService {
       throw new BadRequestException('El metodo de envio no esta disponible');
     }
 
+    const despacho = await this.enviosConfig.getDespacho(envio.venta.empresaId);
+    if (!despacho.configurado) {
+      throw new BadRequestException(
+        'El negocio aun no configuro los dias de despacho',
+      );
+    }
+    if (!dto.fechaEnvio) {
+      throw new BadRequestException('Seleccione la fecha de envio');
+    }
+    const fechasDisponibles = calcularFechasDespacho(
+      despacho.diasSemana,
+      despacho.horaCorte,
+    );
+    if (!fechasDisponibles.includes(dto.fechaEnvio)) {
+      throw new BadRequestException('La fecha de envio no esta disponible');
+    }
+
     const datos = {
       nombreCompleto: dto.nombreCompleto.trim().replace(/\s+/g, ' '),
       dni: dto.dni,
       celular: dto.celular,
       metodoEnvio: metodo.metodo,
+      fechaEnvio: dto.fechaEnvio,
       recibidoAt: new Date(),
     };
 
@@ -252,6 +279,7 @@ export class ShippingLinksService {
       dni: string;
       celular: string;
       metodoEnvio: string;
+      fechaEnvio: string;
       recibidoAt: Date;
     },
     dto: SubmitShippingDetailsDto,
@@ -308,6 +336,7 @@ export class ShippingLinksService {
       dni: string;
       celular: string;
       metodoEnvio: string;
+      fechaEnvio: string;
       recibidoAt: Date;
       direccion: string | null;
     },
@@ -452,6 +481,7 @@ export class ShippingLinksService {
     metodoEnvio: string | null;
     direccionEntrega: string | null;
     referenciaEntrega: string | null;
+    fechaEnvio: Date | null;
     recibidoAt: Date | null;
     despachadoAt: Date | null;
     entregadoAt: Date | null;
@@ -476,6 +506,7 @@ export class ShippingLinksService {
       metodoEnvio: envio.metodoEnvio,
       direccionEntrega: envio.direccionEntrega,
       referenciaEntrega: envio.referenciaEntrega,
+      fechaEnvio: envio.fechaEnvio?.toISOString().slice(0, 10) ?? null,
       recibidoAt: envio.recibidoAt?.toISOString() ?? null,
       despachadoAt: envio.despachadoAt?.toISOString() ?? null,
       entregadoAt: envio.entregadoAt?.toISOString() ?? null,
@@ -492,12 +523,32 @@ export class ShippingLinksService {
       tipo: string;
       direccion: string | null;
     }>,
+    despacho: {
+      diasSemana: number[];
+      horaCorte: string;
+      fechasDisponibles: string[];
+    } | null,
   ) {
     return {
       estado: envio.estado,
       venta: { correlativo: envio.venta.correlativo },
       negocio: envio.venta.empresa,
       metodosEnvio,
+      despacho,
+    };
+  }
+
+  private async getDespachoPublico(empresaId: bigint) {
+    const config = await this.enviosConfig.getDespacho(empresaId);
+    if (!config.configurado) return null;
+
+    return {
+      diasSemana: config.diasSemana,
+      horaCorte: config.horaCorte,
+      fechasDisponibles: calcularFechasDespacho(
+        config.diasSemana,
+        config.horaCorte,
+      ),
     };
   }
 

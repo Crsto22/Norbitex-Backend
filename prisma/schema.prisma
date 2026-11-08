@@ -554,7 +554,8 @@ model Empresa {
   stockTraspasos                  StockTraspaso[]
   productoColorImagenes           ProductoColorImagen[]
   metodosPago                     MetodoPago[]
-  enviosConfig                    EmpresaEnvioConfig[]
+  enviosConfig               EmpresaEnvioConfig[]
+  despachoConfig             EmpresaDespachoConfig?
   ventas                          Venta[]
   ventasCodigoInternoSecuencias   VentaCodigoInternoSecuencia[]
   notasCredito                    NotaCredito[]
@@ -2585,6 +2586,7 @@ model VentaEnvio {
   metodoEnvio    String?            @map("metodo_envio") @db.VarChar(50)
   direccionEntrega String?          @map("direccion_entrega") @db.Text
   referenciaEntrega String?         @map("referencia_entrega") @db.VarChar(300)
+  fechaEnvio     DateTime?          @map("fecha_envio") @db.Date
   recibidoAt     DateTime?          @map("recibido_at") @db.Timestamptz(6)
   despachadoAt   DateTime?          @map("despachado_at") @db.Timestamptz(6)
   entregadoAt    DateTime?          @map("entregado_at") @db.Timestamptz(6)
@@ -2717,6 +2719,18 @@ model EmpresaEnvioConfig {
 
   @@unique([empresaId, metodo])
   @@map("empresa_envio_config")
+}
+
+model EmpresaDespachoConfig {
+  id         BigInt    @id @default(autoincrement())
+  empresaId  BigInt    @unique @map("empresa_id")
+  diasSemana Int[]     @map("dias_semana")
+  horaCorte  String    @map("hora_corte") @db.VarChar(5)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa    Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@map("empresa_despacho_config")
 }
 
 model NotaCredito {

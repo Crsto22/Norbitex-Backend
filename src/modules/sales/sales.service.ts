@@ -2914,6 +2914,8 @@ export class SalesService {
             metodoEnvio: venta.envio.metodoEnvio,
             direccionEntrega: venta.envio.direccionEntrega,
             referenciaEntrega: venta.envio.referenciaEntrega,
+            fechaEnvio:
+              venta.envio.fechaEnvio?.toISOString().slice(0, 10) ?? null,
             recibidoAt: venta.envio.recibidoAt?.toISOString() ?? null,
             despachadoAt: venta.envio.despachadoAt?.toISOString() ?? null,
             entregadoAt: venta.envio.entregadoAt?.toISOString() ?? null,
