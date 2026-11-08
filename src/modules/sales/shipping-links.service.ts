@@ -196,6 +196,17 @@ export class ShippingLinksService {
       throw new BadRequestException('El metodo de envio no esta disponible');
     }
 
+    const tipoDocumento = dto.tipoDocumento ?? 'DNI';
+    const numeroDocumento = dto.dni.trim();
+    if (tipoDocumento === 'DNI' && !/^\d{8}$/.test(numeroDocumento)) {
+      throw new BadRequestException('El DNI debe tener 8 digitos');
+    }
+    if (tipoDocumento === 'CE' && !/^\d{9,12}$/.test(numeroDocumento)) {
+      throw new BadRequestException(
+        'El carnet de extranjeria debe tener entre 9 y 12 digitos',
+      );
+    }
+
     let fechaEnvio: Date;
     if (metodo.tipo === 'recojo') {
       const recojo = await this.getRecojoPublico(envio.venta.empresaId);
@@ -230,7 +241,8 @@ export class ShippingLinksService {
 
     const datos = {
       nombreCompleto: dto.nombreCompleto.trim().replace(/\s+/g, ' '),
-      dni: dto.dni,
+      dni: numeroDocumento,
+      tipoDocumento,
       celular: dto.celular,
       metodoEnvio: metodo.metodo,
       fechaEnvio,
@@ -497,6 +509,7 @@ export class ShippingLinksService {
     estadoLogistico: VentaEnvioEstadoLogistico;
     nombreCompleto: string | null;
     dni: string | null;
+    tipoDocumento: string;
     celular: string | null;
     agencia: 'SHALOM' | 'OLVA' | null;
     agenciaExternalId: string | null;
@@ -522,6 +535,7 @@ export class ShippingLinksService {
       estadoLogistico: envio.estadoLogistico,
       nombreCompleto: envio.nombreCompleto,
       dni: envio.dni,
+      tipoDocumento: envio.tipoDocumento,
       celular: envio.celular,
       agencia: envio.agencia,
       agenciaExternalId: envio.agenciaExternalId,

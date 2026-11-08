@@ -2946,6 +2946,7 @@ export class SalesService {
             estadoLogistico: venta.envio.estadoLogistico,
             nombreCompleto: venta.envio.nombreCompleto,
             dni: venta.envio.dni,
+            tipoDocumento: venta.envio.tipoDocumento,
             celular: venta.envio.celular,
             agencia: venta.envio.agencia,
             agenciaExternalId: venta.envio.agenciaExternalId,

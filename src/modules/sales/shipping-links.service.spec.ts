@@ -63,6 +63,7 @@ describe('ShippingLinksService', () => {
     estadoLogistico: VentaEnvioEstadoLogistico.POR_PREPARAR,
     nombreCompleto: null,
     dni: null,
+    tipoDocumento: 'DNI',
     celular: null,
     agencia: null,
     agenciaExternalId: null,
@@ -230,6 +231,7 @@ describe('ShippingLinksService', () => {
       service.submitPublic('Abc234Def567', {
         nombreCompleto: '  Maria   Lopez ',
         dni: '12345678',
+        tipoDocumento: 'DNI',
         celular: '987654321',
         metodo: 'SHALOM',
         fechaEnvio,
@@ -282,6 +284,7 @@ describe('ShippingLinksService', () => {
       service.submitPublic('Abc234Def567', {
         nombreCompleto: 'Maria Lopez',
         dni: '12345678',
+        tipoDocumento: 'DNI',
         celular: '987654321',
         metodo: 'RECOJO',
       }),
@@ -312,6 +315,7 @@ describe('ShippingLinksService', () => {
       service.submitPublic('Abc234Def567', {
         nombreCompleto: 'Maria Lopez',
         dni: '12345678',
+        tipoDocumento: 'DNI',
         celular: '987654321',
         metodo: 'OLVA',
         fechaEnvio: '2026-11-10',
@@ -319,6 +323,30 @@ describe('ShippingLinksService', () => {
         agenciaExternalId: '1',
       }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rechaza un carnet de extranjeria con longitud invalida', async () => {
+    prisma.ventaEnvio.findUnique.mockResolvedValue({
+      ...pendingShipping,
+      venta: {
+        estado: VentaEstado.completada,
+        correlativo: 'NV01-000001',
+        empresa: { nombreComercial: 'Tienda', logoUrl: null },
+      },
+    });
+
+    await expect(
+      service.submitPublic('Abc234Def567', {
+        nombreCompleto: 'Maria Lopez',
+        dni: '12345678',
+        tipoDocumento: 'CE',
+        celular: '987654321',
+        metodo: 'SHALOM',
+        fechaEnvio: '2026-11-10',
+        agencia: VentaEnvioAgencia.SHALOM,
+        agenciaExternalId: '392',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rechaza una fecha de envio no disponible', async () => {
@@ -341,6 +369,7 @@ describe('ShippingLinksService', () => {
       service.submitPublic('Abc234Def567', {
         nombreCompleto: 'Maria Lopez',
         dni: '12345678',
+        tipoDocumento: 'DNI',
         celular: '987654321',
         metodo: 'SHALOM',
         fechaEnvio: '1999-01-01',

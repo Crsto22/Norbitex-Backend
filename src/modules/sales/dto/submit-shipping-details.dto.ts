@@ -1,5 +1,6 @@
 import {
   IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -19,8 +20,13 @@ export class SubmitShippingDetailsDto {
   nombreCompleto: string;
 
   @IsString()
-  @Matches(/^\d{8}$/, { message: 'El DNI debe tener 8 digitos' })
+  @Matches(/^\d{8,12}$/, {
+    message: 'El documento debe tener entre 8 y 12 digitos',
+  })
   dni: string;
+
+  @IsIn(['DNI', 'CE'])
+  tipoDocumento: 'DNI' | 'CE';
 
   @IsString()
   @Matches(/^9\d{8}$/, {

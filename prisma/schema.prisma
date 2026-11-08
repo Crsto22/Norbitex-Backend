@@ -2572,7 +2572,8 @@ model VentaEnvio {
   estado         VentaEnvioEstado   @default(pendiente)
   estadoLogistico VentaEnvioEstadoLogistico @default(POR_PREPARAR) @map("estado_logistico")
   nombreCompleto String?            @map("nombre_completo") @db.VarChar(150)
-  dni            String?            @db.VarChar(8)
+  dni            String?            @db.VarChar(12)
+  tipoDocumento  String             @default("DNI") @map("tipo_documento") @db.VarChar(2)
   celular        String?            @db.VarChar(9)
   agencia        VentaEnvioAgencia?
   agenciaExternalId String?         @map("agencia_external_id") @db.VarChar(100)
