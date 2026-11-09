@@ -155,6 +155,10 @@ export class AuthService {
         email,
         passwordHash,
         codigoHash,
+        termsAcceptedAt: new Date(),
+        termsVersion: '2026-11-09',
+        privacyAcceptedAt: new Date(),
+        privacyVersion: '2026-11-09',
         expiresAt,
       },
       update: {
@@ -162,6 +166,10 @@ export class AuthService {
         apellido: dto.apellido,
         passwordHash,
         codigoHash,
+        termsAcceptedAt: new Date(),
+        termsVersion: '2026-11-09',
+        privacyAcceptedAt: new Date(),
+        privacyVersion: '2026-11-09',
         expiresAt,
         intentos: 0,
         verifiedAt: null,
@@ -215,6 +223,10 @@ export class AuthService {
           email,
           passwordHash: pending.passwordHash,
           emailVerificado: true,
+          termsAcceptedAt: pending.termsAcceptedAt,
+          termsVersion: pending.termsVersion,
+          privacyAcceptedAt: pending.privacyAcceptedAt,
+          privacyVersion: pending.privacyVersion,
         },
       });
 

@@ -1,0 +1,11 @@
+ALTER TABLE "usuario"
+  ADD COLUMN "terms_accepted_at" TIMESTAMPTZ(6),
+  ADD COLUMN "terms_version" VARCHAR(20),
+  ADD COLUMN "privacy_accepted_at" TIMESTAMPTZ(6),
+  ADD COLUMN "privacy_version" VARCHAR(20);
+
+ALTER TABLE "registro_pendiente"
+  ADD COLUMN "terms_accepted_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ADD COLUMN "terms_version" VARCHAR(20) NOT NULL DEFAULT '2026-11-09',
+  ADD COLUMN "privacy_accepted_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ADD COLUMN "privacy_version" VARCHAR(20) NOT NULL DEFAULT '2026-11-09';

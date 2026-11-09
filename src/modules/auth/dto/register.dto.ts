@@ -1,4 +1,6 @@
 import {
+  Equals,
+  IsBoolean,
   IsEmail,
   IsString,
   Matches,
@@ -11,6 +13,13 @@ export class RegisterDto {
   @MinLength(1)
   @MaxLength(2048)
   turnstileToken: string;
+
+  @IsBoolean()
+  @Equals(true, {
+    message:
+      'Debes aceptar los Terminos y Condiciones y la Politica de Privacidad.',
+  })
+  acceptedLegalTerms: boolean;
 
   @IsString()
   @MaxLength(100)
