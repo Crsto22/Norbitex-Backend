@@ -414,6 +414,44 @@ describe('ShippingLinksService', () => {
     );
   });
 
+  it('devuelve los productos comprados y sus cantidades', async () => {
+    prisma.ventaEnvio.findUnique.mockResolvedValue({
+      ...pendingShipping,
+      venta: {
+        estado: VentaEstado.completada,
+        correlativo: 'NV01-000001',
+        empresa: { nombreComercial: 'Tienda', logoUrl: null },
+        detalles: [
+          {
+            cantidad: 2,
+            descripcion: 'Polo',
+            productoVariante: { producto: { nombre: 'Polo' } },
+          },
+          {
+            cantidad: 1,
+            descripcion: 'Polo',
+            productoVariante: { producto: { nombre: 'Polo' } },
+          },
+          {
+            cantidad: 3,
+            descripcion: null,
+            productoVariante: { producto: { nombre: 'Gorra' } },
+          },
+        ],
+      },
+    });
+    enviosConfig.enabledMetodosDetalle.mockResolvedValue([]);
+    enviosConfig.getDespacho.mockResolvedValue({ configurado: false });
+    enviosConfig.getRecojo.mockResolvedValue({ configurado: false });
+
+    await expect(service.getPublic('Abc234Def567')).resolves.toMatchObject({
+      productos: [
+        { nombre: 'Polo', cantidad: 3 },
+        { nombre: 'Gorra', cantidad: 3 },
+      ],
+    });
+  });
+
   it('solo busca agencias con un enlace vigente y pendiente', async () => {
     prisma.ventaEnvio.findUnique.mockResolvedValue({
       ...pendingShipping,

@@ -38,6 +38,17 @@ const publicShippingLinkInclude = {
       correlativo: true,
       empresaId: true,
       empresa: { select: { nombreComercial: true, logoUrl: true } },
+      detalles: {
+        select: {
+          cantidad: true,
+          descripcion: true,
+          productoVariante: {
+            select: {
+              producto: { select: { nombre: true } },
+            },
+          },
+        },
+      },
     },
   },
 } satisfies Prisma.VentaEnvioInclude;
@@ -581,10 +592,22 @@ export class ShippingLinksService {
       fechaListo: string | null;
     } | null,
   ) {
+    const productos = new Map<string, number>();
+    for (const detalle of envio.venta.detalles) {
+      const nombre =
+        detalle.descripcion?.trim() ||
+        detalle.productoVariante.producto.nombre;
+      productos.set(nombre, (productos.get(nombre) ?? 0) + detalle.cantidad);
+    }
+
     return {
       estado: envio.estado,
       venta: { correlativo: envio.venta.correlativo },
       negocio: envio.venta.empresa,
+      productos: Array.from(productos, ([nombre, cantidad]) => ({
+        nombre,
+        cantidad,
+      })),
       metodosEnvio,
       despacho,
       recojo,
