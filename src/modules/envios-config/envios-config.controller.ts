@@ -64,7 +64,9 @@ export class EnviosConfigController {
     );
   }
 
-  @Patch(':metodo')
+  // Keep this under a distinct prefix so "RECOJO" does not collide with the
+  // case-insensitive "recojo" configuration route above.
+  @Patch('metodo/:metodo')
   update(
     @CurrentUser() user: JwtPayload,
     @Param('metodo') metodo: string,
