@@ -29,6 +29,9 @@ import {
 } from './plan-catalog';
 import { userModuleKeySet } from '../users/user-modules';
 
+// Company-level modules that apply to every user when enabled for the company.
+const companyWideModuleKeys = ['envios-config'] as const;
+
 export type PlanStatus = 'trial' | 'active' | 'expired';
 export type PlanResource = keyof PlanLimits;
 export type DocumentAllowance = {
@@ -747,10 +750,17 @@ export class PlansService {
       this.prisma,
       company,
     );
+    const effective = new Set(
+      roles.includes('OWNER')
+        ? Array.from(available)
+        : this.expandIncludedModuleKeys(assignedModuleKeys, available),
+    );
 
-    return roles.includes('OWNER')
-      ? Array.from(available)
-      : this.expandIncludedModuleKeys(assignedModuleKeys, available);
+    for (const moduleKey of companyWideModuleKeys) {
+      if (available.has(moduleKey)) effective.add(moduleKey);
+    }
+
+    return Array.from(effective);
   }
 
   private expandIncludedModuleKeys(

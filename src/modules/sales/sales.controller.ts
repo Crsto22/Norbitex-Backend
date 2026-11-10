@@ -453,6 +453,7 @@ export class SalesController {
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
   ) {
+    this.assertShippingLinkAccess(user);
     return this.shippingLinksService.generate(
       this.getEmpresaId(user),
       getCommercialScope(user),
@@ -466,6 +467,7 @@ export class SalesController {
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
   ) {
+    this.assertShippingLinkAccess(user);
     return this.shippingLinksService.generate(
       this.getEmpresaId(user),
       getCommercialScope(user),
@@ -582,6 +584,15 @@ export class SalesController {
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────
+
+  private assertShippingLinkAccess(user: JwtPayload) {
+    if (!user.moduleKeys?.includes('envios-config')) {
+      throw new ForbiddenException({
+        code: 'MODULE_NOT_INCLUDED',
+        message: 'No tienes acceso a Link Envios',
+      });
+    }
+  }
 
   private getEmpresaId(user: JwtPayload) {
     if (!user.empresaId) {

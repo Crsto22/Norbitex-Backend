@@ -97,6 +97,30 @@ describe('PlansService', () => {
     expect(ownerModules).not.toContain('reportes-usuarios');
   });
 
+  it('shares envios-config with all company users when enabled', async () => {
+    companyModuleFindMany.mockResolvedValue([
+      { moduleKey: 'envios-config', enabled: true },
+    ]);
+    const company = {
+      id: 1n,
+      planCodigo: PlanCodigo.basico,
+      planInicioAt: startsAt,
+      planFinAt: null,
+    };
+
+    await expect(
+      service.getEffectiveModuleKeys(company, [], []),
+    ).resolves.toEqual(['envios-config']);
+
+    companyModuleFindMany.mockResolvedValue([
+      { moduleKey: 'envios-config', enabled: false },
+    ]);
+
+    await expect(
+      service.getEffectiveModuleKeys(company, [], []),
+    ).resolves.toEqual([]);
+  });
+
   it('adds attendance modules only when the company addon is active', async () => {
     planModuloFindMany.mockResolvedValue([
       { moduleKey: 'asistencias-dashboard' },
