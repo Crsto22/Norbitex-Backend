@@ -21,7 +21,7 @@ import {
 } from '../../common/commercial-access';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CourierAgenciesService } from '../courier-agencies/courier-agencies.service';
-import { EnviosConfigService } from '../envios-config/envios-config.service';
+import { EnviosConfigService, envioPreviewDefaultColor } from '../envios-config/envios-config.service';
 import {
   FindPublicShippingAgenciesDto,
   SubmitShippingDetailsDto,
@@ -37,7 +37,21 @@ const publicShippingLinkInclude = {
       estado: true,
       correlativo: true,
       empresaId: true,
-      empresa: { select: { nombreComercial: true, logoUrl: true } },
+      empresa: {
+        select: {
+          nombreComercial: true,
+          logoUrl: true,
+          envioPreviewConfig: {
+            select: {
+              titulo: true,
+              descripcion: true,
+              colorPrimario: true,
+              textoCentral: true,
+              updatedAt: true,
+            },
+          },
+        },
+      },
       detalles: {
         select: {
           cantidad: true,
@@ -604,6 +618,17 @@ export class ShippingLinksService {
       estado: envio.estado,
       venta: { correlativo: envio.venta.correlativo },
       negocio: envio.venta.empresa,
+      preview: {
+        titulo: envio.venta.empresa.envioPreviewConfig?.titulo ?? null,
+        descripcion: envio.venta.empresa.envioPreviewConfig?.descripcion ?? null,
+        colorPrimario:
+          envio.venta.empresa.envioPreviewConfig?.colorPrimario ??
+          envioPreviewDefaultColor,
+        textoCentral: envio.venta.empresa.envioPreviewConfig?.textoCentral ?? null,
+        actualizadoAt:
+          envio.venta.empresa.envioPreviewConfig?.updatedAt.toISOString() ??
+          null,
+      },
       productos: Array.from(productos, ([nombre, cantidad]) => ({
         nombre,
         cantidad,

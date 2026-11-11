@@ -12,6 +12,8 @@ export const ENVIO_METODOS = [
 export type EnvioMetodo = (typeof ENVIO_METODOS)[number]['metodo'];
 export type EnvioMetodoTipo = (typeof ENVIO_METODOS)[number]['tipo'];
 
+export const envioPreviewDefaultColor = '#101D69';
+
 export function getEnvioMetodo(metodo: string | null | undefined) {
   return ENVIO_METODOS.find((item) => item.metodo === metodo) ?? null;
 }
@@ -192,6 +194,76 @@ export class EnviosConfigService {
       anticipacionDias: config.anticipacionDias,
       configurado: true,
       usaDespacho: false,
+    };
+  }
+
+  async getPreview(empresaId: bigint) {
+    const config = await this.prisma.empresaEnvioPreviewConfig.findUnique({
+      where: { empresaId },
+      select: {
+        titulo: true,
+        descripcion: true,
+        colorPrimario: true,
+        textoCentral: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      titulo: config?.titulo ?? null,
+      descripcion: config?.descripcion ?? null,
+      colorPrimario: config?.colorPrimario ?? envioPreviewDefaultColor,
+      textoCentral: config?.textoCentral ?? null,
+      configurado: Boolean(config),
+      actualizadoAt: config ? config.updatedAt.toISOString() : null,
+    };
+  }
+
+  async updatePreview(
+    empresaId: bigint,
+    data: {
+      titulo?: string | null;
+      descripcion?: string | null;
+      colorPrimario: string;
+      textoCentral?: string | null;
+    },
+  ) {
+    const normalize = (value?: string | null) => {
+      const trimmed = value?.trim();
+      return trimmed ? trimmed : null;
+    };
+
+    const config = await this.prisma.empresaEnvioPreviewConfig.upsert({
+      where: { empresaId },
+      update: {
+        titulo: normalize(data.titulo),
+        descripcion: normalize(data.descripcion),
+        colorPrimario: data.colorPrimario,
+        textoCentral: normalize(data.textoCentral),
+      },
+      create: {
+        empresaId,
+        titulo: normalize(data.titulo),
+        descripcion: normalize(data.descripcion),
+        colorPrimario: data.colorPrimario,
+        textoCentral: normalize(data.textoCentral),
+      },
+      select: {
+        titulo: true,
+        descripcion: true,
+        colorPrimario: true,
+        textoCentral: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      titulo: config.titulo,
+      descripcion: config.descripcion,
+      colorPrimario: config.colorPrimario,
+      textoCentral: config.textoCentral,
+      configurado: true,
+      actualizadoAt: config.updatedAt.toISOString(),
     };
   }
 

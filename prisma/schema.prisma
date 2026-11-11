@@ -588,6 +588,7 @@ model Empresa {
   puntosQrAsistencia              PuntoQrAsistencia[]
   marcajesAsistencia              MarcajeAsistencia[]
   afiliacion                      EmpresaAfiliacion?
+  envioPreviewConfig              EmpresaEnvioPreviewConfig?
   comisionesAfiliado              ComisionAfiliado[]
   billingIntegration              BillingIntegration?
   billingEstablishments           BillingEstablishmentMapping[]
@@ -2755,6 +2756,19 @@ model EmpresaRecojoConfig {
   empresa    Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 
   @@map("empresa_recojo_config")
+}
+
+model EmpresaEnvioPreviewConfig {
+  empresaId      BigInt   @id @map("empresa_id")
+  titulo         String?  @db.VarChar(60)
+  descripcion    String?  @db.VarChar(120)
+  colorPrimario  String   @default("#101D69") @map("color_primario") @db.VarChar(7)
+  textoCentral   String?  @map("texto_central") @db.VarChar(40)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa        Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@map("empresa_envio_preview_config")
 }
 
 model NotaCredito {
