@@ -13,7 +13,6 @@ import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { UpdateDespachoConfigDto } from './dto/update-despacho-config.dto';
 import { UpdateEnvioConfigDto } from './dto/update-envio-config.dto';
-import { UpdateEnvioPreviewConfigDto } from './dto/update-envio-preview-config.dto';
 import { UpdateRecojoConfigDto } from './dto/update-recojo-config.dto';
 import { EnviosConfigService } from './envios-config.service';
 
@@ -49,25 +48,6 @@ export class EnviosConfigController {
   @Get('recojo')
   findRecojo(@CurrentUser() user: JwtPayload) {
     return this.enviosConfigService.getRecojo(this.getEmpresaId(user));
-  }
-
-  @Get('preview')
-  findPreview(@CurrentUser() user: JwtPayload) {
-    return this.enviosConfigService.getPreview(this.getEmpresaId(user));
-  }
-
-  @Patch('preview')
-  updatePreview(
-    @CurrentUser() user: JwtPayload,
-    @Body() dto: UpdateEnvioPreviewConfigDto,
-  ) {
-    return this.enviosConfigService.updatePreview(this.getEmpresaId(user), {
-      titulo: dto.titulo,
-      descripcion: dto.descripcion,
-      colorPrimario: dto.colorPrimario,
-      textoCentral: dto.textoCentral,
-      escalaContenido: dto.escalaContenido ?? 100,
-    });
   }
 
   @Patch('recojo')
