@@ -41,7 +41,7 @@ export class UpdateEnvioPreviewConfigDto {
 
   @Type(() => Number)
   @IsInt()
-  @Min(80)
-  @Max(120)
+  @Min(70)
+  @Max(140)
   escalaContenido?: number;
 }
