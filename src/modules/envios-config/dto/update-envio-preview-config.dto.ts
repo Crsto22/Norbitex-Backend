@@ -1,4 +1,13 @@
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 export const envioPreviewColors = [
   '#101D69',
@@ -29,4 +38,10 @@ export class UpdateEnvioPreviewConfigDto {
   @IsString()
   @MaxLength(40)
   textoCentral?: string | null;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(80)
+  @Max(120)
+  escalaContenido?: number;
 }

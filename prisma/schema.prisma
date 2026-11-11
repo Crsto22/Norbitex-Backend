@@ -2764,6 +2764,7 @@ model EmpresaEnvioPreviewConfig {
   descripcion    String?  @db.VarChar(120)
   colorPrimario  String   @default("#101D69") @map("color_primario") @db.VarChar(7)
   textoCentral   String?  @map("texto_central") @db.VarChar(40)
+  escalaContenido Int     @default(100) @map("escala_contenido")
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
   empresa        Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)

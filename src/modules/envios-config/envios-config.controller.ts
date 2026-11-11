@@ -66,6 +66,7 @@ export class EnviosConfigController {
       descripcion: dto.descripcion,
       colorPrimario: dto.colorPrimario,
       textoCentral: dto.textoCentral,
+      escalaContenido: dto.escalaContenido ?? 100,
     });
   }
 

@@ -47,6 +47,7 @@ const publicShippingLinkInclude = {
               descripcion: true,
               colorPrimario: true,
               textoCentral: true,
+              escalaContenido: true,
               updatedAt: true,
             },
           },
@@ -625,6 +626,7 @@ export class ShippingLinksService {
           envio.venta.empresa.envioPreviewConfig?.colorPrimario ??
           envioPreviewDefaultColor,
         textoCentral: envio.venta.empresa.envioPreviewConfig?.textoCentral ?? null,
+        escalaContenido: envio.venta.empresa.envioPreviewConfig?.escalaContenido ?? 100,
         actualizadoAt:
           envio.venta.empresa.envioPreviewConfig?.updatedAt.toISOString() ??
           null,

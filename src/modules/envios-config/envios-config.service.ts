@@ -205,6 +205,7 @@ export class EnviosConfigService {
         descripcion: true,
         colorPrimario: true,
         textoCentral: true,
+        escalaContenido: true,
         updatedAt: true,
       },
     });
@@ -214,6 +215,7 @@ export class EnviosConfigService {
       descripcion: config?.descripcion ?? null,
       colorPrimario: config?.colorPrimario ?? envioPreviewDefaultColor,
       textoCentral: config?.textoCentral ?? null,
+      escalaContenido: config?.escalaContenido ?? 100,
       configurado: Boolean(config),
       actualizadoAt: config ? config.updatedAt.toISOString() : null,
     };
@@ -226,6 +228,7 @@ export class EnviosConfigService {
       descripcion?: string | null;
       colorPrimario: string;
       textoCentral?: string | null;
+      escalaContenido: number;
     },
   ) {
     const normalize = (value?: string | null) => {
@@ -240,6 +243,7 @@ export class EnviosConfigService {
         descripcion: normalize(data.descripcion),
         colorPrimario: data.colorPrimario,
         textoCentral: normalize(data.textoCentral),
+        escalaContenido: data.escalaContenido,
       },
       create: {
         empresaId,
@@ -247,12 +251,14 @@ export class EnviosConfigService {
         descripcion: normalize(data.descripcion),
         colorPrimario: data.colorPrimario,
         textoCentral: normalize(data.textoCentral),
+        escalaContenido: data.escalaContenido,
       },
       select: {
         titulo: true,
         descripcion: true,
         colorPrimario: true,
         textoCentral: true,
+        escalaContenido: true,
         updatedAt: true,
       },
     });
@@ -262,6 +268,7 @@ export class EnviosConfigService {
       descripcion: config.descripcion,
       colorPrimario: config.colorPrimario,
       textoCentral: config.textoCentral,
+      escalaContenido: config.escalaContenido,
       configurado: true,
       actualizadoAt: config.updatedAt.toISOString(),
     };
