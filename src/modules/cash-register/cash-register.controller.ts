@@ -5,18 +5,26 @@ import {
   Param,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
+import { PdfConcurrencyService } from '../../common/pdf/pdf-concurrency.service';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import {
   getCommercialScope,
   resolveScopedBranchId,
   scopedCreatorId,
 } from '../../common/commercial-access';
+import {
+  CashRegisterPdfService,
+  type CashRegisterPdfFormat,
+} from './cash-register-pdf.service';
 import { CashRegisterService } from './cash-register.service';
 import { CloseCashRegisterDto } from './dto/close-cash-register.dto';
 import { CreateCashMovementDto } from './dto/create-cash-movement.dto';
@@ -30,7 +38,11 @@ import { OpenCashRegisterDto } from './dto/open-cash-register.dto';
 @RequireModule('caja')
 @Controller('cash-register')
 export class CashRegisterController {
-  constructor(private readonly cashRegisterService: CashRegisterService) {}
+  constructor(
+    private readonly cashRegisterService: CashRegisterService,
+    private readonly cashRegisterPdfService: CashRegisterPdfService,
+    private readonly pdfConcurrency: PdfConcurrencyService,
+  ) {}
 
   @Post('open')
   open(@CurrentUser() user: JwtPayload, @Body() dto: OpenCashRegisterDto) {
@@ -102,6 +114,33 @@ export class CashRegisterController {
     )?.toString();
     query.usuarioId = scopedCreatorId(scope)?.toString() ?? query.usuarioId;
     return this.cashRegisterService.findAll(this.getEmpresaId(user), query);
+  }
+
+  @Get(':publicId/pdf')
+  async generatePdf(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Query('format') format: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const pdfFormat: CashRegisterPdfFormat =
+      format === 'a4' ? 'a4' : 'ticket80';
+    const file = await this.pdfConcurrency.run(() =>
+      this.cashRegisterPdfService.generate(
+        this.getEmpresaId(user),
+        getCommercialScope(user),
+        publicId,
+        pdfFormat,
+      ),
+    );
+
+    response.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${file.fileName}"`,
+      'Content-Length': file.buffer.length,
+    });
+
+    return new StreamableFile(file.buffer);
   }
 
   @Get(':publicId')
