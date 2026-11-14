@@ -2,10 +2,13 @@ import {
   Controller,
   Get,
   Query,
+  Res,
+  StreamableFile,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
@@ -34,6 +37,51 @@ export class ReportsController {
     );
   }
 
+  @Get('sales/excel')
+  @RequireModule('reportes-ventas')
+  async exportSales(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: FindReportQueryDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.reportsService.exportSalesExcel(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
+
+    response.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${file.fileName}"`,
+      'Content-Length': file.buffer.length,
+    });
+
+    return new StreamableFile(file.buffer);
+  }
+
+  @Get('products/csv')
+  @RequireModule('reportes-productos')
+  async exportProducts(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: FindReportQueryDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.reportsService.exportProductsCsv(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
+
+    response.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${file.fileName}"`,
+      'Content-Length': file.buffer.length,
+    });
+
+    return new StreamableFile(file.buffer);
+  }
+
   @Get('products')
   @RequireModule('reportes-productos')
   findProducts(
@@ -47,6 +95,28 @@ export class ReportsController {
     );
   }
 
+  @Get('clients/csv')
+  @RequireModule('reportes-clientes')
+  async exportClients(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: FindReportQueryDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.reportsService.exportClientsCsv(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
+
+    response.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${file.fileName}"`,
+      'Content-Length': file.buffer.length,
+    });
+
+    return new StreamableFile(file.buffer);
+  }
+
   @Get('clients')
   @RequireModule('reportes-clientes')
   findClients(
@@ -58,6 +128,28 @@ export class ReportsController {
       getCommercialScope(user),
       query,
     );
+  }
+
+  @Get('users/csv')
+  @RequireModule('reportes-usuarios')
+  async exportUsers(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: FindReportQueryDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.reportsService.exportUsersCsv(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
+
+    response.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${file.fileName}"`,
+      'Content-Length': file.buffer.length,
+    });
+
+    return new StreamableFile(file.buffer);
   }
 
   @Get('users')

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import ExcelJS from 'exceljs';
 import {
   ClienteEstado,
   EmpresaUsuarioEstado,
@@ -27,6 +28,45 @@ type ReportContext = {
   creatorId: bigint | null;
   dateFilter: ReportDateFilter;
   range: DateRange;
+};
+
+const MAX_EXPORT_SALES = 20_000;
+const MAX_EXPORT_PRODUCTS = 100;
+const MAX_EXPORT_CLIENTS = 100;
+
+const comprobanteLabels: Record<string, string> = {
+  nota_venta: 'Nota de venta',
+  factura: 'Factura',
+  boleta: 'Boleta',
+  guia_remision: 'Guia de remision',
+  nota_credito_factura: 'Nota de credito (factura)',
+  nota_credito_boleta: 'Nota de credito (boleta)',
+  nota_debito_factura: 'Nota de debito (factura)',
+  nota_debito_boleta: 'Nota de debito (boleta)',
+};
+
+const sunatEstadoLabels: Record<string, string> = {
+  no_aplica: 'No aplica',
+  pendiente_envio: 'Pendiente de envio',
+  enviando: 'Enviando',
+  pendiente_cdr: 'Pendiente de CDR',
+  aceptado: 'Aceptado',
+  observado: 'Observado',
+  rechazado: 'Rechazado',
+  error_transitorio: 'Error transitorio',
+  error_definitivo: 'Error definitivo',
+};
+
+const formaPagoLabels: Record<string, string> = {
+  CONTADO: 'Contado',
+  CREDITO: 'Credito',
+};
+
+const dateFilterFileLabels: Record<ReportDateFilter, string> = {
+  today: 'hoy',
+  '7days': '7dias',
+  '14days': '14dias',
+  '30days': '30dias',
 };
 
 @Injectable()
@@ -152,6 +192,278 @@ export class ReportsService {
         }))
         .sort((a, b) => b.count - a.count),
       salesByBranch,
+    };
+  }
+
+  async exportSalesExcel(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindReportQueryDto,
+  ): Promise<{ buffer: Buffer; fileName: string }> {
+    const context = await this.resolveContext(empresaId, scope, query, true);
+    const baseWhere = this.buildSaleWhere(
+      empresaId,
+      context.sucursalId,
+      context.creatorId,
+    );
+
+    const ventas = await this.prisma.venta.findMany({
+      where: {
+        ...baseWhere,
+        estado: VentaEstado.completada,
+        createdAt: { gte: context.range.start, lte: context.range.end },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: MAX_EXPORT_SALES + 1,
+      select: {
+        codigoInterno: true,
+        correlativo: true,
+        tipoComprobante: true,
+        serie: true,
+        numero: true,
+        createdAt: true,
+        moneda: true,
+        formaPago: true,
+        subtotal: true,
+        descuentoMonto: true,
+        igvMonto: true,
+        total: true,
+        sunatEstado: true,
+        cliente: {
+          select: {
+            nombre: true,
+            razonSocial: true,
+            tipoDocumento: true,
+            numeroDocumento: true,
+          },
+        },
+        sucursal: { select: { nombre: true } },
+        creadoPor: { select: { nombre: true, apellido: true } },
+        detalles: {
+          select: {
+            descripcion: true,
+            cantidad: true,
+            precioUnitario: true,
+            descuentoMonto: true,
+            subtotal: true,
+            total: true,
+            productoVariante: {
+              select: {
+                sku: true,
+                producto: { select: { nombre: true } },
+                productoColor: {
+                  select: { color: { select: { nombre: true } } },
+                },
+                talla: { select: { nombre: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const truncated = ventas.length > MAX_EXPORT_SALES;
+    const rows = truncated ? ventas.slice(0, MAX_EXPORT_SALES) : ventas;
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Nuvex';
+    workbook.created = new Date();
+
+    const salesSheet = workbook.addWorksheet('Ventas', {
+      views: [{ state: 'frozen', ySplit: 1 }],
+    });
+    salesSheet.columns = [
+      { header: 'N° interno', key: 'codigoInterno', width: 14 },
+      { header: 'Correlativo', key: 'correlativo', width: 16 },
+      { header: 'Fecha', key: 'fecha', width: 12 },
+      { header: 'Hora', key: 'hora', width: 8 },
+      { header: 'Comprobante', key: 'comprobante', width: 20 },
+      { header: 'Cliente', key: 'cliente', width: 32 },
+      { header: 'Documento', key: 'documento', width: 16 },
+      { header: 'Sucursal', key: 'sucursal', width: 22 },
+      { header: 'Vendedor', key: 'vendedor', width: 24 },
+      { header: 'Moneda', key: 'moneda', width: 8 },
+      { header: 'Forma de pago', key: 'formaPago', width: 14 },
+      { header: 'Subtotal', key: 'subtotal', width: 12 },
+      { header: 'Descuento', key: 'descuento', width: 12 },
+      { header: 'IGV', key: 'igv', width: 12 },
+      { header: 'Total', key: 'total', width: 12 },
+      { header: 'Estado SUNAT', key: 'sunatEstado', width: 18 },
+    ];
+
+    const productsSheet = workbook.addWorksheet('Productos vendidos', {
+      views: [{ state: 'frozen', ySplit: 1 }],
+    });
+    productsSheet.columns = [
+      { header: 'Correlativo venta', key: 'correlativo', width: 16 },
+      { header: 'Fecha', key: 'fecha', width: 12 },
+      { header: 'Cliente', key: 'cliente', width: 32 },
+      { header: 'Producto', key: 'producto', width: 32 },
+      { header: 'Color', key: 'color', width: 14 },
+      { header: 'Talla', key: 'talla', width: 10 },
+      { header: 'SKU', key: 'sku', width: 18 },
+      { header: 'Cantidad', key: 'cantidad', width: 10 },
+      { header: 'Precio unitario', key: 'precioUnitario', width: 14 },
+      { header: 'Descuento', key: 'descuento', width: 12 },
+      { header: 'Subtotal', key: 'subtotal', width: 12 },
+      { header: 'Total', key: 'total', width: 12 },
+    ];
+
+    for (const venta of rows) {
+      const cliente =
+        venta.cliente?.razonSocial?.trim() ||
+        venta.cliente?.nombre?.trim() ||
+        'Cliente generico';
+      const documento = venta.cliente?.numeroDocumento
+        ? `${(venta.cliente.tipoDocumento ?? '').toUpperCase()} ${venta.cliente.numeroDocumento}`.trim()
+        : '';
+      const vendedor = [venta.creadoPor?.nombre, venta.creadoPor?.apellido]
+        .filter(Boolean)
+        .join(' ');
+
+      salesSheet.addRow({
+        codigoInterno: venta.codigoInterno,
+        correlativo: venta.correlativo,
+        fecha: venta.createdAt,
+        hora: this.formatTime(venta.createdAt),
+        comprobante:
+          comprobanteLabels[venta.tipoComprobante] ?? venta.tipoComprobante,
+        cliente,
+        documento,
+        sucursal: venta.sucursal?.nombre ?? '',
+        vendedor,
+        moneda: venta.moneda,
+        formaPago: formaPagoLabels[venta.formaPago] ?? venta.formaPago,
+        subtotal: this.decimalToNumber(venta.subtotal),
+        descuento: this.decimalToNumber(venta.descuentoMonto),
+        igv: this.decimalToNumber(venta.igvMonto),
+        total: this.decimalToNumber(venta.total),
+        sunatEstado: sunatEstadoLabels[venta.sunatEstado] ?? venta.sunatEstado,
+      });
+
+      for (const detalle of venta.detalles) {
+        productsSheet.addRow({
+          correlativo: venta.correlativo,
+          fecha: venta.createdAt,
+          cliente,
+          producto:
+            detalle.productoVariante?.producto?.nombre ??
+            detalle.descripcion ??
+            'Producto',
+          color: detalle.productoVariante?.productoColor?.color?.nombre ?? '',
+          talla: detalle.productoVariante?.talla?.nombre ?? '',
+          sku: detalle.productoVariante?.sku ?? '',
+          cantidad: detalle.cantidad,
+          precioUnitario: this.decimalToNumber(detalle.precioUnitario),
+          descuento: this.decimalToNumber(detalle.descuentoMonto),
+          subtotal: this.decimalToNumber(detalle.subtotal),
+          total: this.decimalToNumber(detalle.total),
+        });
+      }
+    }
+
+    this.styleExcelSheet(
+      salesSheet,
+      ['subtotal', 'descuento', 'igv', 'total'],
+      ['fecha'],
+    );
+    this.styleExcelSheet(
+      productsSheet,
+      ['precioUnitario', 'descuento', 'subtotal', 'total'],
+      ['fecha'],
+    );
+
+    if (truncated) {
+      const noteRow = salesSheet.addRow({
+        codigoInterno: `Se muestran las primeras ${MAX_EXPORT_SALES.toLocaleString('es-PE')} ventas del periodo.`,
+      });
+      noteRow.font = { italic: true, color: { argb: 'FF6B7280' } };
+    }
+
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    return {
+      buffer,
+      fileName: `reporte-ventas-${dateFilterFileLabels[context.dateFilter]}-${stamp}.xlsx`,
+    };
+  }
+
+  async exportProductsCsv(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindReportQueryDto,
+  ): Promise<{ buffer: Buffer; fileName: string }> {
+    const context = await this.resolveContext(empresaId, scope, query);
+    const completedWhere = {
+      ...this.buildSaleWhere(empresaId, context.sucursalId, context.creatorId),
+      estado: VentaEstado.completada,
+      createdAt: { gte: context.range.start, lte: context.range.end },
+    } satisfies Prisma.VentaWhereInput;
+
+    const groups = await this.prisma.ventaDetalle.groupBy({
+      by: ['productoVarianteId'],
+      where: { venta: completedWhere },
+      _sum: { cantidad: true, total: true },
+      orderBy: [{ _sum: { cantidad: 'desc' } }, { _sum: { total: 'desc' } }],
+      take: MAX_EXPORT_PRODUCTS,
+    });
+
+    const variantIds = groups.map((group) => group.productoVarianteId);
+    const variants = variantIds.length
+      ? await this.prisma.productoVariante.findMany({
+          where: { empresaId, id: { in: variantIds } },
+          select: {
+            id: true,
+            sku: true,
+            codigoBarras: true,
+            producto: {
+              select: {
+                nombre: true,
+                categoria: { select: { nombre: true } },
+              },
+            },
+          },
+        })
+      : [];
+    const variantMap = new Map(
+      variants.map((variant) => [variant.id.toString(), variant]),
+    );
+
+    const rows: string[][] = [
+      [
+        'Posicion',
+        'SKU',
+        'Producto',
+        'Categoria',
+        'Cantidad vendida',
+        'Venta total',
+        'Precio promedio',
+      ],
+    ];
+
+    groups.forEach((group, index) => {
+      const variant = variantMap.get(group.productoVarianteId.toString());
+      const quantity = group._sum.cantidad ?? 0;
+      const total = this.decimalToNumber(group._sum.total);
+      const average = quantity > 0 ? total / quantity : 0;
+
+      rows.push([
+        String(index + 1),
+        variant?.sku?.trim() || variant?.codigoBarras?.trim() || '',
+        variant?.producto?.nombre ?? '',
+        variant?.producto?.categoria?.nombre ?? 'Sin categoria',
+        String(quantity),
+        this.formatCsvNumber(total),
+        this.formatCsvNumber(average),
+      ]);
+    });
+
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    return {
+      buffer: Buffer.from(this.buildCsv(rows), 'utf8'),
+      fileName: `reporte-productos-${dateFilterFileLabels[context.dateFilter]}-${stamp}.csv`,
     };
   }
 
@@ -298,6 +610,89 @@ export class ReportsService {
     };
   }
 
+  async exportClientsCsv(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindReportQueryDto,
+  ): Promise<{ buffer: Buffer; fileName: string }> {
+    const context = await this.resolveContext(empresaId, scope, query, true);
+    const completedWhere = {
+      ...this.buildSaleWhere(empresaId, context.sucursalId, context.creatorId),
+      estado: VentaEstado.completada,
+      createdAt: { gte: context.range.start, lte: context.range.end },
+      clienteId: { not: null },
+    } satisfies Prisma.VentaWhereInput;
+
+    const groups = await this.prisma.venta.groupBy({
+      by: ['clienteId'],
+      where: completedWhere,
+      _count: { _all: true },
+      _sum: { total: true },
+      orderBy: [{ _count: { clienteId: 'desc' } }, { _sum: { total: 'desc' } }],
+      take: MAX_EXPORT_CLIENTS,
+    });
+
+    const clientIds = groups.flatMap((group) =>
+      group.clienteId ? [group.clienteId] : [],
+    );
+    const clients = clientIds.length
+      ? await this.prisma.cliente.findMany({
+          where: { empresaId, id: { in: clientIds } },
+          select: {
+            id: true,
+            tipoDocumento: true,
+            numeroDocumento: true,
+            nombre: true,
+            razonSocial: true,
+          },
+        })
+      : [];
+    const clientMap = new Map(
+      clients.map((client) => [client.id.toString(), client]),
+    );
+
+    const rows: string[][] = [
+      [
+        'Posicion',
+        'Cliente',
+        'Documento',
+        'Compras',
+        'Venta total',
+        'Ticket promedio',
+      ],
+    ];
+
+    groups.forEach((group, index) => {
+      if (!group.clienteId) return;
+
+      const client = clientMap.get(group.clienteId.toString());
+      const purchases = group._count._all;
+      const total = this.decimalToNumber(group._sum.total);
+      const average = purchases > 0 ? total / purchases : 0;
+
+      rows.push([
+        String(index + 1),
+        client?.razonSocial?.trim() ||
+          client?.nombre?.trim() ||
+          client?.numeroDocumento?.trim() ||
+          'Cliente',
+        client?.numeroDocumento
+          ? `${(client.tipoDocumento ?? '').toUpperCase()} ${client.numeroDocumento}`.trim()
+          : '',
+        String(purchases),
+        this.formatCsvNumber(total),
+        this.formatCsvNumber(average),
+      ]);
+    });
+
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    return {
+      buffer: Buffer.from(this.buildCsv(rows), 'utf8'),
+      fileName: `reporte-clientes-${dateFilterFileLabels[context.dateFilter]}-${stamp}.csv`,
+    };
+  }
+
   async findClients(
     empresaId: bigint,
     scope: CommercialScope,
@@ -403,6 +798,130 @@ export class ReportsService {
             Number(b.amount) - Number(a.amount) || b.purchases - a.purchases,
         )
         .slice(0, 6),
+    };
+  }
+
+  async exportUsersCsv(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindReportQueryDto,
+  ): Promise<{ buffer: Buffer; fileName: string }> {
+    const context = await this.resolveContext(empresaId, scope, query, true);
+    const baseWhere = this.buildSaleWhere(
+      empresaId,
+      context.sucursalId,
+      context.creatorId,
+    );
+    const completedWhere = {
+      ...baseWhere,
+      estado: VentaEstado.completada,
+      createdAt: { gte: context.range.start, lte: context.range.end },
+    } satisfies Prisma.VentaWhereInput;
+    const annulledWhere = {
+      ...baseWhere,
+      estado: VentaEstado.anulada,
+      anuladoAt: { gte: context.range.start, lte: context.range.end },
+    } satisfies Prisma.VentaWhereInput;
+
+    const [companyUsers, salesGroups, cancellationGroups] = await Promise.all([
+      this.prisma.empresaUsuario.findMany({
+        where: {
+          empresaId,
+          ...(context.creatorId ? { usuarioId: context.creatorId } : {}),
+          estado: EmpresaUsuarioEstado.activo,
+          usuario: { estado: UsuarioEstado.activo },
+        },
+        select: {
+          id: true,
+          usuarioId: true,
+          usuario: { select: { nombre: true, apellido: true } },
+        },
+        orderBy: { usuario: { nombre: 'asc' } },
+      }),
+      this.prisma.venta.groupBy({
+        by: ['creadoPorId'],
+        where: { ...completedWhere, creadoPorId: { not: null } },
+        _count: { _all: true },
+        _sum: { total: true },
+        _avg: { total: true },
+      }),
+      this.prisma.venta.groupBy({
+        by: ['creadoPorId'],
+        where: { ...annulledWhere, creadoPorId: { not: null } },
+        _count: { _all: true },
+        _sum: { total: true },
+      }),
+    ]);
+
+    const salesMap = new Map(
+      salesGroups.flatMap((group) =>
+        group.creadoPorId
+          ? [[group.creadoPorId.toString(), group] as const]
+          : [],
+      ),
+    );
+    const cancellationsMap = new Map(
+      cancellationGroups.flatMap((group) =>
+        group.creadoPorId
+          ? [[group.creadoPorId.toString(), group] as const]
+          : [],
+      ),
+    );
+
+    const rows: string[][] = [
+      [
+        'Posicion',
+        'Usuario',
+        'Ventas',
+        'Monto vendido',
+        'Ticket promedio',
+        'Anuladas',
+        'Monto anulado',
+      ],
+    ];
+
+    const ranking = companyUsers
+      .map((companyUser) => {
+        const userId = companyUser.usuarioId.toString();
+        const sales = salesMap.get(userId);
+        const cancellations = cancellationsMap.get(userId);
+
+        return {
+          name:
+            [companyUser.usuario.nombre, companyUser.usuario.apellido]
+              .filter(Boolean)
+              .join(' ') || 'Usuario',
+          sales: sales?._count._all ?? 0,
+          amount: this.decimalToNumber(sales?._sum.total),
+          averageTicket: this.decimalToNumber(sales?._avg.total),
+          cancellations: cancellations?._count._all ?? 0,
+          cancelledAmount: this.decimalToNumber(cancellations?._sum.total),
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.amount - a.amount ||
+          b.sales - a.sales ||
+          a.name.localeCompare(b.name),
+      );
+
+    ranking.forEach((user, index) => {
+      rows.push([
+        String(index + 1),
+        user.name,
+        String(user.sales),
+        this.formatCsvNumber(user.amount),
+        this.formatCsvNumber(user.averageTicket),
+        String(user.cancellations),
+        this.formatCsvNumber(user.cancelledAmount),
+      ]);
+    });
+
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    return {
+      buffer: Buffer.from(this.buildCsv(rows), 'utf8'),
+      fileName: `reporte-usuarios-${dateFilterFileLabels[context.dateFilter]}-${stamp}.csv`,
     };
   }
 
@@ -821,5 +1340,63 @@ export class ReportsService {
 
   private decimalToNumber(value?: Prisma.Decimal | null) {
     return Number(this.decimalToString(value));
+  }
+
+  private formatTime(date: Date) {
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+
+    return `${hours}:${minutes}`;
+  }
+
+  private formatCsvNumber(value: number) {
+    return value.toFixed(2).replace('.', ',');
+  }
+
+  private buildCsv(rows: string[][]) {
+    const content = rows
+      .map((row) => row.map((cell) => this.csvCell(cell)).join(';'))
+      .join('\r\n');
+
+    return `\uFEFF${content}\r\n`;
+  }
+
+  private csvCell(value: string) {
+    if (/[";\r\n]/.test(value)) {
+      return `"${value.replace(/"/g, '""')}"`;
+    }
+
+    return value;
+  }
+
+  private styleExcelSheet(
+    sheet: ExcelJS.Worksheet,
+    moneyColumns: string[],
+    dateColumns: string[],
+  ) {
+    const header = sheet.getRow(1);
+    header.height = 22;
+    header.alignment = { vertical: 'middle', horizontal: 'left' };
+    header.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF101D69' },
+      };
+    });
+
+    sheet.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: 1, column: sheet.columnCount },
+    };
+
+    for (const key of moneyColumns) {
+      sheet.getColumn(key).numFmt = '#,##0.00';
+    }
+
+    for (const key of dateColumns) {
+      sheet.getColumn(key).numFmt = 'dd/mm/yyyy';
+    }
   }
 }
