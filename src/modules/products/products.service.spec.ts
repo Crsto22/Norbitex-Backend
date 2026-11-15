@@ -164,9 +164,11 @@ describe('ProductsService export', () => {
     expect(lines[0]).toContain('Nombre;SKU;Código de barras;Categoría');
     expect(lines[0]).toContain('Precio oferta;Stock;Stock mínimo');
     expect(lines[0]).toContain('Cod. producto SUNAT');
+    expect(lines[0]).not.toContain('Tipo de producto');
+    expect(lines[0]).not.toContain('ID público');
     // Primera variante con stock 0 en la sucursal 2 igual aparece
     expect(lines[1]).toContain(
-      'Polo export;SKU-1;7750000001;Polos;Marca X;M;Negro;Polo de prueba;Con variantes;10,00;25,00;;',
+      'Polo export;SKU-1;7750000001;Polos;Marca X;M;Negro;Polo de prueba;10,00;25,00;;',
     );
     expect(lines[2]).toContain('SKU-2');
     expect(lines[2]).toContain('No'); // variante inactiva
@@ -196,8 +198,8 @@ describe('ProductsService export', () => {
     expect(sheet?.rowCount).toBe(3);
     expect(sheet?.getRow(1).getCell(1).value).toBe('Nombre');
     expect(sheet?.getRow(2).getCell(2).value).toBe('SKU-1');
-    expect(sheet?.getRow(2).getCell(14).value).toBe(0);
-    expect(sheet?.getRow(3).getCell(14).value).toBe(5);
+    expect(sheet?.getRow(2).getCell(13).value).toBe(0);
+    expect(sheet?.getRow(3).getCell(13).value).toBe(5);
   });
 });
 

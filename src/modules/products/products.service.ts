@@ -38,7 +38,6 @@ const exportHeaders = [
   'Talla',
   'Color',
   'Descripción',
-  'Tipo de producto',
   'Precio costo',
   'Precio regular',
   'Precio mayorista',
@@ -51,7 +50,6 @@ const exportHeaders = [
   'Disponible para venta',
   'Activo',
   'Controla stock',
-  'ID público',
 ] as const;
 
 type ProductExportRow = {
@@ -63,7 +61,6 @@ type ProductExportRow = {
   talla: string;
   color: string;
   descripcion: string;
-  tipo: string;
   precioCosto: number | null;
   precioRegular: number;
   precioMayorista: number | null;
@@ -76,7 +73,6 @@ type ProductExportRow = {
   disponibleVenta: string;
   activo: string;
   controlaStock: string;
-  idPublico: string;
 };
 
 type ProductColorInput = {
@@ -562,7 +558,6 @@ export class ProductsService {
       talla: variant?.talla.nombre ?? '',
       color: variant?.productoColor.color.nombre ?? '',
       descripcion: product.descripcion ?? '',
-      tipo: product.tipo === ProductoTipo.normal ? 'Normal' : 'Con variantes',
       precioCosto: variant?.precioCompra ? Number(variant.precioCompra) : null,
       precioRegular: variant ? Number(variant.precioVenta) : 0,
       precioMayorista: variant?.precioMayorista
@@ -577,7 +572,6 @@ export class ProductsService {
       disponibleVenta: disponibleVenta ? 'Sí' : 'No',
       activo: product.activo ? 'Sí' : 'No',
       controlaStock: product.controlaStock ? 'Sí' : 'No',
-      idPublico: product.publicId,
     };
   }
 
@@ -591,7 +585,6 @@ export class ProductsService {
       row.talla,
       row.color,
       row.descripcion,
-      row.tipo,
       this.csvNumber(row.precioCosto),
       this.csvNumber(row.precioRegular),
       this.csvNumber(row.precioMayorista),
@@ -604,14 +597,11 @@ export class ProductsService {
       row.disponibleVenta,
       row.activo,
       row.controlaStock,
-      row.idPublico,
     ]);
 
     if (truncated) {
       data.push([
         `Se muestran los primeros ${MAX_EXPORT_PRODUCTS.toLocaleString('es-PE')} productos del filtro.`,
-        '',
-        '',
         '',
         '',
         '',
@@ -659,7 +649,6 @@ export class ProductsService {
       { header: 'Talla', key: 'talla', width: 12 },
       { header: 'Color', key: 'color', width: 16 },
       { header: 'Descripción', key: 'descripcion', width: 36 },
-      { header: 'Tipo de producto', key: 'tipo', width: 16 },
       { header: 'Precio costo', key: 'precioCosto', width: 14 },
       { header: 'Precio regular', key: 'precioRegular', width: 14 },
       { header: 'Precio mayorista', key: 'precioMayorista', width: 16 },
@@ -672,7 +661,6 @@ export class ProductsService {
       { header: 'Disponible para venta', key: 'disponibleVenta', width: 20 },
       { header: 'Activo', key: 'activo', width: 10 },
       { header: 'Controla stock', key: 'controlaStock', width: 15 },
-      { header: 'ID público', key: 'idPublico', width: 32 },
     ];
 
     for (const row of rows) {
