@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import ExcelJS from 'exceljs';
 import {
   Prisma,
   ProductoTipo,
@@ -17,12 +18,66 @@ import {
   resolveScopedBranchId,
   type CommercialScope,
 } from '../../common/commercial-access';
+import { buildCsv } from '../../common/export/csv.util';
 import { PlansService } from '../plans/plans.service';
 import { StockService } from '../stock/stock.service';
 import { R2StorageService } from '../storage/r2-storage.service';
 import { CreateProductDto } from './dto/create-product.dto';
+import { ExportProductsQueryDto } from './dto/export-products-query.dto';
 import { FindProductsQueryDto } from './dto/find-products-query.dto';
 import { resolveSunatUnitCode } from './sunat-unit-codes';
+
+const MAX_EXPORT_PRODUCTS = 50_000;
+
+const exportHeaders = [
+  'Nombre',
+  'SKU',
+  'Código de barras',
+  'Categoría',
+  'Marca',
+  'Talla',
+  'Color',
+  'Descripción',
+  'Tipo de producto',
+  'Precio costo',
+  'Precio regular',
+  'Precio mayorista',
+  'Precio oferta',
+  'Stock',
+  'Stock mínimo',
+  'Unidad de medida',
+  'Tipo afectación IGV',
+  'Cod. producto SUNAT',
+  'Disponible para venta',
+  'Activo',
+  'Controla stock',
+  'ID público',
+] as const;
+
+type ProductExportRow = {
+  nombre: string;
+  sku: string;
+  codigoBarras: string;
+  categoria: string;
+  marca: string;
+  talla: string;
+  color: string;
+  descripcion: string;
+  tipo: string;
+  precioCosto: number | null;
+  precioRegular: number;
+  precioMayorista: number | null;
+  precioOferta: number | null;
+  stock: number;
+  stockMinimo: number;
+  unidadMedida: string;
+  tipoAfectacionIgv: string;
+  codProdSunat: string;
+  disponibleVenta: string;
+  activo: string;
+  controlaStock: string;
+  idPublico: string;
+};
 
 type ProductColorInput = {
   colorId: string;
@@ -112,64 +167,17 @@ export class ProductsService {
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? this.getDefaultPaginationLimit();
-    const search = query.search?.trim();
-    const categoriaId = this.parseOptionalId(query.categoriaId, 'categoriaId');
-    const marcaId = this.parseOptionalId(query.marcaId, 'marcaId');
     const colorId = this.parseOptionalId(query.colorId, 'colorId');
     const tallaId = this.parseOptionalId(query.tallaId, 'tallaId');
     const sucursalId = resolveScopedBranchId(scope, query.sucursalId);
-    const variantWhere = this.buildProductVariantWhere({
+    const where = this.buildProductWhere({
       empresaId,
+      query,
       colorId,
       tallaId,
       sucursalId,
+      requireBranchStock: true,
     });
-    const where: Prisma.ProductoWhereInput = {
-      empresaId,
-      deletedAt: null,
-      ...(query.status ? { activo: query.status === 'active' } : {}),
-      ...(categoriaId ? { categoriaId } : {}),
-      ...(marcaId ? { marcaId } : {}),
-      ...(variantWhere
-        ? {
-            variantes: {
-              some: variantWhere,
-            },
-          }
-        : {}),
-      ...(search
-        ? {
-            OR: [
-              { nombre: { contains: search, mode: 'insensitive' } },
-              { nombreKey: { contains: this.buildNameKey(search) } },
-              { descripcion: { contains: search, mode: 'insensitive' } },
-              { marca: { nombre: { contains: search, mode: 'insensitive' } } },
-              {
-                categoria: {
-                  nombre: { contains: search, mode: 'insensitive' },
-                },
-              },
-              {
-                variantes: {
-                  some: {
-                    sku: { contains: search, mode: 'insensitive' },
-                  },
-                },
-              },
-              {
-                variantes: {
-                  some: {
-                    codigoBarras: {
-                      contains: search,
-                      mode: 'insensitive',
-                    },
-                  },
-                },
-              },
-            ],
-          }
-        : {}),
-    };
 
     const [products, total, activeTotal, inactiveTotal] =
       await this.prisma.$transaction([
@@ -430,6 +438,285 @@ export class ProductsService {
 
       this.handlePrismaError(error);
     }
+  }
+
+  async exportProducts(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: ExportProductsQueryDto,
+  ): Promise<{ buffer: Buffer; fileName: string }> {
+    const colorId = this.parseOptionalId(query.colorId, 'colorId');
+    const tallaId = this.parseOptionalId(query.tallaId, 'tallaId');
+    const sucursalId = resolveScopedBranchId(scope, query.sucursalId);
+    const where = this.buildProductWhere({
+      empresaId,
+      query,
+      colorId,
+      tallaId,
+      sucursalId,
+      requireBranchStock: false,
+    });
+
+    const products = await this.prisma.producto.findMany({
+      where,
+      include: productInclude,
+      orderBy: [{ activo: 'desc' }, { nombre: 'asc' }, { id: 'asc' }],
+      take: MAX_EXPORT_PRODUCTS + 1,
+    });
+
+    const truncated = products.length > MAX_EXPORT_PRODUCTS;
+    const selected = truncated
+      ? products.slice(0, MAX_EXPORT_PRODUCTS)
+      : products;
+    const rows: ProductExportRow[] = [];
+
+    for (const product of selected) {
+      const unidadMedida = `${product.unidadMedida.codigo} - ${product.unidadMedida.descripcion}`;
+      const tipoAfectacionIgv = `${product.tipoAfectacionIgv.codigo} - ${product.tipoAfectacionIgv.descripcion}`;
+      const variants = product.variantes;
+
+      if (variants.length === 0) {
+        rows.push(
+          this.toProductExportRow({
+            product,
+            variant: null,
+            unidadMedida,
+            tipoAfectacionIgv,
+            sucursalId,
+          }),
+        );
+        continue;
+      }
+
+      for (const variant of variants) {
+        rows.push(
+          this.toProductExportRow({
+            product,
+            variant,
+            unidadMedida,
+            tipoAfectacionIgv,
+            sucursalId,
+          }),
+        );
+      }
+    }
+
+    const format = query.format ?? 'xlsx';
+    const stamp = new Date().toISOString().slice(0, 10);
+    const branchLabel = sucursalId ? `sucursal-${sucursalId}` : 'todas';
+    const fileName = `catalogo-productos-${branchLabel}-${stamp}.${format}`;
+
+    if (format === 'csv') {
+      return {
+        buffer: Buffer.from(this.productsToCsv(rows, truncated), 'utf8'),
+        fileName,
+      };
+    }
+
+    return {
+      buffer: await this.productsToExcel(rows, truncated),
+      fileName,
+    };
+  }
+
+  private toProductExportRow(params: {
+    product: ProductWithRelations;
+    variant: ProductWithRelations['variantes'][number] | null;
+    unidadMedida: string;
+    tipoAfectacionIgv: string;
+    sucursalId: bigint | null;
+  }): ProductExportRow {
+    const { product, variant, unidadMedida, tipoAfectacionIgv, sucursalId } =
+      params;
+    const inventory =
+      variant && sucursalId
+        ? variant.inventarios.find((item) => item.sucursalId === sucursalId)
+        : undefined;
+    const stock = variant
+      ? sucursalId
+        ? (inventory?.stockActual ?? 0)
+        : variant.inventarios.reduce(
+            (total, item) => total + item.stockActual,
+            0,
+          )
+      : 0;
+    const stockMinimo = variant
+      ? sucursalId
+        ? (inventory?.stockMinimo ?? 0)
+        : variant.inventarios.reduce(
+            (total, item) => total + item.stockMinimo,
+            0,
+          )
+      : 0;
+    const disponibleVenta =
+      product.activo && variant
+        ? variant.activo && variant.productoColor.activo
+        : product.activo;
+
+    return {
+      nombre: product.nombre,
+      sku: variant?.sku ?? '',
+      codigoBarras: variant?.codigoBarras ?? '',
+      categoria: product.categoria?.nombre ?? '',
+      marca: product.marca?.nombre ?? '',
+      talla: variant?.talla.nombre ?? '',
+      color: variant?.productoColor.color.nombre ?? '',
+      descripcion: product.descripcion ?? '',
+      tipo: product.tipo === ProductoTipo.normal ? 'Normal' : 'Con variantes',
+      precioCosto: variant?.precioCompra ? Number(variant.precioCompra) : null,
+      precioRegular: variant ? Number(variant.precioVenta) : 0,
+      precioMayorista: variant?.precioMayorista
+        ? Number(variant.precioMayorista)
+        : null,
+      precioOferta: null,
+      stock,
+      stockMinimo,
+      unidadMedida,
+      tipoAfectacionIgv,
+      codProdSunat: '',
+      disponibleVenta: disponibleVenta ? 'Sí' : 'No',
+      activo: product.activo ? 'Sí' : 'No',
+      controlaStock: product.controlaStock ? 'Sí' : 'No',
+      idPublico: product.publicId,
+    };
+  }
+
+  private productsToCsv(rows: ProductExportRow[], truncated: boolean) {
+    const data = rows.map((row) => [
+      row.nombre,
+      row.sku,
+      row.codigoBarras,
+      row.categoria,
+      row.marca,
+      row.talla,
+      row.color,
+      row.descripcion,
+      row.tipo,
+      this.csvNumber(row.precioCosto),
+      this.csvNumber(row.precioRegular),
+      this.csvNumber(row.precioMayorista),
+      this.csvNumber(row.precioOferta),
+      String(row.stock),
+      String(row.stockMinimo),
+      row.unidadMedida,
+      row.tipoAfectacionIgv,
+      row.codProdSunat,
+      row.disponibleVenta,
+      row.activo,
+      row.controlaStock,
+      row.idPublico,
+    ]);
+
+    if (truncated) {
+      data.push([
+        `Se muestran los primeros ${MAX_EXPORT_PRODUCTS.toLocaleString('es-PE')} productos del filtro.`,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+      ]);
+    }
+
+    return buildCsv([[...exportHeaders], ...data]);
+  }
+
+  private csvNumber(value: number | null) {
+    return value === null ? '' : value.toFixed(2).replace('.', ',');
+  }
+
+  private async productsToExcel(rows: ProductExportRow[], truncated: boolean) {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Nuvex';
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet('Productos', {
+      views: [{ state: 'frozen', ySplit: 1 }],
+    });
+
+    sheet.columns = [
+      { header: 'Nombre', key: 'nombre', width: 34 },
+      { header: 'SKU', key: 'sku', width: 20 },
+      { header: 'Código de barras', key: 'codigoBarras', width: 20 },
+      { header: 'Categoría', key: 'categoria', width: 20 },
+      { header: 'Marca', key: 'marca', width: 18 },
+      { header: 'Talla', key: 'talla', width: 12 },
+      { header: 'Color', key: 'color', width: 16 },
+      { header: 'Descripción', key: 'descripcion', width: 36 },
+      { header: 'Tipo de producto', key: 'tipo', width: 16 },
+      { header: 'Precio costo', key: 'precioCosto', width: 14 },
+      { header: 'Precio regular', key: 'precioRegular', width: 14 },
+      { header: 'Precio mayorista', key: 'precioMayorista', width: 16 },
+      { header: 'Precio oferta', key: 'precioOferta', width: 14 },
+      { header: 'Stock', key: 'stock', width: 10 },
+      { header: 'Stock mínimo', key: 'stockMinimo', width: 13 },
+      { header: 'Unidad de medida', key: 'unidadMedida', width: 22 },
+      { header: 'Tipo afectación IGV', key: 'tipoAfectacionIgv', width: 22 },
+      { header: 'Cod. producto SUNAT', key: 'codProdSunat', width: 20 },
+      { header: 'Disponible para venta', key: 'disponibleVenta', width: 20 },
+      { header: 'Activo', key: 'activo', width: 10 },
+      { header: 'Controla stock', key: 'controlaStock', width: 15 },
+      { header: 'ID público', key: 'idPublico', width: 32 },
+    ];
+
+    for (const row of rows) {
+      sheet.addRow(row);
+    }
+
+    const header = sheet.getRow(1);
+    header.height = 22;
+    header.alignment = { vertical: 'middle', horizontal: 'left' };
+    header.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF101D69' },
+      };
+    });
+
+    sheet.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: 1, column: sheet.columnCount },
+    };
+
+    for (const key of [
+      'precioCosto',
+      'precioRegular',
+      'precioMayorista',
+      'precioOferta',
+    ]) {
+      sheet.getColumn(key).numFmt = '#,##0.00';
+    }
+
+    for (const key of ['stock', 'stockMinimo']) {
+      sheet.getColumn(key).numFmt = '0';
+    }
+
+    if (truncated) {
+      const noteRow = sheet.addRow({
+        nombre: `Se muestran los primeros ${MAX_EXPORT_PRODUCTS.toLocaleString('es-PE')} productos del filtro.`,
+      });
+      noteRow.font = { italic: true, color: { argb: 'FF6B7280' } };
+    }
+
+    return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 
   async findOne(empresaId: bigint, scope: CommercialScope, publicId: string) {
@@ -1565,11 +1852,80 @@ export class ProductsService {
     return Math.min(defaultLimit, maxLimit);
   }
 
+  private buildProductWhere(params: {
+    empresaId: bigint;
+    query: FindProductsQueryDto;
+    colorId: bigint | null;
+    tallaId: bigint | null;
+    sucursalId: bigint | null;
+    requireBranchStock: boolean;
+  }): Prisma.ProductoWhereInput {
+    const { empresaId, query, colorId, tallaId, sucursalId } = params;
+    const search = query.search?.trim();
+    const categoriaId = this.parseOptionalId(query.categoriaId, 'categoriaId');
+    const marcaId = this.parseOptionalId(query.marcaId, 'marcaId');
+    const variantWhere = this.buildProductVariantWhere({
+      empresaId,
+      colorId,
+      tallaId,
+      sucursalId,
+      requireBranchStock: params.requireBranchStock,
+    });
+
+    return {
+      empresaId,
+      deletedAt: null,
+      ...(query.status ? { activo: query.status === 'active' } : {}),
+      ...(categoriaId ? { categoriaId } : {}),
+      ...(marcaId ? { marcaId } : {}),
+      ...(variantWhere
+        ? {
+            variantes: {
+              some: variantWhere,
+            },
+          }
+        : {}),
+      ...(search
+        ? {
+            OR: [
+              { nombre: { contains: search, mode: 'insensitive' } },
+              { nombreKey: { contains: this.buildNameKey(search) } },
+              { descripcion: { contains: search, mode: 'insensitive' } },
+              { marca: { nombre: { contains: search, mode: 'insensitive' } } },
+              {
+                categoria: {
+                  nombre: { contains: search, mode: 'insensitive' },
+                },
+              },
+              {
+                variantes: {
+                  some: {
+                    sku: { contains: search, mode: 'insensitive' },
+                  },
+                },
+              },
+              {
+                variantes: {
+                  some: {
+                    codigoBarras: {
+                      contains: search,
+                      mode: 'insensitive',
+                    },
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+  }
+
   private buildProductVariantWhere(params: {
     empresaId: bigint;
     colorId: bigint | null;
     tallaId: bigint | null;
     sucursalId: bigint | null;
+    requireBranchStock?: boolean;
   }) {
     if (!params.colorId && !params.tallaId && !params.sucursalId) {
       return null;
@@ -1588,7 +1944,7 @@ export class ProductsService {
             },
           }
         : {}),
-      ...(params.sucursalId
+      ...(params.sucursalId && params.requireBranchStock !== false
         ? {
             inventarios: {
               some: {

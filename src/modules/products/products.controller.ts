@@ -7,12 +7,15 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UnauthorizedException,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
@@ -20,6 +23,7 @@ import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { getCommercialScope } from '../../common/commercial-access';
 import { CreateProductDto } from './dto/create-product.dto';
+import { ExportProductsQueryDto } from './dto/export-products-query.dto';
 import { FindProductsQueryDto } from './dto/find-products-query.dto';
 import { ProductsService } from './products.service';
 
@@ -45,6 +49,31 @@ export class ProductsController {
       getCommercialScope(user),
       query,
     );
+  }
+
+  @Get('export')
+  @RequireModule('productos')
+  async exportProducts(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: ExportProductsQueryDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.productsService.exportProducts(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
+
+    response.set({
+      'Content-Type':
+        query.format === 'csv'
+          ? 'text/csv; charset=utf-8'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${file.fileName}"`,
+      'Content-Length': file.buffer.length,
+    });
+
+    return new StreamableFile(file.buffer);
   }
 
   @Get(':publicId')

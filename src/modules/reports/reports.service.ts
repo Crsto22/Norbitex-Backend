@@ -16,6 +16,7 @@ import {
   type CommercialScope,
 } from '../../common/commercial-access';
 import { ResponseCacheService } from '../../common/cache/response-cache.service';
+import { buildCsv, formatCsvNumber } from '../../common/export/csv.util';
 import {
   FindReportQueryDto,
   ReportDateFilter,
@@ -1350,23 +1351,11 @@ export class ReportsService {
   }
 
   private formatCsvNumber(value: number) {
-    return value.toFixed(2).replace('.', ',');
+    return formatCsvNumber(value);
   }
 
   private buildCsv(rows: string[][]) {
-    const content = rows
-      .map((row) => row.map((cell) => this.csvCell(cell)).join(';'))
-      .join('\r\n');
-
-    return `\uFEFF${content}\r\n`;
-  }
-
-  private csvCell(value: string) {
-    if (/[";\r\n]/.test(value)) {
-      return `"${value.replace(/"/g, '""')}"`;
-    }
-
-    return value;
+    return buildCsv(rows);
   }
 
   private styleExcelSheet(
