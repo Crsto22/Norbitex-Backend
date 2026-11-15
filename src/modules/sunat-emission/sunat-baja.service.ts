@@ -660,6 +660,8 @@ export class SunatBajaService {
 
     if (venta.sucursalId) {
       for (const detalle of venta.detalles) {
+        if (!detalle.afectaStock) continue;
+
         await this.stockService.changeStock(tx, {
           empresaId: venta.empresaId,
           sucursalId: venta.sucursalId,

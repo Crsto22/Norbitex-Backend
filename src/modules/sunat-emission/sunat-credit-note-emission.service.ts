@@ -363,6 +363,8 @@ export class SunatCreditNoteEmissionService {
 
       if (['06', '07'].includes(note.codigoMotivo) && note.sucursalId) {
         for (const detail of note.detalles) {
+          if (detail.ventaDetalleReferencia?.afectaStock === false) continue;
+
           await this.stockService.changeStock(tx, {
             empresaId: note.empresaId,
             sucursalId: note.sucursalId,

@@ -43,6 +43,10 @@ export class CreateProductDto {
   activo?: string;
 
   @IsOptional()
+  @IsBooleanString()
+  controlaStock?: string;
+
+  @IsOptional()
   @IsString()
   colores?: string;
 

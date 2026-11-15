@@ -298,6 +298,7 @@ export class ProductsService {
               nombreKey,
               tipo,
               descripcion: this.cleanOptionalText(dto.descripcion),
+              controlaStock: this.parseBoolean(dto.controlaStock, true),
               activo: this.parseBoolean(dto.activo, true),
             },
           });
@@ -566,6 +567,10 @@ export class ProductsService {
             categoriaId,
             unidadMedidaId: unidadMedida.id,
             tipoAfectacionIgvId: tipoAfectacionIgv.id,
+            controlaStock: this.parseBoolean(
+              dto.controlaStock,
+              existing.controlaStock,
+            ),
             activo: this.parseBoolean(dto.activo, true),
           },
         });
@@ -1656,6 +1661,7 @@ export class ProductsService {
       nombre: product.nombre,
       tipo: product.tipo,
       descripcion: product.descripcion,
+      controlaStock: product.controlaStock,
       activo: product.activo,
       stockTotal,
       stockSucursal,

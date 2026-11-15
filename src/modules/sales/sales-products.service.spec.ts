@@ -9,6 +9,7 @@ describe('SalesService product catalog', () => {
       nombre: 'Polo',
       tipo: 'variantes',
       descripcion: null,
+      controlaStock: true,
       marca: null,
       categoria: null,
       unidadMedida: { codigo: 'NIU', descripcion: 'Unidad' },
@@ -84,9 +85,14 @@ describe('SalesService product catalog', () => {
     expect(findManyCall[0].where).toMatchObject({
       variantes: {
         some: {
-          inventarios: {
-            some: { stockActual: { gt: 0 }, sucursalId: 5n },
-          },
+          OR: [
+            { producto: { controlaStock: false } },
+            {
+              inventarios: {
+                some: { stockActual: { gt: 0 }, sucursalId: 5n },
+              },
+            },
+          ],
         },
       },
     });
@@ -95,6 +101,73 @@ describe('SalesService product catalog', () => {
       precioMinimo: '20.00',
       precioMaximo: '20.00',
       stockSucursal: 3,
+      cantidadVariantes: 1,
+    });
+    expect(response.data[0].variantes).toHaveLength(1);
+  });
+
+  it('keeps products without stock control visible even with zero stock', async () => {
+    const product = {
+      id: 20n,
+      empresaId: 1n,
+      nombre: 'Servicio de instalacion',
+      tipo: 'normal',
+      descripcion: null,
+      controlaStock: false,
+      marca: null,
+      categoria: null,
+      unidadMedida: { codigo: 'NIU', descripcion: 'Unidad' },
+      tipoAfectacionIgv: { codigo: '10', descripcion: 'Gravado' },
+      variantes: [
+        {
+          id: 201n,
+          sku: 'SRV-01',
+          codigoBarras: null,
+          precioVenta: new Prisma.Decimal(50),
+          precioMayorista: null,
+          tallaId: 1n,
+          talla: { id: 1n, nombre: 'UNI' },
+          productoColor: {
+            colorId: 1n,
+            color: { id: 1n, nombre: 'Normal', hex: '#111111' },
+            imagenes: [],
+          },
+          inventarios: [],
+        },
+      ],
+    };
+    const prisma = {
+      producto: {
+        findMany: jest.fn().mockResolvedValue([product]),
+        count: jest.fn().mockResolvedValue(1),
+      },
+      $transaction: jest.fn((queries: Promise<unknown>[]) =>
+        Promise.all(queries),
+      ),
+    };
+    const service = new SalesService(
+      prisma as never,
+      { get: jest.fn() } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const response = await service.findProducts(
+      1n,
+      {
+        userId: 1n,
+        branchId: null,
+        visibility: VisibilidadOperaciones.todas,
+        isOwner: true,
+      },
+      { sucursalId: '5' },
+    );
+
+    expect(response.data[0]).toMatchObject({
+      productoId: '20',
+      controlaStock: false,
       cantidadVariantes: 1,
     });
     expect(response.data[0].variantes).toHaveLength(1);

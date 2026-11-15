@@ -566,6 +566,8 @@ export class BillingVoidService {
       }
       if (sale.sucursalId) {
         for (const detail of sale.detalles) {
+          if (!detail.afectaStock) continue;
+
           await this.stock.changeStock(tx, {
             empresaId: sale.empresaId,
             sucursalId: sale.sucursalId,

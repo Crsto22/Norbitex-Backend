@@ -644,6 +644,9 @@ export class SalesService {
         igvMonto: line.igvMonto,
         subtotal: line.subtotal,
         total: line.total,
+        afectaStock:
+          varianteMap.get(line.productoVarianteId.toString())?.producto
+            .controlaStock ?? true,
       }));
 
     const pagoTotal = dto.pagos.reduce(
@@ -812,6 +815,7 @@ export class SalesService {
                   igvMonto: d.igvMonto,
                   subtotal: d.subtotal,
                   total: d.total,
+                  afectaStock: d.afectaStock,
                 })),
               },
               pagos: {
@@ -916,6 +920,8 @@ export class SalesService {
           if (dto.sucursalId) {
             const sucursalIdBigint = BigInt(dto.sucursalId);
             for (const detalle of detallesData) {
+              if (!detalle.afectaStock) continue;
+
               await this.stockService.changeStock(tx, {
                 empresaId,
                 sucursalId: sucursalIdBigint,
@@ -2210,6 +2216,8 @@ export class SalesService {
         });
 
         for (const detalle of detalles) {
+          if (!detalle.afectaStock) continue;
+
           await this.stockService.changeStock(tx, {
             empresaId,
             sucursalId: venta.sucursalId,
@@ -2276,12 +2284,17 @@ export class SalesService {
     const variantWhere: Prisma.ProductoVarianteWhereInput = {
       activo: true,
       deletedAt: null,
-      inventarios: {
-        some: {
-          stockActual: { gt: 0 },
-          ...(sucursalId ? { sucursalId } : {}),
+      OR: [
+        { producto: { controlaStock: false } },
+        {
+          inventarios: {
+            some: {
+              stockActual: { gt: 0 },
+              ...(sucursalId ? { sucursalId } : {}),
+            },
+          },
         },
-      },
+      ],
       ...(colorId
         ? {
             productoColor: {
@@ -3168,14 +3181,15 @@ export class SalesService {
       (variant) =>
         (!colorId || variant.productoColor.colorId === colorId) &&
         (!tallaId || variant.tallaId === tallaId) &&
-        (sucursalId
-          ? (variant.inventarios.find(
-              (inventory) => inventory.sucursalId === sucursalId,
-            )?.stockActual ?? 0) > 0
-          : variant.inventarios.reduce(
-              (total, inventory) => total + inventory.stockActual,
-              0,
-            ) > 0),
+        (product.controlaStock === false ||
+          (sucursalId
+            ? (variant.inventarios.find(
+                (inventory) => inventory.sucursalId === sucursalId,
+              )?.stockActual ?? 0) > 0
+            : variant.inventarios.reduce(
+                (total, inventory) => total + inventory.stockActual,
+                0,
+              ) > 0)),
     );
     const variantResponses = variants.map((variant) => {
       const image = variant.productoColor.imagenes[0];
@@ -3231,6 +3245,7 @@ export class SalesService {
       nombre: product.nombre,
       tipo: product.tipo,
       descripcion: product.descripcion,
+      controlaStock: product.controlaStock,
       precioMinimo: Math.min(...prices).toFixed(2),
       precioMaximo: Math.max(...prices).toFixed(2),
       stockTotal: variantResponses.reduce(
