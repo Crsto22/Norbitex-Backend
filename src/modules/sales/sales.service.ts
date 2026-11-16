@@ -71,6 +71,19 @@ import { BillingEmissionService } from '../billing-integration/billing-emission.
 import { BillingIntegrationService } from '../billing-integration/billing-integration.service';
 import { BillingVoidService } from '../billing-integration/billing-void.service';
 
+const MAX_PRINTABLE_SALES = 250;
+
+type DeliveryFilters = {
+  commonWhere: Prisma.VentaWhereInput;
+  commonAnd: Prisma.VentaWhereInput[];
+  modeWhere: Prisma.VentaWhereInput;
+  readyWhere: Prisma.VentaWhereInput;
+  stateWhere: (
+    requested: NonNullable<FindDeliveriesQueryDto['estado']>,
+  ) => Prisma.VentaWhereInput;
+  orderBy: Prisma.VentaOrderByWithRelationInput[];
+};
+
 const ventaInclude = {
   sucursal: { select: { id: true, nombre: true } },
   cliente: {
@@ -1406,6 +1419,80 @@ export class SalesService {
     const estado = query.estado ?? 'pendiente';
     const page = query.page ?? 1;
     const limit = query.limit ?? this.getDefaultPaginationLimit();
+    const filters = this.buildDeliveriesFilters(empresaId, scope, query);
+    const where: Prisma.VentaWhereInput = {
+      ...filters.commonWhere,
+      AND: [...filters.commonAnd, filters.stateWhere(estado)],
+    };
+
+    const [ventas, total, counts] = await Promise.all([
+      this.prisma.venta.findMany({
+        where,
+        include: ventaInclude,
+        orderBy: filters.orderBy,
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.venta.count({ where }),
+      this.buildDeliveryCounts(filters, query.mode),
+    ]);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    return {
+      data: ventas.map((v) => this.toVentaResponse(v)),
+      meta: { page, limit, total, totalPages, counts },
+    };
+  }
+
+  async findDeliveryPrintables(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindDeliveriesQueryDto,
+  ) {
+    const filters = this.buildDeliveriesFilters(empresaId, scope, {
+      ...query,
+      mode: query.mode ?? 'courier',
+    });
+    const where: Prisma.VentaWhereInput = {
+      ...filters.commonWhere,
+      AND: [
+        ...filters.commonAnd,
+        filters.stateWhere('pendiente'),
+        { envio: { isNot: null } },
+      ],
+    };
+    const [rows, total] = await Promise.all([
+      this.prisma.venta.findMany({
+        where,
+        select: {
+          publicId: true,
+          correlativo: true,
+          cliente: { select: { nombre: true, razonSocial: true } },
+        },
+        orderBy: filters.orderBy,
+        take: MAX_PRINTABLE_SALES,
+      }),
+      this.prisma.venta.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((row) => ({
+        publicId: row.publicId,
+        correlativo: row.correlativo,
+        clienteNombre:
+          row.cliente?.nombre?.trim() ||
+          row.cliente?.razonSocial?.trim() ||
+          'Cliente genérico',
+      })),
+      meta: { limit: MAX_PRINTABLE_SALES, total },
+    };
+  }
+
+  private buildDeliveriesFilters(
+    empresaId: bigint,
+    scope: CommercialScope,
+    query: FindDeliveriesQueryDto,
+  ): DeliveryFilters {
     const search = query.search?.trim();
     const branchId = resolveScopedBranchId(scope, query.sucursalId);
     const hasDateFilter = Boolean(
@@ -1581,29 +1668,70 @@ export class SalesService {
         : {}),
     };
 
-    const where: Prisma.VentaWhereInput = {
-      ...commonWhere,
-      AND: [...commonAnd, stateWhere(estado)],
-    };
-
-    const [ventas, total] = await this.prisma.$transaction([
-      this.prisma.venta.findMany({
-        where,
-        include: ventaInclude,
-        orderBy: hasFechaEnvioFilter
-          ? [{ envio: { fechaEnvio: 'asc' } }, { createdAt: 'desc' }]
-          : { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.venta.count({ where }),
-    ]);
-    const totalPages = Math.max(1, Math.ceil(total / limit));
-
     return {
-      data: ventas.map((v) => this.toVentaResponse(v)),
-      meta: { page, limit, total, totalPages },
+      commonWhere,
+      commonAnd,
+      modeWhere,
+      readyWhere,
+      stateWhere,
+      orderBy: hasFechaEnvioFilter
+        ? [{ envio: { fechaEnvio: 'asc' } }, { createdAt: 'desc' }]
+        : [{ createdAt: 'desc' }],
     };
+  }
+
+  private async buildDeliveryCounts(
+    filters: DeliveryFilters,
+    mode?: 'pickup' | 'courier',
+  ) {
+    const counts = {
+      todos: 0,
+      shalom: 0,
+      olva: 0,
+      motorizado: 0,
+      domicilio: 0,
+      recojo: 0,
+    };
+    if (!mode) return counts;
+
+    const pendingWhere: Prisma.VentaWhereInput = {
+      ...filters.commonWhere,
+      AND: [
+        filters.modeWhere,
+        filters.readyWhere,
+        filters.stateWhere('pendiente'),
+      ],
+    };
+
+    if (mode === 'pickup') {
+      counts.recojo = await this.prisma.venta.count({ where: pendingWhere });
+      return counts;
+    }
+
+    const grouped = await this.prisma.ventaEnvio.groupBy({
+      by: ['metodoEnvio', 'agencia'],
+      where: {
+        estado: VentaEnvioEstado.recibido,
+        venta: pendingWhere,
+      },
+      _count: { _all: true },
+    });
+
+    for (const row of grouped) {
+      const total = row._count._all;
+      const metodo = (row.metodoEnvio ?? '').toUpperCase();
+      const agencia = (row.agencia ?? '').toUpperCase();
+      counts.todos += total;
+      if (metodo === 'MOTORIZADO') counts.motorizado += total;
+      else if (metodo === 'DOMICILIO') counts.domicilio += total;
+      else if (metodo === 'SHALOM' || agencia === 'SHALOM') {
+        counts.shalom += total;
+      } else if (metodo === 'OLVA' || agencia === 'OLVA') {
+        counts.olva += total;
+      }
+    }
+
+    return counts;
   }
 
   async deliverSale(

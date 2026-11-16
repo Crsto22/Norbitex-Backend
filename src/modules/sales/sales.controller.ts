@@ -187,6 +187,19 @@ export class SalesController {
     );
   }
 
+  @Get('deliveries/printables')
+  @RequireModule('entregas-pendientes')
+  findDeliveryPrintables(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: FindDeliveriesQueryDto,
+  ) {
+    return this.salesService.findDeliveryPrintables(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      query,
+    );
+  }
+
   @Post('shipping-labels/batch/pdf')
   @RequireModule('entregas-pendientes')
   @Throttle(rateLimits.pdf)

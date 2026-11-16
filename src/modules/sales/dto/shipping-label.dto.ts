@@ -41,7 +41,7 @@ export class BatchShippingLabelItemDto {
 export class PrintShippingLabelBatchDto {
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(50)
+  @ArrayMaxSize(250)
   @ValidateNested({ each: true })
   @Type(() => BatchShippingLabelItemDto)
   sales: BatchShippingLabelItemDto[];

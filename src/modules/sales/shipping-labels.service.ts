@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
-import { VentaEnvioEstado } from '@prisma/client';
+import { Prisma, VentaEnvioEstado } from '@prisma/client';
 import {
   scopedCreatorId,
   type CommercialScope,
@@ -21,7 +21,7 @@ const LABEL_WIDTH = 115 * 2.834645669;
 const LABEL_HEIGHT = 60 * 2.834645669;
 const A4_WIDTH = 210 * 2.834645669;
 const A4_HEIGHT = 297 * 2.834645669;
-const MAX_LABELS_PER_BATCH = 100;
+const MAX_LABELS_PER_BATCH = 250;
 
 type RenderOptions = {
   columns: ShippingLabelColumns;
@@ -50,6 +50,25 @@ type ShippingLabelSnapshot = {
 
 const PICKUP_METHOD = 'RECOJO';
 const LOCAL_DELIVERY_METHODS = ['MOTORIZADO', 'DOMICILIO'] as const;
+
+const shippingLabelSaleSelect = {
+  publicId: true,
+  correlativo: true,
+  empresa: { select: { nombreComercial: true, razonSocial: true } },
+  sucursal: { select: { nombre: true } },
+  cliente: {
+    select: { nombre: true, numeroDocumento: true, telefono: true },
+  },
+  detalles: {
+    select: { descripcion: true, cantidad: true },
+    orderBy: { id: 'asc' as const },
+  },
+  envio: true,
+} satisfies Prisma.VentaSelect;
+
+type ShippingLabelSale = Prisma.VentaGetPayload<{
+  select: typeof shippingLabelSaleSelect;
+}>;
 
 @Injectable()
 export class ShippingLabelsService {
@@ -86,12 +105,7 @@ export class ShippingLabelsService {
         `La impresion por lote admite hasta ${MAX_LABELS_PER_BATCH} etiquetas`,
       );
     }
-    const snapshots = await Promise.all(
-      items.map(async (item) => ({
-        snapshot: await this.snapshot(empresaId, scope, item.publicId),
-        packageCount: item.packageCount,
-      })),
-    );
+    const snapshots = await this.snapshots(empresaId, scope, items);
     const options = this.options(dto);
     const buffer = await this.render(snapshots, options);
     await this.audit(userId, snapshots, options);
@@ -102,6 +116,35 @@ export class ShippingLabelsService {
     const unique = new Map<string, BatchShippingLabelItemDto>();
     for (const item of items) unique.set(item.publicId, item);
     return Array.from(unique.values());
+  }
+
+  private async snapshots(
+    empresaId: bigint,
+    scope: CommercialScope,
+    items: BatchShippingLabelItemDto[],
+  ) {
+    const sales = await this.prisma.venta.findMany({
+      where: {
+        publicId: { in: items.map((item) => item.publicId) },
+        empresaId,
+        ...(scope.branchId ? { sucursalId: scope.branchId } : {}),
+        ...(scopedCreatorId(scope)
+          ? { creadoPorId: scopedCreatorId(scope)! }
+          : {}),
+        envio: { isNot: null },
+      },
+      select: shippingLabelSaleSelect,
+    });
+    const byPublicId = new Map(sales.map((sale) => [sale.publicId, sale]));
+
+    return items.map((item) => {
+      const sale = byPublicId.get(item.publicId);
+      if (!sale?.envio) throw new NotFoundException('Envio no encontrado');
+      return {
+        snapshot: this.buildSnapshot(sale),
+        packageCount: item.packageCount,
+      };
+    });
   }
 
   private async snapshot(
@@ -119,60 +162,52 @@ export class ShippingLabelsService {
           : {}),
         envio: { isNot: null },
       },
-      select: {
-        publicId: true,
-        correlativo: true,
-        empresa: { select: { nombreComercial: true, razonSocial: true } },
-        sucursal: { select: { nombre: true } },
-        cliente: {
-          select: { nombre: true, numeroDocumento: true, telefono: true },
-        },
-        detalles: {
-          select: { descripcion: true, cantidad: true },
-          orderBy: { id: 'asc' },
-        },
-        envio: true,
-      },
+      select: shippingLabelSaleSelect,
     });
     if (!sale?.envio) throw new NotFoundException('Envio no encontrado');
-    const metodoEnvio = (sale.envio.metodoEnvio ?? '').trim().toUpperCase();
+    return this.buildSnapshot(sale);
+  }
+
+  private buildSnapshot(sale: ShippingLabelSale): ShippingLabelSnapshot {
+    const envio = sale.envio!;
+    const metodoEnvio = (envio.metodoEnvio ?? '').trim().toUpperCase();
     const isPickup = metodoEnvio === PICKUP_METHOD;
     const isLocalDelivery = (
       LOCAL_DELIVERY_METHODS as readonly string[]
     ).includes(metodoEnvio);
-    if (sale.envio.estado !== VentaEnvioEstado.recibido) {
+    if (envio.estado !== VentaEnvioEstado.recibido) {
       throw new BadRequestException(
         'El envio debe estar recibido antes de imprimir la etiqueta',
       );
     }
-    if (!isLocalDelivery && !isPickup && !sale.envio.agencia) {
+    if (!isLocalDelivery && !isPickup && !envio.agencia) {
       throw new BadRequestException(
         'Seleccione el courier del envio antes de imprimir la etiqueta',
       );
     }
 
     const recipientName =
-      sale.envio.nombreCompleto?.trim() ||
+      envio.nombreCompleto?.trim() ||
       sale.cliente?.nombre?.trim() ||
       'CLIENTE';
     const location = [
-      sale.envio.agenciaDistrito,
-      sale.envio.agenciaProvincia,
-      sale.envio.agenciaDepartamento,
+      envio.agenciaDistrito,
+      envio.agenciaProvincia,
+      envio.agenciaDepartamento,
     ]
       .filter(Boolean)
       .join(' / ');
-    const referencia = sale.envio.referenciaEntrega?.trim();
+    const referencia = envio.referenciaEntrega?.trim();
     const pickupAddress =
-      sale.envio.agenciaDireccion?.trim() ||
-      sale.envio.direccionEntrega?.trim() ||
+      envio.agenciaDireccion?.trim() ||
+      envio.direccionEntrega?.trim() ||
       null;
     const pickupStoreName =
       sale.sucursal?.nombre?.trim() ||
-      sale.envio.agenciaNombre?.trim() ||
+      envio.agenciaNombre?.trim() ||
       'TIENDA';
     return {
-      shippingId: sale.envio.id,
+      shippingId: envio.id,
       salePublicId: sale.publicId,
       saleCode: sale.correlativo,
       businessName:
@@ -182,34 +217,34 @@ export class ShippingLabelsService {
         ? PICKUP_METHOD
         : isLocalDelivery
           ? metodoEnvio
-          : (sale.envio.agencia as string),
+          : (envio.agencia as string),
       serviceLabel: isPickup
         ? 'RECOJO EN TIENDA'
         : isLocalDelivery
           ? metodoEnvio
-          : (sale.envio.agencia as string),
+          : (envio.agencia as string),
       destinationTitle: isPickup
         ? 'RECOJO EN TIENDA'
         : isLocalDelivery
           ? 'DIRECCION DE ENTREGA'
           : 'AGENCIA DESTINO',
-      shippingCode: sale.envio.codigoPublico,
+      shippingCode: envio.codigoPublico,
       recipientName,
       recipientDocument:
-        sale.envio.dni || sale.cliente?.numeroDocumento || null,
-      recipientPhone: sale.envio.celular || sale.cliente?.telefono || null,
+        envio.dni || sale.cliente?.numeroDocumento || null,
+      recipientPhone: envio.celular || sale.cliente?.telefono || null,
       agencyName: isPickup
         ? pickupStoreName
         : isLocalDelivery
-          ? sale.envio.direccionEntrega?.trim() || 'SIN DIRECCION'
-          : sale.envio.agenciaNombre?.trim() || (sale.envio.agencia as string),
+          ? envio.direccionEntrega?.trim() || 'SIN DIRECCION'
+          : envio.agenciaNombre?.trim() || (envio.agencia as string),
       agencyAddress: isPickup
         ? pickupAddress
         : isLocalDelivery
           ? referencia
             ? `Ref: ${referencia}`
             : null
-          : sale.envio.agenciaDireccion,
+          : envio.agenciaDireccion,
       agencyLocation: isPickup ? null : location,
       products: sale.detalles.map((detail) => ({
         description: detail.descripcion || 'Producto',
