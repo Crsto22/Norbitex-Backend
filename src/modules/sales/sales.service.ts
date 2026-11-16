@@ -1586,24 +1586,7 @@ export class SalesService {
       AND: [...commonAnd, stateWhere(estado)],
     };
 
-    const summaryWhere = (
-      requested: NonNullable<FindDeliveriesQueryDto['estado']>,
-    ): Prisma.VentaWhereInput => ({
-      ...commonWhere,
-      AND: [...commonAnd, stateWhere(requested)],
-    });
-
-    const [
-      ventas,
-      total,
-      porPreparar,
-      porDespachar,
-      enTransito,
-      entregados,
-      incidencias,
-      recojoParciales,
-      productosRecojo,
-    ] = await this.prisma.$transaction([
+    const [ventas, total] = await this.prisma.$transaction([
       this.prisma.venta.findMany({
         where,
         include: ventaInclude,
@@ -1614,40 +1597,12 @@ export class SalesService {
         take: limit,
       }),
       this.prisma.venta.count({ where }),
-      this.prisma.venta.count({ where: summaryWhere('por_preparar') }),
-      this.prisma.venta.count({ where: summaryWhere('por_despachar') }),
-      this.prisma.venta.count({ where: summaryWhere('en_transito') }),
-      this.prisma.venta.count({ where: summaryWhere('entregada') }),
-      this.prisma.venta.count({ where: summaryWhere('incidencia') }),
-      this.prisma.venta.count({
-        where: {
-          ...commonWhere,
-          AND: [...commonAnd, { estadoEntrega: VentaEntregaEstado.parcial }],
-        },
-      }),
-      this.prisma.ventaDetalle.aggregate({
-        where: { venta: { is: summaryWhere('pendiente') } },
-        _sum: { cantidad: true, cantidadEntregada: true },
-      }),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
     return {
       data: ventas.map((v) => this.toVentaResponse(v)),
       meta: { page, limit, total, totalPages },
-      summary: {
-        porPreparar,
-        porDespachar,
-        enTransito,
-        entregados,
-        incidencias,
-        recojoParciales,
-        productosPendientes: Math.max(
-          0,
-          (productosRecojo._sum.cantidad ?? 0) -
-            (productosRecojo._sum.cantidadEntregada ?? 0),
-        ),
-      },
     };
   }
 
