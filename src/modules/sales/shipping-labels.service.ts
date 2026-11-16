@@ -44,10 +44,11 @@ type ShippingLabelSnapshot = {
   recipientPhone: string | null;
   agencyName: string;
   agencyAddress: string | null;
-  agencyLocation: string;
+  agencyLocation: string | null;
   products: Array<{ description: string; quantity: number }>;
 };
 
+const PICKUP_METHOD = 'RECOJO';
 const LOCAL_DELIVERY_METHODS = ['MOTORIZADO', 'DOMICILIO'] as const;
 
 @Injectable()
@@ -135,6 +136,7 @@ export class ShippingLabelsService {
     });
     if (!sale?.envio) throw new NotFoundException('Envio no encontrado');
     const metodoEnvio = (sale.envio.metodoEnvio ?? '').trim().toUpperCase();
+    const isPickup = metodoEnvio === PICKUP_METHOD;
     const isLocalDelivery = (
       LOCAL_DELIVERY_METHODS as readonly string[]
     ).includes(metodoEnvio);
@@ -143,7 +145,7 @@ export class ShippingLabelsService {
         'El envio debe estar recibido antes de imprimir la etiqueta',
       );
     }
-    if (!isLocalDelivery && !sale.envio.agencia) {
+    if (!isLocalDelivery && !isPickup && !sale.envio.agencia) {
       throw new BadRequestException(
         'Seleccione el courier del envio antes de imprimir la etiqueta',
       );
@@ -161,6 +163,14 @@ export class ShippingLabelsService {
       .filter(Boolean)
       .join(' / ');
     const referencia = sale.envio.referenciaEntrega?.trim();
+    const pickupAddress =
+      sale.envio.agenciaDireccion?.trim() ||
+      sale.envio.direccionEntrega?.trim() ||
+      null;
+    const pickupStoreName =
+      sale.sucursal?.nombre?.trim() ||
+      sale.envio.agenciaNombre?.trim() ||
+      'TIENDA';
     return {
       shippingId: sale.envio.id,
       salePublicId: sale.publicId,
@@ -168,27 +178,39 @@ export class ShippingLabelsService {
       businessName:
         sale.empresa.nombreComercial || sale.empresa.razonSocial || 'NUVEX',
       branchName: sale.sucursal?.nombre ?? null,
-      service: isLocalDelivery ? metodoEnvio : (sale.envio.agencia as string),
-      serviceLabel: isLocalDelivery
-        ? metodoEnvio
-        : (sale.envio.agencia as string),
-      destinationTitle: isLocalDelivery
-        ? 'DIRECCION DE ENTREGA'
-        : 'AGENCIA DESTINO',
+      service: isPickup
+        ? PICKUP_METHOD
+        : isLocalDelivery
+          ? metodoEnvio
+          : (sale.envio.agencia as string),
+      serviceLabel: isPickup
+        ? 'RECOJO EN TIENDA'
+        : isLocalDelivery
+          ? metodoEnvio
+          : (sale.envio.agencia as string),
+      destinationTitle: isPickup
+        ? 'RECOJO EN TIENDA'
+        : isLocalDelivery
+          ? 'DIRECCION DE ENTREGA'
+          : 'AGENCIA DESTINO',
       shippingCode: sale.envio.codigoPublico,
       recipientName,
       recipientDocument:
         sale.envio.dni || sale.cliente?.numeroDocumento || null,
       recipientPhone: sale.envio.celular || sale.cliente?.telefono || null,
-      agencyName: isLocalDelivery
-        ? sale.envio.direccionEntrega?.trim() || 'SIN DIRECCION'
-        : sale.envio.agenciaNombre?.trim() || (sale.envio.agencia as string),
-      agencyAddress: isLocalDelivery
-        ? referencia
-          ? `Ref: ${referencia}`
-          : null
-        : sale.envio.agenciaDireccion,
-      agencyLocation: location,
+      agencyName: isPickup
+        ? pickupStoreName
+        : isLocalDelivery
+          ? sale.envio.direccionEntrega?.trim() || 'SIN DIRECCION'
+          : sale.envio.agenciaNombre?.trim() || (sale.envio.agencia as string),
+      agencyAddress: isPickup
+        ? pickupAddress
+        : isLocalDelivery
+          ? referencia
+            ? `Ref: ${referencia}`
+            : null
+          : sale.envio.agenciaDireccion,
+      agencyLocation: isPickup ? null : location,
       products: sale.detalles.map((detail) => ({
         description: detail.descripcion || 'Producto',
         quantity: detail.cantidad,
