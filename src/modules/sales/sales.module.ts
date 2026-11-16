@@ -13,6 +13,7 @@ import { ShippingLinksService } from './shipping-links.service';
 import { CourierAgenciesModule } from '../courier-agencies/courier-agencies.module';
 import { EnviosConfigModule } from '../envios-config/envios-config.module';
 import { ShippingLabelsService } from './shipping-labels.service';
+import { ShalomMassiveService } from './shalom-massive.service';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { ShippingLabelsService } from './shipping-labels.service';
     SaleScopeGuard,
     ShippingLinksService,
     ShippingLabelsService,
+    ShalomMassiveService,
   ],
   exports: [SalesService, SalesPdfService],
 })

@@ -51,6 +51,8 @@ import {
 } from './dto/serie-comprobante.dto';
 import { ShippingLinksService } from './shipping-links.service';
 import { ShippingLabelsService } from './shipping-labels.service';
+import { ShalomMassiveService } from './shalom-massive.service';
+import { ExportShalomMassiveDto } from './dto/export-shalom.dto';
 import {
   PrintShippingLabelBatchDto,
   PrintShippingLabelDto,
@@ -69,6 +71,7 @@ export class SalesController {
     private readonly pdfConcurrency: PdfConcurrencyService,
     private readonly shippingLinksService: ShippingLinksService,
     private readonly shippingLabelsService: ShippingLabelsService,
+    private readonly shalomMassiveService: ShalomMassiveService,
   ) {}
 
   // ── Products (static route BEFORE :publicId) ────────────────────────
@@ -198,6 +201,28 @@ export class SalesController {
       getCommercialScope(user),
       query,
     );
+  }
+
+  @Post('deliveries/export-shalom')
+  @RequireModule('entregas-pendientes')
+  @Throttle(rateLimits.pdf)
+  async exportShalomMassive(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ExportShalomMassiveDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.shalomMassiveService.export(
+      this.getEmpresaId(user),
+      getCommercialScope(user),
+      dto,
+    );
+
+    response.set({
+      'Content-Type': file.contentType,
+      'Content-Disposition': `attachment; filename="${file.filename}"`,
+      'Content-Length': file.buffer.length,
+    });
+    return new StreamableFile(file.buffer);
   }
 
   @Post('shipping-labels/batch/pdf')
