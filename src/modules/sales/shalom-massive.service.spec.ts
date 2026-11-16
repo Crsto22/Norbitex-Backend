@@ -182,7 +182,7 @@ describe('ShalomMassiveService', () => {
       expect(file.contentType).toBe('application/zip');
     });
 
-    it('aplica origen y mercaderia con los valores calculados', async () => {
+    it('aplica origen y mercaderia sin escribir las medidas', async () => {
       const { service } = serviceWith([sale('70503353', 1)], {
         origen: 'BAGUA CAPITAL',
         modo: 'mercaderia',
@@ -200,10 +200,11 @@ describe('ShalomMassiveService', () => {
 
       expect(hoja1.getCell('F2').value).toBe('BAGUA CAPITAL');
       expect(hoja1.getCell('H2').value).toBe('PAQUETE L');
-      expect(hoja1.getCell('I2').value).toBe(0.42);
-      expect(hoja1.getCell('J2').value).toBe(0.3);
-      expect(hoja1.getCell('K2').value).toBe(0.23);
-      expect(hoja1.getCell('L2').value).toBe(10);
+      // Shalom calcula las medidas: se mantienen las formulas del formato.
+      expect(String(hoja1.getCell('I2').value?.formula)).toContain('PAQUETE L');
+      expect(hoja1.getCell('J2').value?.formula).toBeDefined();
+      expect(hoja1.getCell('K2').value?.formula).toBeDefined();
+      expect(hoja1.getCell('L2').value?.formula).toBeDefined();
     });
 
     it('aplica medidas personalizadas y deja mercaderia vacia', async () => {
@@ -246,7 +247,7 @@ describe('ShalomMassiveService', () => {
       });
     });
 
-    it('guarda modo mercaderia y calcula las medidas', async () => {
+    it('guarda modo mercaderia sin medidas propias', async () => {
       const { service, prisma } = serviceWith([]);
 
       const settings = await service.updateSettings(1n, {
@@ -260,10 +261,10 @@ describe('ShalomMassiveService', () => {
         origen: 'AV TACNA',
         modo: 'mercaderia',
         mercaderia: 'PAQUETE M',
-        alto: 0.3,
-        ancho: 0.24,
-        largo: 0.2,
-        peso: 5,
+        alto: null,
+        ancho: null,
+        largo: null,
+        peso: null,
       });
     });
 

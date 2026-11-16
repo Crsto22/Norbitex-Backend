@@ -253,11 +253,8 @@ export class ShalomMassiveService {
         );
       }
       mercaderia = dto.mercaderia;
-      const dimensiones = PACKAGE_DIMENSIONS[mercaderia];
-      alto = dimensiones.alto;
-      ancho = dimensiones.ancho;
-      largo = dimensiones.largo;
-      peso = dimensiones.peso;
+      // Shalom calcula alto, ancho, largo y peso segun la mercaderia:
+      // solo se envia el nombre del paquete en la columna MERCADERIA.
     }
 
     if (modo === 'medidas') {
@@ -593,12 +590,9 @@ export class ShalomMassiveService {
       target.getCell(13).value = 1;
 
       if (settings.modo === 'mercaderia' && settings.mercaderia) {
-        const dimensiones = PACKAGE_DIMENSIONS[settings.mercaderia];
+        // Shalom calcula alto, ancho, largo y peso de cada mercaderia:
+        // solo se escribe el nombre y se conservan las formulas del formato.
         target.getCell(8).value = settings.mercaderia;
-        target.getCell(9).value = dimensiones.alto;
-        target.getCell(10).value = dimensiones.ancho;
-        target.getCell(11).value = dimensiones.largo;
-        target.getCell(12).value = dimensiones.peso;
       } else if (settings.modo === 'medidas') {
         target.getCell(9).value = settings.alto;
         target.getCell(10).value = settings.ancho;
