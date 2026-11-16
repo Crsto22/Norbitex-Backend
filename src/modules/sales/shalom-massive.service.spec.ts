@@ -43,8 +43,21 @@ function sale(document: string, index: number) {
   };
 }
 
-function serviceWith(rows: ReturnType<typeof sale>[]) {
-  const prisma = { venta: { findMany: jest.fn().mockResolvedValue(rows) } };
+function serviceWith(
+  rows: ReturnType<typeof sale>[],
+  config: Record<string, unknown> | null = null,
+) {
+  const prisma = {
+    venta: { findMany: jest.fn().mockResolvedValue(rows) },
+    empresaShalomExportConfig: {
+      findUnique: jest.fn().mockResolvedValue(config),
+      upsert: jest
+        .fn()
+        .mockImplementation(({ create }: { create: unknown }) =>
+          Promise.resolve(create),
+        ),
+    },
+  };
   return { service: new ShalomMassiveService(prisma as never), prisma };
 }
 
@@ -167,6 +180,118 @@ describe('ShalomMassiveService', () => {
 
       expect(file.filename).toMatch(/^Formato-Pro-Masivo-.*\.zip$/);
       expect(file.contentType).toBe('application/zip');
+    });
+
+    it('aplica origen y mercaderia con los valores calculados', async () => {
+      const { service } = serviceWith([sale('70503353', 1)], {
+        origen: 'BAGUA CAPITAL',
+        modo: 'mercaderia',
+        mercaderia: 'PAQUETE L',
+        alto: null,
+        ancho: null,
+        largo: null,
+        peso: null,
+      });
+
+      const file = await service.export(1n, scope, {});
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(file.buffer as unknown as ArrayBuffer);
+      const hoja1 = workbook.getWorksheet('Hoja1')!;
+
+      expect(hoja1.getCell('F2').value).toBe('BAGUA CAPITAL');
+      expect(hoja1.getCell('H2').value).toBe('PAQUETE L');
+      expect(hoja1.getCell('I2').value).toBe(0.42);
+      expect(hoja1.getCell('J2').value).toBe(0.3);
+      expect(hoja1.getCell('K2').value).toBe(0.23);
+      expect(hoja1.getCell('L2').value).toBe(10);
+    });
+
+    it('aplica medidas personalizadas y deja mercaderia vacia', async () => {
+      const { service } = serviceWith([sale('70503353', 1)], {
+        origen: 'AV TACNA',
+        modo: 'medidas',
+        mercaderia: null,
+        alto: 0.5,
+        ancho: 0.4,
+        largo: 0.3,
+        peso: 3,
+      });
+
+      const file = await service.export(1n, scope, {});
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(file.buffer as unknown as ArrayBuffer);
+      const hoja1 = workbook.getWorksheet('Hoja1')!;
+
+      expect(hoja1.getCell('F2').value).toBe('AV TACNA');
+      expect(hoja1.getCell('H2').value).toBeNull();
+      expect(hoja1.getCell('I2').value).toBe(0.5);
+      expect(hoja1.getCell('J2').value).toBe(0.4);
+      expect(hoja1.getCell('K2').value).toBe(0.3);
+      expect(hoja1.getCell('L2').value).toBe(3);
+    });
+  });
+
+  describe('settings', () => {
+    it('devuelve valores por defecto cuando no hay configuracion', async () => {
+      const { service } = serviceWith([]);
+
+      await expect(service.getSettings(1n)).resolves.toEqual({
+        origen: null,
+        modo: 'ninguno',
+        mercaderia: null,
+        alto: null,
+        ancho: null,
+        largo: null,
+        peso: null,
+      });
+    });
+
+    it('guarda modo mercaderia y calcula las medidas', async () => {
+      const { service, prisma } = serviceWith([]);
+
+      const settings = await service.updateSettings(1n, {
+        modo: 'mercaderia',
+        mercaderia: 'PAQUETE M',
+        origen: 'AV TACNA',
+      });
+
+      expect(prisma.empresaShalomExportConfig.upsert).toHaveBeenCalled();
+      expect(settings).toMatchObject({
+        origen: 'AV TACNA',
+        modo: 'mercaderia',
+        mercaderia: 'PAQUETE M',
+        alto: 0.3,
+        ancho: 0.24,
+        largo: 0.2,
+        peso: 5,
+      });
+    });
+
+    it('exige las 4 medidas en modo medidas', async () => {
+      const { service } = serviceWith([]);
+
+      await expect(
+        service.updateSettings(1n, { modo: 'medidas', alto: 0.5 }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rechaza un origen que no esta en el catalogo', async () => {
+      const { service } = serviceWith([]);
+
+      await expect(
+        service.updateSettings(1n, {
+          modo: 'ninguno',
+          origen: 'AGENCIA INVENTADA',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('exige mercaderia valida en modo mercaderia', async () => {
+      const { service } = serviceWith([]);
+
+      await expect(
+        service.updateSettings(1n, { modo: 'mercaderia' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

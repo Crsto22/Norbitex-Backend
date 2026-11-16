@@ -26,15 +26,31 @@ import {
   SHALOM_MAX_ROWS_PER_FILE,
   SHALOM_MAX_ROWS_PER_RECIPIENT,
 } from './dto/export-shalom.dto';
+import {
+  SHALOM_EXPORT_MODES,
+  SHALOM_PACKAGE_TYPES,
+  type ShalomExportMode,
+  type ShalomPackageType,
+  type UpdateShalomExportSettingsDto,
+} from './dto/shalom-export-settings.dto';
 
-const PACKAGE_TYPES = [
-  'SOBRE',
-  'PAQUETE XXS',
-  'PAQUETE XS',
-  'PAQUETE S',
-  'PAQUETE M',
-  'PAQUETE L',
-] as const;
+const PACKAGE_TYPES = SHALOM_PACKAGE_TYPES;
+
+type PackageDimensions = {
+  alto: number;
+  ancho: number;
+  largo: number;
+  peso: number;
+};
+
+const PACKAGE_DIMENSIONS: Record<ShalomPackageType, PackageDimensions> = {
+  SOBRE: { alto: 0.1, ancho: 0.1, largo: 0.15, peso: 0 },
+  'PAQUETE XXS': { alto: 0.15, ancho: 0.1, largo: 0.1, peso: 0.25 },
+  'PAQUETE XS': { alto: 0.2, ancho: 0.15, largo: 0.12, peso: 0.5 },
+  'PAQUETE S': { alto: 0.3, ancho: 0.3, largo: 0.12, peso: 2 },
+  'PAQUETE M': { alto: 0.3, ancho: 0.24, largo: 0.2, peso: 5 },
+  'PAQUETE L': { alto: 0.42, ancho: 0.3, largo: 0.23, peso: 10 },
+};
 
 const TEMPLATE_HEADERS = [
   'DESTINATARIO (DOC)',
@@ -59,6 +75,27 @@ const LAST_DATA_ROW = FIRST_DATA_ROW + TEMPLATE_ROWS - 1;
 const agenciaPorCodigo = new Map<string, string>(
   shalomAgencias.map(([codigo, nombre]) => [codigo, nombre]),
 );
+const agenciaNombres = new Set(shalomAgencias.map(([, nombre]) => nombre));
+
+export type ShalomExportSettings = {
+  origen: string | null;
+  modo: ShalomExportMode;
+  mercaderia: ShalomPackageType | null;
+  alto: number | null;
+  ancho: number | null;
+  largo: number | null;
+  peso: number | null;
+};
+
+const DEFAULT_SETTINGS: ShalomExportSettings = {
+  origen: null,
+  modo: 'ninguno',
+  mercaderia: null,
+  alto: null,
+  ancho: null,
+  largo: null,
+  peso: null,
+};
 
 type SheetWithValidations = ExcelJS.Worksheet & {
   dataValidations: {
@@ -67,45 +104,18 @@ type SheetWithValidations = ExcelJS.Worksheet & {
 };
 
 function dimensionFormula(row: number) {
-  const ifChain = (values: Record<string, string>) =>
+  const ifChain = (key: keyof PackageDimensions) =>
     PACKAGE_TYPES.reduceRight(
-      (acc, tipo) => `IF(H${row}="${tipo}",${values[tipo]},${acc})`,
+      (acc, tipo) =>
+        `IF(H${row}="${tipo}",${PACKAGE_DIMENSIONS[tipo][key]},${acc})`,
       '""',
     );
 
   return {
-    alto: ifChain({
-      SOBRE: '0.1',
-      'PAQUETE XXS': '0.15',
-      'PAQUETE XS': '0.2',
-      'PAQUETE S': '0.3',
-      'PAQUETE M': '0.3',
-      'PAQUETE L': '0.42',
-    }),
-    ancho: ifChain({
-      SOBRE: '0.1',
-      'PAQUETE XXS': '0.1',
-      'PAQUETE XS': '0.15',
-      'PAQUETE S': '0.3',
-      'PAQUETE M': '0.24',
-      'PAQUETE L': '0.3',
-    }),
-    largo: ifChain({
-      SOBRE: '0.15',
-      'PAQUETE XXS': '0.1',
-      'PAQUETE XS': '0.12',
-      'PAQUETE S': '0.12',
-      'PAQUETE M': '0.2',
-      'PAQUETE L': '0.23',
-    }),
-    peso: ifChain({
-      SOBRE: '0',
-      'PAQUETE XXS': '0.25',
-      'PAQUETE XS': '0.5',
-      'PAQUETE S': '2',
-      'PAQUETE M': '5',
-      'PAQUETE L': '10',
-    }),
+    alto: ifChain('alto'),
+    ancho: ifChain('ancho'),
+    largo: ifChain('largo'),
+    peso: ifChain('peso'),
   };
 }
 
@@ -133,7 +143,10 @@ export class ShalomMassiveService {
     scope: CommercialScope,
     dto: ExportShalomMassiveDto,
   ): Promise<ShalomExportFile> {
-    const rows = await this.rows(empresaId, scope, dto);
+    const [rows, settings] = await Promise.all([
+      this.rows(empresaId, scope, dto),
+      this.settings(empresaId),
+    ]);
     if (rows.length === 0) {
       throw new BadRequestException(
         'No hay envios Shalom pendientes para exportar con los filtros actuales',
@@ -145,7 +158,7 @@ export class ShalomMassiveService {
 
     if (parts.length === 1) {
       return {
-        buffer: await this.workbook(parts[0]),
+        buffer: await this.workbook(parts[0], settings),
         filename: `Formato-Pro-Masivo-${stamp}.xlsx`,
         contentType:
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -156,7 +169,7 @@ export class ShalomMassiveService {
     for (let index = 0; index < parts.length; index += 1) {
       zip.file(
         `Formato-Pro-Masivo-parte${index + 1}.xlsx`,
-        await this.workbook(parts[index]),
+        await this.workbook(parts[index], settings),
       );
     }
     const buffer = await zip.generateAsync({
@@ -202,6 +215,140 @@ export class ShalomMassiveService {
     }
 
     return parts;
+  }
+
+  async getSettings(empresaId: bigint): Promise<ShalomExportSettings> {
+    return this.settings(empresaId);
+  }
+
+  origins(): string[] {
+    return [...agenciaNombres].sort((a, b) => a.localeCompare(b, 'es'));
+  }
+
+  async updateSettings(
+    empresaId: bigint,
+    dto: UpdateShalomExportSettingsDto,
+  ): Promise<ShalomExportSettings> {
+    const modo: ShalomExportMode = SHALOM_EXPORT_MODES.includes(dto.modo)
+      ? dto.modo
+      : 'ninguno';
+    const origen = dto.origen?.trim() || null;
+
+    if (origen && !agenciaNombres.has(origen)) {
+      throw new BadRequestException(
+        'El origen seleccionado no existe en el catalogo de agencias de Shalom',
+      );
+    }
+
+    let mercaderia: ShalomPackageType | null = null;
+    let alto: number | null = null;
+    let ancho: number | null = null;
+    let largo: number | null = null;
+    let peso: number | null = null;
+
+    if (modo === 'mercaderia') {
+      if (!dto.mercaderia || !PACKAGE_TYPES.includes(dto.mercaderia)) {
+        throw new BadRequestException(
+          'Selecciona un tipo de mercaderia valido para este modo',
+        );
+      }
+      mercaderia = dto.mercaderia;
+      const dimensiones = PACKAGE_DIMENSIONS[mercaderia];
+      alto = dimensiones.alto;
+      ancho = dimensiones.ancho;
+      largo = dimensiones.largo;
+      peso = dimensiones.peso;
+    }
+
+    if (modo === 'medidas') {
+      const values = [dto.alto, dto.ancho, dto.largo, dto.peso];
+      if (values.some((value) => value === null || value === undefined)) {
+        throw new BadRequestException(
+          'Completa alto, ancho, largo y peso para el modo medidas',
+        );
+      }
+      alto = this.decimal(dto.alto);
+      ancho = this.decimal(dto.ancho);
+      largo = this.decimal(dto.largo);
+      peso = this.decimal(dto.peso);
+      if ([alto, ancho, largo].some((value) => !value || value <= 0)) {
+        throw new BadRequestException(
+          'Alto, ancho y largo deben ser mayores a cero',
+        );
+      }
+      if (peso === null || peso < 0) {
+        throw new BadRequestException('El peso no puede ser negativo');
+      }
+    }
+
+    const record = await this.prisma.empresaShalomExportConfig.upsert({
+      where: { empresaId },
+      create: {
+        empresaId,
+        origen,
+        modo,
+        mercaderia,
+        alto,
+        ancho,
+        largo,
+        peso,
+      },
+      update: {
+        origen,
+        modo,
+        mercaderia,
+        alto,
+        ancho,
+        largo,
+        peso,
+      },
+    });
+
+    return this.toSettings(record);
+  }
+
+  private async settings(empresaId: bigint): Promise<ShalomExportSettings> {
+    const record = await this.prisma.empresaShalomExportConfig.findUnique({
+      where: { empresaId },
+    });
+    return record ? this.toSettings(record) : { ...DEFAULT_SETTINGS };
+  }
+
+  private toSettings(record: {
+    origen: string | null;
+    modo: string;
+    mercaderia: string | null;
+    alto: unknown;
+    ancho: unknown;
+    largo: unknown;
+    peso: unknown;
+  }): ShalomExportSettings {
+    const modo = SHALOM_EXPORT_MODES.includes(record.modo as ShalomExportMode)
+      ? (record.modo as ShalomExportMode)
+      : 'ninguno';
+
+    return {
+      origen: record.origen?.trim() || null,
+      modo,
+      mercaderia: record.mercaderia
+        ? (record.mercaderia as ShalomPackageType)
+        : null,
+      alto: this.number(record.alto),
+      ancho: this.number(record.ancho),
+      largo: this.number(record.largo),
+      peso: this.number(record.peso),
+    };
+  }
+
+  private number(value: unknown): number | null {
+    if (value === null || value === undefined) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private decimal(value?: number | null): number | null {
+    const parsed = this.number(value);
+    return parsed === null ? null : Math.round(parsed * 1000) / 1000;
   }
 
   private async rows(
@@ -362,12 +509,15 @@ export class ShalomMassiveService {
     ].join('_');
   }
 
-  private async workbook(rows: ShalomExportRow[]): Promise<Buffer> {
+  private async workbook(
+    rows: ShalomExportRow[],
+    settings: ShalomExportSettings,
+  ): Promise<Buffer> {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Nuvex';
     workbook.created = new Date();
 
-    this.buildHoja1(workbook, rows);
+    this.buildHoja1(workbook, rows, settings);
     this.buildHoja2(workbook);
     this.buildMedidas(workbook);
 
@@ -375,7 +525,11 @@ export class ShalomMassiveService {
     return Buffer.from(buffer);
   }
 
-  private buildHoja1(workbook: ExcelJS.Workbook, rows: ShalomExportRow[]) {
+  private buildHoja1(
+    workbook: ExcelJS.Workbook,
+    rows: ShalomExportRow[],
+    settings: ShalomExportSettings,
+  ) {
     const sheet = workbook.addWorksheet('Hoja1');
 
     const header = sheet.addRow([...TEMPLATE_HEADERS]);
@@ -430,11 +584,27 @@ export class ShalomMassiveService {
     }
 
     rows.forEach((row, index) => {
-      const target = sheet.getRow(FIRST_DATA_ROW + index);
+      const targetRow = FIRST_DATA_ROW + index;
+      const target = sheet.getRow(targetRow);
       target.getCell(1).value = row.document;
       target.getCell(2).value = row.phone;
+      if (settings.origen) target.getCell(6).value = settings.origen;
       target.getCell(7).value = row.destino;
       target.getCell(13).value = 1;
+
+      if (settings.modo === 'mercaderia' && settings.mercaderia) {
+        const dimensiones = PACKAGE_DIMENSIONS[settings.mercaderia];
+        target.getCell(8).value = settings.mercaderia;
+        target.getCell(9).value = dimensiones.alto;
+        target.getCell(10).value = dimensiones.ancho;
+        target.getCell(11).value = dimensiones.largo;
+        target.getCell(12).value = dimensiones.peso;
+      } else if (settings.modo === 'medidas') {
+        target.getCell(9).value = settings.alto;
+        target.getCell(10).value = settings.ancho;
+        target.getCell(11).value = settings.largo;
+        target.getCell(12).value = settings.peso;
+      }
     });
   }
 

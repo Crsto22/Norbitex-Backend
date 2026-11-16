@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   StreamableFile,
@@ -53,6 +54,7 @@ import { ShippingLinksService } from './shipping-links.service';
 import { ShippingLabelsService } from './shipping-labels.service';
 import { ShalomMassiveService } from './shalom-massive.service';
 import { ExportShalomMassiveDto } from './dto/export-shalom.dto';
+import { UpdateShalomExportSettingsDto } from './dto/shalom-export-settings.dto';
 import {
   PrintShippingLabelBatchDto,
   PrintShippingLabelDto,
@@ -200,6 +202,30 @@ export class SalesController {
       this.getEmpresaId(user),
       getCommercialScope(user),
       query,
+    );
+  }
+
+  @Get('shalom-export-settings/origins')
+  @RequireModule('entregas-pendientes', 'envios-config')
+  getShalomExportOrigins() {
+    return { data: this.shalomMassiveService.origins() };
+  }
+
+  @Get('shalom-export-settings')
+  @RequireModule('entregas-pendientes', 'envios-config')
+  getShalomExportSettings(@CurrentUser() user: JwtPayload) {
+    return this.shalomMassiveService.getSettings(this.getEmpresaId(user));
+  }
+
+  @Put('shalom-export-settings')
+  @RequireModule('entregas-pendientes', 'envios-config')
+  updateShalomExportSettings(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateShalomExportSettingsDto,
+  ) {
+    return this.shalomMassiveService.updateSettings(
+      this.getEmpresaId(user),
+      dto,
     );
   }
 

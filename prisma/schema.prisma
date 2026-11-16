@@ -557,6 +557,7 @@ model Empresa {
   enviosConfig               EmpresaEnvioConfig[]
   despachoConfig             EmpresaDespachoConfig?
   recojoConfig               EmpresaRecojoConfig?
+  shalomExportConfig         EmpresaShalomExportConfig?
   ventas                          Venta[]
   ventasCodigoInternoSecuencias   VentaCodigoInternoSecuencia[]
   notasCredito                    NotaCredito[]
@@ -2757,6 +2758,23 @@ model EmpresaRecojoConfig {
   empresa    Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 
   @@map("empresa_recojo_config")
+}
+
+model EmpresaShalomExportConfig {
+  id         BigInt    @id @default(autoincrement())
+  empresaId  BigInt    @unique @map("empresa_id")
+  origen     String?   @db.VarChar(300)
+  modo       String    @default("ninguno") @db.VarChar(20)
+  mercaderia String?   @db.VarChar(30)
+  alto       Decimal?  @db.Decimal(8, 3)
+  ancho      Decimal?  @db.Decimal(8, 3)
+  largo      Decimal?  @db.Decimal(8, 3)
+  peso       Decimal?  @db.Decimal(8, 3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  empresa    Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@map("empresa_shalom_export_config")
 }
 
 model NotaCredito {
