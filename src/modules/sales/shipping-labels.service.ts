@@ -35,7 +35,9 @@ type ShippingLabelSnapshot = {
   saleCode: string;
   businessName: string;
   branchName: string | null;
-  courier: 'SHALOM' | 'OLVA';
+  service: string;
+  serviceLabel: string;
+  destinationTitle: string;
   shippingCode: string;
   recipientName: string;
   recipientDocument: string | null;
@@ -45,6 +47,8 @@ type ShippingLabelSnapshot = {
   agencyLocation: string;
   products: Array<{ description: string; quantity: number }>;
 };
+
+const LOCAL_DELIVERY_METHODS = ['MOTORIZADO', 'DOMICILIO'] as const;
 
 @Injectable()
 export class ShippingLabelsService {
@@ -130,11 +134,16 @@ export class ShippingLabelsService {
       },
     });
     if (!sale?.envio) throw new NotFoundException('Envio no encontrado');
-    if (
-      sale.envio.estado !== VentaEnvioEstado.recibido ||
-      !sale.envio.agencia ||
-      !sale.envio.agenciaNombre
-    ) {
+    const metodoEnvio = (sale.envio.metodoEnvio ?? '').trim().toUpperCase();
+    const isLocalDelivery = (LOCAL_DELIVERY_METHODS as readonly string[]).includes(
+      metodoEnvio,
+    );
+    if (sale.envio.estado !== VentaEnvioEstado.recibido) {
+      throw new BadRequestException(
+        'El envio debe estar recibido antes de imprimir la etiqueta',
+      );
+    }
+    if (!isLocalDelivery && (!sale.envio.agencia || !sale.envio.agenciaNombre)) {
       throw new BadRequestException(
         'Complete los datos del courier y la agencia antes de imprimir',
       );
@@ -144,6 +153,14 @@ export class ShippingLabelsService {
       sale.envio.nombreCompleto?.trim() ||
       sale.cliente?.nombre?.trim() ||
       'CLIENTE';
+    const location = [
+      sale.envio.agenciaDistrito,
+      sale.envio.agenciaProvincia,
+      sale.envio.agenciaDepartamento,
+    ]
+      .filter(Boolean)
+      .join(' / ');
+    const referencia = sale.envio.referenciaEntrega?.trim();
     return {
       shippingId: sale.envio.id,
       salePublicId: sale.publicId,
@@ -151,21 +168,27 @@ export class ShippingLabelsService {
       businessName:
         sale.empresa.nombreComercial || sale.empresa.razonSocial || 'NUVEX',
       branchName: sale.sucursal?.nombre ?? null,
-      courier: sale.envio.agencia,
+      service: isLocalDelivery ? metodoEnvio : (sale.envio.agencia as string),
+      serviceLabel: isLocalDelivery
+        ? metodoEnvio
+        : (sale.envio.agencia as string),
+      destinationTitle: isLocalDelivery
+        ? 'DIRECCION DE ENTREGA'
+        : 'AGENCIA DESTINO',
       shippingCode: sale.envio.codigoPublico,
       recipientName,
       recipientDocument:
         sale.envio.dni || sale.cliente?.numeroDocumento || null,
       recipientPhone: sale.envio.celular || sale.cliente?.telefono || null,
-      agencyName: sale.envio.agenciaNombre,
-      agencyAddress: sale.envio.agenciaDireccion,
-      agencyLocation: [
-        sale.envio.agenciaDistrito,
-        sale.envio.agenciaProvincia,
-        sale.envio.agenciaDepartamento,
-      ]
-        .filter(Boolean)
-        .join(' / '),
+      agencyName: isLocalDelivery
+        ? sale.envio.direccionEntrega?.trim() || 'SIN DIRECCION'
+        : (sale.envio.agenciaNombre as string),
+      agencyAddress: isLocalDelivery
+        ? referencia
+          ? `Ref: ${referencia}`
+          : null
+        : sale.envio.agenciaDireccion,
+      agencyLocation: location,
       products: sale.detalles.map((detail) => ({
         description: detail.descripcion || 'Producto',
         quantity: detail.cantidad,
@@ -292,7 +315,7 @@ export class ShippingLabelsService {
       .fontSize(9)
       .fillColor('#111827')
       .text(label.businessName, margin, y, { width: width * 0.62 });
-    doc.fontSize(11).text(label.courier, margin + width * 0.62, y - 1, {
+    doc.fontSize(11).text(label.serviceLabel, margin + width * 0.62, y - 1, {
       width: width * 0.38,
       align: 'right',
     });
@@ -336,7 +359,7 @@ export class ShippingLabelsService {
       .font('Helvetica')
       .fontSize(7)
       .fillColor('#4b5563')
-      .text('AGENCIA DESTINO', margin, y);
+      .text(label.destinationTitle, margin, y);
     y += 10;
     doc
       .font('Helvetica-Bold')
@@ -344,16 +367,23 @@ export class ShippingLabelsService {
       .fillColor('#111827')
       .text(label.agencyName, margin, y, { width, height: 29, ellipsis: true });
     y += 31;
-    doc
-      .font('Helvetica')
-      .fontSize(8)
-      .text(label.agencyLocation || '-', margin, y, { width });
-    y += 14;
-    doc.text(label.agencyAddress || '-', margin, y, {
-      width,
-      height: 34,
-      ellipsis: true,
-    });
+    if (label.agencyLocation) {
+      doc
+        .font('Helvetica')
+        .fontSize(8)
+        .text(label.agencyLocation, margin, y, { width });
+      y += 14;
+    }
+    if (label.agencyAddress) {
+      doc
+        .font('Helvetica')
+        .fontSize(8)
+        .text(label.agencyAddress, margin, y, {
+          width,
+          height: 34,
+          ellipsis: true,
+        });
+    }
     y += 39;
 
     doc
