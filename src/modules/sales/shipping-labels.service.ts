@@ -135,17 +135,17 @@ export class ShippingLabelsService {
     });
     if (!sale?.envio) throw new NotFoundException('Envio no encontrado');
     const metodoEnvio = (sale.envio.metodoEnvio ?? '').trim().toUpperCase();
-    const isLocalDelivery = (LOCAL_DELIVERY_METHODS as readonly string[]).includes(
-      metodoEnvio,
-    );
+    const isLocalDelivery = (
+      LOCAL_DELIVERY_METHODS as readonly string[]
+    ).includes(metodoEnvio);
     if (sale.envio.estado !== VentaEnvioEstado.recibido) {
       throw new BadRequestException(
         'El envio debe estar recibido antes de imprimir la etiqueta',
       );
     }
-    if (!isLocalDelivery && (!sale.envio.agencia || !sale.envio.agenciaNombre)) {
+    if (!isLocalDelivery && !sale.envio.agencia) {
       throw new BadRequestException(
-        'Complete los datos del courier y la agencia antes de imprimir',
+        'Seleccione el courier del envio antes de imprimir la etiqueta',
       );
     }
 
@@ -182,7 +182,7 @@ export class ShippingLabelsService {
       recipientPhone: sale.envio.celular || sale.cliente?.telefono || null,
       agencyName: isLocalDelivery
         ? sale.envio.direccionEntrega?.trim() || 'SIN DIRECCION'
-        : (sale.envio.agenciaNombre as string),
+        : sale.envio.agenciaNombre?.trim() || (sale.envio.agencia as string),
       agencyAddress: isLocalDelivery
         ? referencia
           ? `Ref: ${referencia}`
@@ -375,14 +375,11 @@ export class ShippingLabelsService {
       y += 14;
     }
     if (label.agencyAddress) {
-      doc
-        .font('Helvetica')
-        .fontSize(8)
-        .text(label.agencyAddress, margin, y, {
-          width,
-          height: 34,
-          ellipsis: true,
-        });
+      doc.font('Helvetica').fontSize(8).text(label.agencyAddress, margin, y, {
+        width,
+        height: 34,
+        ellipsis: true,
+      });
     }
     y += 39;
 
