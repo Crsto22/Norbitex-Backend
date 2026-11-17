@@ -78,6 +78,14 @@ const agenciaPorCodigo = new Map<string, string>(
 );
 const agenciaNombres = new Set(shalomAgencias.map(([, nombre]) => nombre));
 
+function normalizeSearch(value?: string | null) {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 export type ShalomExportSettings = {
   origen: string | null;
   modo: ShalomExportMode;
@@ -231,7 +239,48 @@ export class ShalomMassiveService {
     return this.settings(empresaId);
   }
 
-  async origins(): Promise<ShalomOrigin[]> {
+  async origins(
+    params: { page?: number; limit?: number; search?: string } = {},
+  ): Promise<{
+    data: ShalomOrigin[];
+    meta: { page: number; limit: number; total: number; totalPages: number };
+  }> {
+    const items = await this.allOrigins();
+    const term = normalizeSearch(params.search);
+    const filtered = term
+      ? items.filter((item) =>
+          normalizeSearch(
+            [
+              item.externalId,
+              item.nombre,
+              item.departamento ?? '',
+              item.provincia ?? '',
+              item.distrito ?? '',
+              item.direccion ?? '',
+            ].join(' '),
+          ).includes(term),
+        )
+      : items;
+
+    const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
+    const totalPages = Math.max(1, Math.ceil(filtered.length / limit));
+    const page = Math.min(Math.max(params.page ?? 1, 1), totalPages);
+    const start = (page - 1) * limit;
+
+    return {
+      data: filtered.slice(start, start + limit),
+      meta: { page, limit, total: filtered.length, totalPages },
+    };
+  }
+
+  private originsCache: { at: number; items: ShalomOrigin[] } | null = null;
+
+  private async allOrigins(): Promise<ShalomOrigin[]> {
+    const now = Date.now();
+    if (this.originsCache && now - this.originsCache.at < 5 * 60 * 1000) {
+      return this.originsCache.items;
+    }
+
     const catalog = await this.prisma.agenciaCourier.findMany({
       where: { courier: AgenciaCourierProveedor.SHALOM },
       select: {
@@ -245,7 +294,7 @@ export class ShalomMassiveService {
     });
     const byCode = new Map(catalog.map((item) => [item.externalId, item]));
 
-    return shalomAgencias
+    const items = shalomAgencias
       .map(([externalId, nombre]): ShalomOrigin => {
         const detail = byCode.get(externalId);
         const path = (detail?.nombre ?? '')
@@ -263,6 +312,9 @@ export class ShalomMassiveService {
         };
       })
       .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+
+    this.originsCache = { at: now, items };
+    return items;
   }
 
   async updateSettings(

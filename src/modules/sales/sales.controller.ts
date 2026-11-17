@@ -55,6 +55,7 @@ import { ShippingLabelsService } from './shipping-labels.service';
 import { ShalomMassiveService } from './shalom-massive.service';
 import { ExportShalomMassiveDto } from './dto/export-shalom.dto';
 import { UpdateShalomExportSettingsDto } from './dto/shalom-export-settings.dto';
+import { ShalomOriginsQueryDto } from './dto/shalom-origins-query.dto';
 import {
   PrintShippingLabelBatchDto,
   PrintShippingLabelDto,
@@ -207,8 +208,8 @@ export class SalesController {
 
   @Get('shalom-export-settings/origins')
   @RequireModule('entregas-pendientes', 'envios-config')
-  async getShalomExportOrigins() {
-    return { data: await this.shalomMassiveService.origins() };
+  getShalomExportOrigins(@Query() query: ShalomOriginsQueryDto) {
+    return this.shalomMassiveService.origins(query);
   }
 
   @Get('shalom-export-settings')

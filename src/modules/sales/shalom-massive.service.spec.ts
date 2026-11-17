@@ -247,10 +247,20 @@ describe('ShalomMassiveService', () => {
         },
       ]);
 
-      const origins = await service.origins();
+      const page = await service.origins({ page: 1, limit: 10 });
 
-      expect(origins.length).toBe(514);
-      expect(origins.find((item) => item.externalId === '622')).toEqual({
+      expect(page.meta).toEqual({
+        page: 1,
+        limit: 10,
+        total: 514,
+        totalPages: 52,
+      });
+      expect(page.data).toHaveLength(10);
+
+      const bagua = (
+        await service.origins({ search: 'bagua', limit: 10 })
+      ).data.find((item) => item.externalId === '622');
+      expect(bagua).toEqual({
         externalId: '622',
         nombre: 'BAGUA CAPITAL',
         departamento: 'AMAZONAS',
@@ -258,11 +268,20 @@ describe('ShalomMassiveService', () => {
         distrito: 'BAGUA',
         direccion: 'Av. Amazonas 123',
       });
-      expect(origins.map((item) => item.nombre)).toEqual(
-        [...origins.map((item) => item.nombre)].sort((a, b) =>
-          a.localeCompare(b, 'es'),
-        ),
+      expect(prisma.agenciaCourier.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('busca por codigo y por nombre', async () => {
+      const { service } = serviceWith([]);
+
+      const porCodigo = await service.origins({ search: '622' });
+      expect(porCodigo.data.map((item) => item.externalId)).toContain('622');
+
+      const porNombre = await service.origins({ search: 'bagua capital' });
+      expect(porNombre.data.map((item) => item.nombre)).toContain(
+        'BAGUA CAPITAL',
       );
+      expect(porNombre.meta.total).toBe(1);
     });
 
     it('devuelve valores por defecto cuando no hay configuracion', async () => {
