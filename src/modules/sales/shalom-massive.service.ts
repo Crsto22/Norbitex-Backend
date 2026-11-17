@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
 import {
+  AgenciaCourierProveedor,
   Prisma,
   VentaEnvioAgencia,
   VentaEnvioEstado,
@@ -85,6 +86,15 @@ export type ShalomExportSettings = {
   ancho: number | null;
   largo: number | null;
   peso: number | null;
+};
+
+export type ShalomOrigin = {
+  externalId: string;
+  nombre: string;
+  departamento: string | null;
+  provincia: string | null;
+  distrito: string | null;
+  direccion: string | null;
 };
 
 const DEFAULT_SETTINGS: ShalomExportSettings = {
@@ -221,8 +231,38 @@ export class ShalomMassiveService {
     return this.settings(empresaId);
   }
 
-  origins(): string[] {
-    return [...agenciaNombres].sort((a, b) => a.localeCompare(b, 'es'));
+  async origins(): Promise<ShalomOrigin[]> {
+    const catalog = await this.prisma.agenciaCourier.findMany({
+      where: { courier: AgenciaCourierProveedor.SHALOM },
+      select: {
+        externalId: true,
+        nombre: true,
+        direccion: true,
+        departamento: true,
+        provincia: true,
+        distrito: true,
+      },
+    });
+    const byCode = new Map(catalog.map((item) => [item.externalId, item]));
+
+    return shalomAgencias
+      .map(([externalId, nombre]): ShalomOrigin => {
+        const detail = byCode.get(externalId);
+        const path = (detail?.nombre ?? '')
+          .split(' / ')
+          .map((part) => part.trim())
+          .filter(Boolean);
+
+        return {
+          externalId,
+          nombre,
+          departamento: detail?.departamento?.trim() || path[0] || null,
+          provincia: detail?.provincia?.trim() || path[1] || null,
+          distrito: detail?.distrito?.trim() || path[2] || null,
+          direccion: detail?.direccion?.trim() || null,
+        };
+      })
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   }
 
   async updateSettings(

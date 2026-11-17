@@ -49,6 +49,7 @@ function serviceWith(
 ) {
   const prisma = {
     venta: { findMany: jest.fn().mockResolvedValue(rows) },
+    agenciaCourier: { findMany: jest.fn().mockResolvedValue([]) },
     empresaShalomExportConfig: {
       findUnique: jest.fn().mockResolvedValue(config),
       upsert: jest
@@ -233,6 +234,37 @@ describe('ShalomMassiveService', () => {
   });
 
   describe('settings', () => {
+    it('devuelve las agencias de Shalom con su ubicacion', async () => {
+      const { service, prisma } = serviceWith([]);
+      prisma.agenciaCourier.findMany.mockResolvedValue([
+        {
+          externalId: '622',
+          nombre: 'AMAZONAS / BAGUA / BAGUA / BAGUA CAPITAL',
+          direccion: 'Av. Amazonas 123',
+          departamento: null,
+          provincia: null,
+          distrito: null,
+        },
+      ]);
+
+      const origins = await service.origins();
+
+      expect(origins.length).toBe(514);
+      expect(origins.find((item) => item.externalId === '622')).toEqual({
+        externalId: '622',
+        nombre: 'BAGUA CAPITAL',
+        departamento: 'AMAZONAS',
+        provincia: 'BAGUA',
+        distrito: 'BAGUA',
+        direccion: 'Av. Amazonas 123',
+      });
+      expect(origins.map((item) => item.nombre)).toEqual(
+        [...origins.map((item) => item.nombre)].sort((a, b) =>
+          a.localeCompare(b, 'es'),
+        ),
+      );
+    });
+
     it('devuelve valores por defecto cuando no hay configuracion', async () => {
       const { service } = serviceWith([]);
 

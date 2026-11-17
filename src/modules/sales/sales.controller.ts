@@ -207,8 +207,8 @@ export class SalesController {
 
   @Get('shalom-export-settings/origins')
   @RequireModule('entregas-pendientes', 'envios-config')
-  getShalomExportOrigins() {
-    return { data: this.shalomMassiveService.origins() };
+  async getShalomExportOrigins() {
+    return { data: await this.shalomMassiveService.origins() };
   }
 
   @Get('shalom-export-settings')
