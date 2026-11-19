@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -10,7 +11,10 @@ import type { ShalomIntegrationStatus } from '@prisma/client';
 
 import { SecretsCryptoService } from '../../common/crypto/secrets-crypto.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ShalomApiClientService } from './shalom-api-client.service';
+import {
+  ShalomApiClientService,
+  ShalomApiError,
+} from './shalom-api-client.service';
 import type { ProvisionShalomProDto } from './dto/shalom-config.dto';
 
 type RemoteTenant = {
@@ -88,12 +92,33 @@ export class ShalomProvisioningService {
     };
   }
 
-  async provision(empresaId: bigint, dto: ProvisionShalomProDto): Promise<ShalomProStatus> {
+  async provision(
+    empresaId: bigint,
+    dto: ProvisionShalomProDto,
+  ): Promise<ShalomProStatus> {
+    try {
+      return await this.connectAccount(empresaId, dto);
+    } catch (error) {
+      this.logger.error(
+        `Fallo al conectar Shalom PRO (empresa ${empresaId}): ${(error as Error).message}`,
+      );
+      this.rethrow(error);
+    }
+  }
+
+  private async connectAccount(
+    empresaId: bigint,
+    dto: ProvisionShalomProDto,
+  ): Promise<ShalomProStatus> {
     const adminKey = this.adminKey();
-    const empresa = await this.prisma.empresa.findUnique({ where: { id: empresaId } });
+    const empresa = await this.prisma.empresa.findUnique({
+      where: { id: empresaId },
+    });
     if (!empresa) throw new NotFoundException('Empresa no encontrada');
 
-    const existing = await this.prisma.shalomIntegration.findUnique({ where: { empresaId } });
+    const existing = await this.prisma.shalomIntegration.findUnique({
+      where: { empresaId },
+    });
 
     if (existing) {
       // Ya conectada: se actualizan las credenciales en shalom-service.
@@ -107,13 +132,19 @@ export class ShalomProvisioningService {
         where: { empresaId },
         data: {
           status: validation.valid ? 'ACTIVE' : 'ERROR',
-          lastError: validation.valid ? null : (validation.message ?? 'Credenciales rechazadas'),
+          lastError: validation.valid
+            ? null
+            : (validation.message ?? 'Credenciales rechazadas'),
           defaultPackageType: dto.packageType ?? existing.defaultPackageType,
           lastSyncedAt: new Date(),
         },
       });
 
-      return { ...(await this.status(empresaId)), valid: validation.valid, message: validation.message ?? null };
+      return {
+        ...(await this.status(empresaId)),
+        valid: validation.valid,
+        message: validation.message ?? null,
+      };
     }
 
     // Primera conexion: alta en shalom-service.
@@ -128,11 +159,13 @@ export class ShalomProvisioningService {
     const webhookUrl = this.webhookUrl();
     if (webhookUrl && created.applicationId) {
       try {
-        const webhook = await this.client.createWebhook<{ id: string; secret: string }>(
-          adminKey,
-          created.applicationId,
-          { url: webhookUrl, events: ['order.registered'] },
-        );
+        const webhook = await this.client.createWebhook<{
+          id: string;
+          secret: string;
+        }>(adminKey, created.applicationId, {
+          url: webhookUrl,
+          events: ['order.registered'],
+        });
         webhookSecretEncrypted = this.crypto.encrypt(webhook.secret);
       } catch (error) {
         this.logger.warn(
@@ -143,7 +176,11 @@ export class ShalomProvisioningService {
 
     const validation = await this.client
       .validateCredentials<RemoteValidation>(adminKey, created.tenantId)
-      .catch((error: Error) => ({ valid: false, status: 'ERROR', message: error.message }));
+      .catch((error: Error) => ({
+        valid: false,
+        status: 'ERROR',
+        message: error.message,
+      }));
 
     await this.prisma.shalomIntegration.create({
       data: {
@@ -154,7 +191,9 @@ export class ShalomProvisioningService {
         webhookSecretEncrypted,
         defaultPackageType: dto.packageType ?? 'PAQUETE S',
         status: validation.valid ? 'ACTIVE' : 'ERROR',
-        lastError: validation.valid ? null : (validation.message ?? 'No se pudo validar la cuenta'),
+        lastError: validation.valid
+          ? null
+          : (validation.message ?? 'No se pudo validar la cuenta'),
         lastSyncedAt: new Date(),
       },
     });
@@ -163,12 +202,29 @@ export class ShalomProvisioningService {
       `Shalom PRO conectado para empresa ${empresa.id} (tenant ${created.tenantId}, webhook ${Boolean(webhookSecretEncrypted)})`,
     );
 
-    return { ...(await this.status(empresaId)), valid: validation.valid, message: validation.message ?? null };
+    return {
+      ...(await this.status(empresaId)),
+      valid: validation.valid,
+      message: validation.message ?? null,
+    };
   }
 
   async validate(empresaId: bigint): Promise<ShalomProStatus> {
+    try {
+      return await this.validateAccount(empresaId);
+    } catch (error) {
+      this.logger.error(
+        `Fallo al validar Shalom PRO (empresa ${empresaId}): ${(error as Error).message}`,
+      );
+      this.rethrow(error);
+    }
+  }
+
+  private async validateAccount(empresaId: bigint): Promise<ShalomProStatus> {
     const adminKey = this.adminKey();
-    const integration = await this.prisma.shalomIntegration.findUnique({ where: { empresaId } });
+    const integration = await this.prisma.shalomIntegration.findUnique({
+      where: { empresaId },
+    });
     if (!integration) {
       throw new BadRequestException('La empresa no tiene Shalom PRO conectado');
     }
@@ -182,12 +238,48 @@ export class ShalomProvisioningService {
       where: { empresaId },
       data: {
         status: validation.valid ? 'ACTIVE' : 'ERROR',
-        lastError: validation.valid ? null : (validation.message ?? 'Credenciales rechazadas'),
+        lastError: validation.valid
+          ? null
+          : (validation.message ?? 'Credenciales rechazadas'),
         lastSyncedAt: new Date(),
       },
     });
 
-    return { ...(await this.status(empresaId)), valid: validation.valid, message: validation.message ?? null };
+    return {
+      ...(await this.status(empresaId)),
+      valid: validation.valid,
+      message: validation.message ?? null,
+    };
+  }
+
+  /**
+   * Traduce los errores del microservicio a respuestas HTTP legibles.
+   * Sin esto, cualquier fallo de shalom-service salia como 500 generico.
+   */
+  private rethrow(error: unknown): never {
+    if (error instanceof ShalomApiError) {
+      if (error.status === 401 || error.status === 403) {
+        throw new ServiceUnavailableException(
+          'La clave de administracion de Shalom no es valida (SHALOM_SERVICE_ADMIN_KEY)',
+        );
+      }
+      if (error.status === 409) {
+        throw new ConflictException(error.message);
+      }
+      if (error.status === 408) {
+        throw new ServiceUnavailableException(
+          'Shalom no respondio a tiempo. Intenta nuevamente en unos minutos',
+        );
+      }
+      if (error.status >= 400 && error.status < 500) {
+        throw new BadRequestException(error.message);
+      }
+      throw new ServiceUnavailableException(
+        `Shalom no respondio: ${error.message}`,
+      );
+    }
+
+    throw error;
   }
 
   private adminKey(): string {

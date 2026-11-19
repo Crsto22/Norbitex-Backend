@@ -32,7 +32,9 @@ export class ShalomApiClientService {
     return this.request<T>(`/v1/tenants/${tenantId}/orders`, apiKey, {
       method: 'POST',
       body: JSON.stringify(payload),
-      headers: idempotencyKey ? { 'idempotency-key': idempotencyKey } : undefined,
+      headers: idempotencyKey
+        ? { 'idempotency-key': idempotencyKey }
+        : undefined,
     });
   }
 
@@ -51,46 +53,79 @@ export class ShalomApiClientService {
   }
 
   track<T>(orden: string, codigo: string | undefined, apiKey: string) {
-    const query = codigo ? `?orden=${orden}&codigo=${codigo}` : `?orden=${orden}`;
+    const query = codigo
+      ? `?orden=${orden}&codigo=${codigo}`
+      : `?orden=${orden}`;
     return this.request<T>(`/v1/tracking${query}`, apiKey);
   }
 
   // --- Administracion (SHALOM_SERVICE_ADMIN_KEY) ---
 
   createTenant<T>(adminKey: string, payload: unknown) {
-    return this.request<T>('/v1/admin/tenants', adminKey, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    return this.request<T>(
+      '/v1/admin/tenants',
+      adminKey,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      'admin',
+    );
   }
 
   updateCredentials<T>(adminKey: string, tenantId: string, payload: unknown) {
-    return this.request<T>(`/v1/admin/tenants/${tenantId}/credentials?validate=true`, adminKey, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
+    return this.request<T>(
+      `/v1/admin/tenants/${tenantId}/credentials?validate=true`,
+      adminKey,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      },
+      'admin',
+    );
   }
 
   validateCredentials<T>(adminKey: string, tenantId: string) {
-    return this.request<T>(`/v1/admin/tenants/${tenantId}/validate-credentials`, adminKey, {
-      method: 'POST',
-    });
+    return this.request<T>(
+      `/v1/admin/tenants/${tenantId}/validate-credentials`,
+      adminKey,
+      { method: 'POST' },
+      'admin',
+    );
   }
 
   createWebhook<T>(adminKey: string, applicationId: string, payload: unknown) {
-    return this.request<T>(`/v1/admin/applications/${applicationId}/webhooks`, adminKey, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    return this.request<T>(
+      `/v1/admin/applications/${applicationId}/webhooks`,
+      adminKey,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      'admin',
+    );
   }
 
   listSessions<T>(adminKey: string) {
-    return this.request<T>('/v1/admin/sessions', adminKey);
+    return this.request<T>('/v1/admin/sessions', adminKey, undefined, 'admin');
   }
 
-  private async request<T>(path: string, token: string, init?: RequestInit) {
+  /**
+   * - `api-key`: `Authorization: Bearer <api key>` (API de negocio).
+   * - `admin`: `X-Admin-Token: <ADMIN_TOKEN>` (administracion del microservicio).
+   */
+  private async request<T>(
+    path: string,
+    token: string,
+    init?: RequestInit,
+    mode: 'api-key' | 'admin' = 'api-key',
+  ) {
     const headers = new Headers(init?.headers);
-    headers.set('authorization', `Bearer ${token}`);
+    if (mode === 'admin') {
+      headers.set('x-admin-token', token);
+    } else {
+      headers.set('authorization', `Bearer ${token}`);
+    }
     headers.set('accept', 'application/json');
     if (init?.body && !(init.body instanceof FormData)) {
       headers.set('content-type', 'application/json');
@@ -128,13 +163,17 @@ export class ShalomApiClientService {
   private baseUrl() {
     const url = this.config.get<string>('SHALOM_SERVICE_URL')?.trim();
     if (!url) {
-      throw new ServiceUnavailableException('SHALOM_SERVICE_URL no esta configurada');
+      throw new ServiceUnavailableException(
+        'SHALOM_SERVICE_URL no esta configurada',
+      );
     }
     return url.replace(/\/$/, '');
   }
 
   private timeoutMs() {
-    return Number(this.config.get<string>('SHALOM_SERVICE_TIMEOUT_MS') ?? 60_000);
+    return Number(
+      this.config.get<string>('SHALOM_SERVICE_TIMEOUT_MS') ?? 60_000,
+    );
   }
 }
 
