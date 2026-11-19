@@ -48,6 +48,7 @@ Con la cuenta conectada, cada envío por Shalom muestra el botón **Registrar en
 | `POST` | `/sales/:publicId/shalom-register` | encola el registro (job asíncrono) |
 | `GET` | `/sales/:publicId/shalom` | estado del registro |
 | `POST` | `/sales/:publicId/shalom-sync` | sincroniza el resultado del job (fallback del webhook) |
+| `GET` | `/sales/dni/:dni` | búsqueda RENIEC desde el modal (consume 1 consulta del plan) |
 
 Requisitos: cuenta `ACTIVE`, envío `recibido`, agencia destino válida y agencia de origen
 configurada en **Configuración → Shalom PRO** (`empresa_shalom_export_config.origen`). El modal

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { SecretsCryptoService } from '../../common/crypto/secrets-crypto.service';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { DocumentoConsultaModule } from '../documento-consulta/documento-consulta.module';
 import { SalesModule } from '../sales/sales.module';
 import { ShalomApiClientService } from './shalom-api-client.service';
 import { ShalomIntegrationController } from './shalom-integration.controller';
@@ -12,7 +13,7 @@ import { ShalomWebhookController } from './shalom-webhook.controller';
 import { ShalomWebhookService } from './shalom-webhook.service';
 
 @Module({
-  imports: [PrismaModule, SalesModule],
+  imports: [PrismaModule, SalesModule, DocumentoConsultaModule],
   controllers: [ShalomIntegrationController, ShalomWebhookController],
   providers: [
     SecretsCryptoService,

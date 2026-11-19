@@ -50,12 +50,31 @@ describe('DocumentoConsultaService', () => {
       apellidoMaterno: 'SAN MARTIN',
       codVerifica: null,
       codVerificaLetra: null,
+      usage: { used: 1, limit: 10, remaining: 9 },
     });
     expect(plansService.recordDocumentQuery).toHaveBeenCalledWith(
       3n,
       7n,
       'dni',
     );
+  });
+
+  it('consulta DNI publico sin registrar consumo del plan', async () => {
+    mockSunatResponse({
+      message: 'success',
+      lista: [{ nombresapellidos: 'PEREZ GOMEZ, ANA' }],
+    });
+
+    await expect(service.consultarDniPublico('12345678')).resolves.toEqual({
+      success: true,
+      dni: '12345678',
+      nombres: 'ANA',
+      apellidoPaterno: 'PEREZ',
+      apellidoMaterno: 'GOMEZ',
+      codVerifica: null,
+      codVerificaLetra: null,
+    });
+    expect(plansService.recordDocumentQuery).not.toHaveBeenCalled();
   });
 
   it('convierte respuesta SUNAT de RUC en razon social, direccion y ubigeo', async () => {

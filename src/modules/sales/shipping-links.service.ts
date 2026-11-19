@@ -21,6 +21,7 @@ import {
 } from '../../common/commercial-access';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CourierAgenciesService } from '../courier-agencies/courier-agencies.service';
+import { DocumentoConsultaService } from '../documento-consulta/documento-consulta.service';
 import { EnviosConfigService } from '../envios-config/envios-config.service';
 import {
   FindPublicShippingAgenciesDto,
@@ -68,6 +69,7 @@ export class ShippingLinksService {
     private readonly prisma: PrismaService,
     private readonly courierAgencies: CourierAgenciesService,
     private readonly enviosConfig: EnviosConfigService,
+    private readonly documentoConsulta: DocumentoConsultaService,
   ) {}
 
   async generate(
@@ -197,6 +199,20 @@ export class ShippingLinksService {
     const despacho = await this.getDespachoPublico(envio.venta.empresaId);
     const recojo = await this.getRecojoPublico(envio.venta.empresaId);
     return this.toPublicResponse(envio, metodosEnvio, despacho, recojo);
+  }
+
+  /**
+   * Consulta RENIEC desde el enlace publico. No descuenta plan: el cliente
+   * completa sus propios datos y solo se permite mientras el envio esta
+   * pendiente (al recibirse el enlace deja de servir).
+   */
+  async lookupPublicDni(code: string, dni: string) {
+    const envio = await this.findAvailablePublicLink(code);
+    if (envio.estado === VentaEnvioEstado.recibido) {
+      throw new ConflictException('El enlace ya fue completado');
+    }
+
+    return this.documentoConsulta.consultarDniPublico(dni);
   }
 
   async submitPublic(code: string, dto: SubmitShippingDetailsDto) {

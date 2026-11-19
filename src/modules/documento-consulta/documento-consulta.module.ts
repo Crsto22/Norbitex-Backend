@@ -5,5 +5,6 @@ import { DocumentoConsultaService } from './documento-consulta.service';
 @Module({
   controllers: [DocumentoConsultaController],
   providers: [DocumentoConsultaService],
+  exports: [DocumentoConsultaService],
 })
 export class DocumentoConsultaModule {}

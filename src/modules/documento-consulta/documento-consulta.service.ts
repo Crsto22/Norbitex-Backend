@@ -53,6 +53,17 @@ export class DocumentoConsultaService {
   ) {}
 
   async consultarDni(user: JwtPayload, dni: string) {
+    const datos = await this.consultarDniPublico(dni);
+    const usage = await this.registrarConsulta(user, ConsultaDocumentoTipo.dni);
+
+    return { ...datos, usage };
+  }
+
+  /**
+   * Consulta RENIEC sin registrar consumo de plan.
+   * Se usa en enlaces publicos donde el cliente completa sus propios datos.
+   */
+  async consultarDniPublico(dni: string) {
     const valor = this.validarDocumento(dni, 8, 'DNI');
     const node = await this.consultar('obtenerDatosDni', 'numDocumento', valor);
     const item = this.extraerPrimerResultado(node, 'DNI', valor);
@@ -67,7 +78,6 @@ export class DocumentoConsultaService {
     }
 
     const nombrePersona = this.parsearNombrePersona(nombresApellidos);
-    await this.registrarConsulta(user, ConsultaDocumentoTipo.dni);
 
     return {
       success: true,

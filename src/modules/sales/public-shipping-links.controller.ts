@@ -22,6 +22,12 @@ export class PublicShippingLinksController {
     return this.shippingLinksService.findPublicAgencies(code, query);
   }
 
+  @Get(':code/dni/:dni')
+  @Throttle({ default: { ttl: 60_000, limit: 6 } })
+  lookupDni(@Param('code') code: string, @Param('dni') dni: string) {
+    return this.shippingLinksService.lookupPublicDni(code, dni);
+  }
+
   @Get(':code')
   findOne(@Param('code') code: string) {
     return this.shippingLinksService.getPublic(code);
