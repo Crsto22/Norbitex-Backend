@@ -75,6 +75,19 @@ SHALOM_TRACKING_INTERVAL_MINUTES=45
 El botón de actualizar del envío llama a `POST /sales/:publicId/shalom-track`, que consulta
 Shalom en vivo (10-20 s) con un cooldown de 60 s por envío.
 
+### Vencimiento de la guía
+
+Si el paquete no se recepciona en la agencia dentro de `SHALOM_ORDER_EXPIRY_HOURS`
+(24 h por defecto), el microservicio marca la orden como `ANULADO` y emite
+`order.status_changed` con `label = "Guía vencida"`.
+
+- **Aún no despachado**: el envío vuelve a Pendiente, se limpian orden/código y se habilita
+  generar una nueva guía (el botón dice “Generar nueva guía”).
+- **Ya despachado**: no se retrocede; se marca Incidencia con la nota correspondiente.
+
+El despacho automático ocurre cuando Shalom reporta `EN_ORIGEN` (recepción en agencia), no al crear
+la guía.
+
 ## Configuracion por empresa
 
 `PUT /company/shalom-config` (requiere módulo `empresa`):

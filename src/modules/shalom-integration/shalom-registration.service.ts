@@ -274,7 +274,7 @@ export class ShalomRegistrationService {
   }
 
   /** Sincroniza el resultado del job cuando el webhook no llego. */
-  async sync(empresaId: bigint, publicId: string, actorId?: bigint | null) {
+  async sync(empresaId: bigint, publicId: string) {
     const venta = await this.integration.requireEnvio(empresaId, publicId);
     const envio = venta.envio!;
 
@@ -289,16 +289,12 @@ export class ShalomRegistrationService {
     );
 
     if (job.status === 'COMPLETED' && job.result?.orden) {
-      await this.applyRegistration(
-        envio.id,
-        {
-          orden: job.result.orden,
-          codigo: job.result.codigo ?? null,
-          monto: job.result.monto ?? null,
-          estado: 'REGISTRADO',
-        },
-        { actorId },
-      );
+      await this.applyRegistration(envio.id, {
+        orden: job.result.orden,
+        codigo: job.result.codigo ?? null,
+        monto: job.result.monto ?? null,
+        estado: 'REGISTRADO',
+      });
       return this.status(empresaId, publicId);
     }
 
@@ -322,7 +318,8 @@ export class ShalomRegistrationService {
 
   /**
    * Aplica el resultado del registro (usado por sync y por webhook).
-   * Despues del registro se marca el envio como despachado (automatico).
+   * El despacho automatico ocurre cuando Shalom recepciona el paquete
+   * (EN_ORIGEN), no al crear la guia.
    */
   async applyRegistration(
     ventaEnvioId: bigint,
@@ -332,7 +329,6 @@ export class ShalomRegistrationService {
       monto: number | null;
       estado: string;
     },
-    options: { actorId?: bigint | null } = {},
   ) {
     const updated = await this.prisma.ventaEnvio.update({
       where: { id: ventaEnvioId },
@@ -355,8 +351,6 @@ export class ShalomRegistrationService {
         detalle: `Registrado en Shalom: ${data.orden}${data.codigo ? ` / ${data.codigo}` : ''}`,
       },
     });
-
-    await this.autoDispatch(ventaEnvioId, data.orden, options.actorId ?? null);
 
     return updated;
   }
@@ -384,6 +378,10 @@ export class ShalomRegistrationService {
       data.shalomTimeline = timeline;
     }
 
+    const wasPending =
+      envio.estadoLogistico === VentaEnvioEstadoLogistico.POR_PREPARAR ||
+      envio.estadoLogistico === VentaEnvioEstadoLogistico.POR_DESPACHAR;
+
     if (estadoLogistico && estadoLogistico !== envio.estadoLogistico) {
       data.estadoLogistico = estadoLogistico;
       if (estadoLogistico === VentaEnvioEstadoLogistico.ENTREGADO) {
@@ -407,7 +405,93 @@ export class ShalomRegistrationService {
       });
     }
 
+    // La agencia recepciono el paquete: recien aqui se marca como despachado.
+    if (
+      remote.status === 'EN_ORIGEN' &&
+      wasPending &&
+      envio.shalomOrden
+    ) {
+      await this.autoDispatch(ventaEnvioId, envio.shalomOrden, null);
+    }
+
     return updated;
+  }
+
+  /**
+   * Guia anulada o vencida en Shalom.
+   *
+   * - Si aun no se despacho: vuelve a pendiente y se habilita una nueva guia.
+   * - Si ya se despacho: no se retrocede; se marca incidencia.
+   */
+  async markGuideCanceled(ventaEnvioId: bigint, label: string) {
+    const envio = await this.prisma.ventaEnvio.findUnique({
+      where: { id: ventaEnvioId },
+    });
+    if (!envio) return;
+
+    const dispatched =
+      envio.estadoLogistico === VentaEnvioEstadoLogistico.EN_TRANSITO ||
+      envio.estadoLogistico === VentaEnvioEstadoLogistico.ENTREGADO ||
+      envio.estadoLogistico === VentaEnvioEstadoLogistico.INCIDENCIA;
+
+    if (dispatched) {
+      if (envio.estadoLogistico !== VentaEnvioEstadoLogistico.INCIDENCIA) {
+        await this.prisma.ventaEnvio.update({
+          where: { id: ventaEnvioId },
+          data: {
+            estadoLogistico: VentaEnvioEstadoLogistico.INCIDENCIA,
+            shalomEstadoLabel: label?.slice(0, 80) ?? 'Guía anulada',
+          },
+        });
+        await this.prisma.ventaEnvioHistorial.create({
+          data: {
+            ventaEnvioId,
+            estadoAnterior: envio.estadoLogistico,
+            estadoNuevo: VentaEnvioEstadoLogistico.INCIDENCIA,
+            detalle:
+              `Shalom: ${label} (guía anulada después del despacho)`.slice(
+                0,
+                500,
+              ),
+          },
+        });
+      }
+      return;
+    }
+
+    const reference = [envio.shalomOrden, envio.shalomCodigo]
+      .filter(Boolean)
+      .join(' / ');
+
+    await this.prisma.ventaEnvio.update({
+      where: { id: ventaEnvioId },
+      data: {
+        shalomJobId: null,
+        shalomOrden: null,
+        shalomCodigo: null,
+        shalomMonto: null,
+        shalomEstado: null,
+        shalomEstadoLabel: null,
+        shalomProgreso: null,
+        shalomTimeline: Prisma.DbNull,
+        shalomRegistradoAt: null,
+        shalomSyncAt: new Date(),
+        shalomError: `Guía vencida${
+          reference ? ` (${reference})` : ''
+        }: genera una nueva guía en Shalom`.slice(0, 500),
+      },
+    });
+
+    await this.prisma.ventaEnvioHistorial.create({
+      data: {
+        ventaEnvioId,
+        estadoAnterior: envio.estadoLogistico,
+        estadoNuevo: envio.estadoLogistico,
+        detalle: `Guía vencida/anulada en Shalom${
+          reference ? `: ${reference}` : ''
+        }`.slice(0, 500),
+      },
+    });
   }
 
   /**

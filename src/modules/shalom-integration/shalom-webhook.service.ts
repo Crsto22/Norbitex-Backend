@@ -92,6 +92,10 @@ export class ShalomWebhookService {
         toEstadoLogistico(remote.status),
         body.data.steps,
       );
+
+      if (remote.status === 'ANULADO') {
+        await this.registration.markGuideCanceled(envio.id, remote.label);
+      }
       await this.integration.markSynced(empresaId);
       return { ok: true, applied: 'order.status_changed' };
     }

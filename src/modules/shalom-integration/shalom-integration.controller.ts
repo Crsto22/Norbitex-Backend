@@ -108,11 +108,7 @@ export class ShalomIntegrationController {
   @Post('sales/:publicId/shalom-sync')
   @RequireModule('shalom-pro')
   sync(@CurrentUser() user: JwtPayload, @Param('publicId') publicId: string) {
-    return this.registration.sync(
-      this.empresaId(user),
-      publicId,
-      BigInt(user.sub),
-    );
+    return this.registration.sync(this.empresaId(user), publicId);
   }
 
   /** Rastreo manual: consulta el estado actual en Shalom. */
