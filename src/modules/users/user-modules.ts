@@ -8,6 +8,11 @@ export const userModules = [
     label: 'Entregas y envíos',
     route: '/entregas-pendientes',
   },
+  {
+    key: 'shalom-pro',
+    label: 'Shalom PRO',
+    route: '/configuracion/shalom-pro',
+  },
   { key: 'clientes', label: 'Clientes', route: '/clientes' },
   {
     key: 'cuentas-cobrar',

@@ -350,6 +350,32 @@ enum VentaEnvioAgencia {
   OLVA
 }
 
+enum ShalomIntegrationStatus {
+  PENDING
+  ACTIVE
+  ERROR
+}
+
+/// Configuracion de la integracion con el microservicio shalom-service.
+model ShalomIntegration {
+  id                      BigInt                  @id @default(autoincrement())
+  empresaId               BigInt                  @unique @map("empresa_id")
+  tenantId                String                  @map("tenant_id") @db.Uuid
+  applicationId           String?                 @map("application_id") @db.Uuid
+  apiKeyEncrypted         String                  @map("api_key_encrypted") @db.Text
+  webhookSecretEncrypted  String?                 @map("webhook_secret_encrypted") @db.Text
+  defaultPackageType      String                  @default("PAQUETE S") @map("default_package_type") @db.VarChar(30)
+  status                  ShalomIntegrationStatus @default(PENDING)
+  lastError               String?                 @map("last_error") @db.VarChar(1000)
+  lastSyncedAt            DateTime?               @map("last_synced_at") @db.Timestamptz(6)
+  createdAt               DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@map("empresa_shalom_integration")
+}
+
 enum AgenciaCourierProveedor {
   SHALOM
   OLVA
@@ -558,6 +584,7 @@ model Empresa {
   despachoConfig             EmpresaDespachoConfig?
   recojoConfig               EmpresaRecojoConfig?
   shalomExportConfig         EmpresaShalomExportConfig?
+  shalomIntegration           ShalomIntegration?
   ventas                          Venta[]
   ventasCodigoInternoSecuencias   VentaCodigoInternoSecuencia[]
   notasCredito                    NotaCredito[]
@@ -2609,6 +2636,16 @@ model VentaEnvio {
   historial      VentaEnvioHistorial[]
   incidencias    VentaEnvioIncidencia[]
   etiquetasImpresas VentaEnvioEtiquetaImpresion[]
+
+  // Integracion con el microservicio shalom-service (registro individual)
+  shalomJobId       String?   @map("shalom_job_id") @db.Uuid
+  shalomOrden       String?   @map("shalom_orden") @db.VarChar(20)
+  shalomCodigo      String?   @map("shalom_codigo") @db.VarChar(10)
+  shalomMonto       Decimal?  @map("shalom_monto") @db.Decimal(10, 2)
+  shalomEstado      String?   @map("shalom_estado") @db.VarChar(20)
+  shalomError       String?   @map("shalom_error") @db.VarChar(500)
+  shalomRegistradoAt DateTime? @map("shalom_registrado_at") @db.Timestamptz(6)
+  shalomSyncAt      DateTime? @map("shalom_sync_at") @db.Timestamptz(6)
 
   @@index([estado])
   @@index([estadoLogistico])

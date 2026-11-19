@@ -37,6 +37,7 @@ import { PurchasesModule } from './modules/purchases/purchases.module';
 import { QuotationsModule } from './modules/quotations/quotations.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SalesModule } from './modules/sales/sales.module';
+import { ShalomIntegrationModule } from './modules/shalom-integration/shalom-integration.module';
 import { ShiftsModule } from './modules/shifts/shifts.module';
 import { SizesModule } from './modules/sizes/sizes.module';
 import { SunatConfigModule } from './modules/sunat-config/sunat-config.module';
@@ -100,6 +101,7 @@ import { validateEnvironment } from './config/environment';
     ProductsModule,
     PurchasesModule,
     SalesModule,
+    ShalomIntegrationModule,
     ShiftsModule,
     QuotationsModule,
     ReportsModule,
