@@ -363,8 +363,8 @@ export class ShalomRegistrationService {
   }
 
   /**
-   * Agencia de origen: la elegida en el modal (se recuerda) o la guardada
-   * previamente en los ajustes de exportacion.
+   * Agencia de origen: la elegida para este envio o, si no se envia,
+   * la configurada en Configuracion -> Shalom PRO (no se sobrescribe).
    */
   private async resolveOriginAgency(empresaId: bigint, requested?: string) {
     const config = await this.prisma.empresaShalomExportConfig.findUnique({
@@ -376,14 +376,6 @@ export class ShalomRegistrationService {
       throw new BadRequestException(
         'Configura la agencia de origen de Shalom antes de registrar',
       );
-    }
-
-    if (requested?.trim() && requested.trim() !== config?.origen?.trim()) {
-      await this.prisma.empresaShalomExportConfig.upsert({
-        where: { empresaId },
-        create: { empresaId, origen: origin },
-        update: { origen: origin },
-      });
     }
 
     return origin;

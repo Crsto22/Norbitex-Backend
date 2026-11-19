@@ -50,8 +50,8 @@ Con la cuenta conectada, cada envío por Shalom muestra el botón **Registrar en
 | `POST` | `/sales/:publicId/shalom-sync` | sincroniza el resultado del job (fallback del webhook) |
 
 Requisitos: cuenta `ACTIVE`, envío `recibido`, agencia destino válida y agencia de origen
-configurada (se elige en el modal la primera vez y queda guardada en
-`empresa_shalom_export_config.origen`).
+configurada en **Configuración → Shalom PRO** (`empresa_shalom_export_config.origen`). El modal
+permite cambiar el origen para un envío puntual sin sobrescribir la configuración.
 
 Al confirmarse la orden, el envío se **despacha automáticamente**: se crea una `VentaEntrega`
 tipo COURIER con `numeroConstancia = orden`, se incrementa `cantidadEntregada` y el envío pasa a
