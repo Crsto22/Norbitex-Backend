@@ -1858,15 +1858,82 @@ export class SalesService {
     publicId: string,
     dto: DispatchToCourierDto,
   ) {
-    if (!dto.detalles.length) {
+    const entrega = await this.dispatchCourierEntrega({
+      where: this.saleAccessWhere(empresaId, scope, publicId),
+      detalles: dto.detalles,
+      actorId: scope.userId,
+      numeroConstancia: dto.numeroConstancia,
+      notas: dto.notas,
+    });
+
+    return {
+      entrega: { publicId: entrega.publicId },
+      venta: await this.findOne(empresaId, scope, publicId),
+    };
+  }
+
+  /**
+   * Despacha automaticamente un envio ya registrado en Shalom.
+   * Idempotente: si el envio ya salio de pendiente no hace nada.
+   */
+  async dispatchShalomEnvio(
+    empresaId: bigint,
+    publicId: string,
+    options: { orden: string; actorId?: bigint | null },
+  ) {
+    const venta = await this.prisma.venta.findFirst({
+      where: { empresaId, publicId },
+      include: { envio: true, detalles: true },
+    });
+    if (!venta?.envio) return null;
+
+    const yaDespachado =
+      venta.envio.estadoLogistico === VentaEnvioEstadoLogistico.EN_TRANSITO ||
+      venta.envio.estadoLogistico === VentaEnvioEstadoLogistico.ENTREGADO ||
+      venta.envio.estadoLogistico === VentaEnvioEstadoLogistico.INCIDENCIA;
+
+    if (yaDespachado) return null;
+
+    const detalles = venta.detalles
+      .map((detail) => ({
+        ventaDetalleId: detail.id.toString(),
+        cantidad: Math.max(0, detail.cantidad - detail.cantidadEntregada),
+      }))
+      .filter((item) => item.cantidad > 0);
+
+    if (!detalles.length) return null;
+
+    const entrega = await this.dispatchCourierEntrega({
+      where: { empresaId, publicId },
+      detalles,
+      actorId: options.actorId ?? null,
+      numeroConstancia: options.orden,
+      notas: 'Despacho automatico por registro en Shalom',
+    });
+
+    return { entregaPublicId: entrega.publicId };
+  }
+
+  /**
+   * Transaccion de despacho al courier compartida por el endpoint HTTP y por
+   * el registro automatico de Shalom (donde no siempre hay usuario).
+   */
+  private async dispatchCourierEntrega(input: {
+    where: Prisma.VentaWhereInput;
+    detalles: Array<{ ventaDetalleId: string; cantidad: number }>;
+    actorId: bigint | null;
+    numeroConstancia?: string | null;
+    notas?: string | null;
+  }) {
+    if (!input.detalles.length) {
       throw new BadRequestException('Seleccione al menos un producto');
     }
 
     const now = new Date();
-    const result = await this.prisma.$transaction(
+    return this.prisma.$transaction(
       async (tx) => {
         const venta = await tx.venta.findFirst({
-          where: this.saleAccessWhere(empresaId, scope, publicId),
+          where: input.where,
           include: { detalles: true, envio: true },
         });
         if (!venta) throw new NotFoundException('Venta no encontrada');
@@ -1905,7 +1972,7 @@ export class SalesService {
           venta.detalles.map((detail) => [detail.id.toString(), detail]),
         );
         const requested = new Map<string, number>();
-        for (const item of dto.detalles) {
+        for (const item of input.detalles) {
           requested.set(
             item.ventaDetalleId,
             (requested.get(item.ventaDetalleId) ?? 0) + item.cantidad,
@@ -1927,10 +1994,10 @@ export class SalesService {
         const entrega = await tx.ventaEntrega.create({
           data: {
             ventaId: venta.id,
-            entregadoPorId: scope.userId,
+            entregadoPorId: input.actorId ?? null,
             tipo: VentaEntregaTipo.COURIER,
-            numeroConstancia: dto.numeroConstancia?.trim() || null,
-            notas: dto.notas?.trim() || null,
+            numeroConstancia: input.numeroConstancia?.trim() || null,
+            notas: input.notas?.trim() || null,
             detalles: {
               create: Array.from(requested.entries()).map(
                 ([ventaDetalleId, cantidad]) => ({
@@ -1980,8 +2047,8 @@ export class SalesService {
             ventaEnvioId: venta.envio.id,
             estadoAnterior: venta.envio.estadoLogistico,
             estadoNuevo: VentaEnvioEstadoLogistico.EN_TRANSITO,
-            detalle: dto.notas?.trim() || 'Productos entregados al courier',
-            usuarioId: scope.userId,
+            detalle: input.notas?.trim() || 'Productos entregados al courier',
+            usuarioId: input.actorId ?? null,
           },
         });
 
@@ -1989,11 +2056,6 @@ export class SalesService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
-
-    return {
-      entrega: { publicId: result.publicId },
-      venta: await this.findOne(empresaId, scope, publicId),
-    };
   }
 
   async updateShippingStatus(
@@ -3062,6 +3124,14 @@ export class SalesService {
             recibidoAt: venta.envio.recibidoAt?.toISOString() ?? null,
             despachadoAt: venta.envio.despachadoAt?.toISOString() ?? null,
             entregadoAt: venta.envio.entregadoAt?.toISOString() ?? null,
+            shalomJobId: venta.envio.shalomJobId,
+            shalomEstado: venta.envio.shalomEstado,
+            shalomOrden: venta.envio.shalomOrden,
+            shalomCodigo: venta.envio.shalomCodigo,
+            shalomMonto: venta.envio.shalomMonto?.toString() ?? null,
+            shalomError: venta.envio.shalomError,
+            shalomRegistradoAt:
+              venta.envio.shalomRegistradoAt?.toISOString() ?? null,
             incidencias: venta.envio.incidencias.map((incidencia) => ({
               publicId: incidencia.publicId,
               motivo: incidencia.motivo,

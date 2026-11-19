@@ -6,6 +6,7 @@ import {
   IsString,
   IsUUID,
   Matches,
+  MaxLength,
   MinLength,
 } from 'class-validator';
 
@@ -56,6 +57,35 @@ export class RegisterShalomDto {
   @IsOptional()
   @IsBoolean()
   cashOnDelivery?: boolean;
+
+  @IsOptional()
+  @IsIn(['DNI', 'CE'])
+  documentType?: 'DNI' | 'CE';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  recipientName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  recipientPaternalLastName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  recipientMaternalLastName?: string;
+
+  @IsOptional()
+  @Matches(/^\d{6,12}$/, { message: 'recipientPhone invalido' })
+  recipientPhone?: string;
+
+  /** Agencia de origen elegida en el modal; se recuerda para la empresa. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  originAgency?: string;
 }
 
 /** Conecta la cuenta de Shalom PRO de la empresa. */

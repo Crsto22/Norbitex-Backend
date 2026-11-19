@@ -38,6 +38,25 @@ SHALOM_SERVICE_TIMEOUT_MS=90000
 (código `<slug>-<ruc>`), registra el webhook `order.registered` y guarda cifrados la API key y el
 secreto. **La contraseña de Shalom no se guarda en Nuvex.**
 
+## Registro individual desde "Entregas y envíos"
+
+Con la cuenta conectada, cada envío por Shalom muestra el botón **Registrar en Shalom**
+(solo OWNER/ADMIN ven la conexión; cualquier usuario con el módulo `shalom-pro` registra).
+
+| Método | Ruta | Uso |
+| --- | --- | --- |
+| `POST` | `/sales/:publicId/shalom-register` | encola el registro (job asíncrono) |
+| `GET` | `/sales/:publicId/shalom` | estado del registro |
+| `POST` | `/sales/:publicId/shalom-sync` | sincroniza el resultado del job (fallback del webhook) |
+
+Requisitos: cuenta `ACTIVE`, envío `recibido`, agencia destino válida y agencia de origen
+configurada (se elige en el modal la primera vez y queda guardada en
+`empresa_shalom_export_config.origen`).
+
+Al confirmarse la orden, el envío se **despacha automáticamente**: se crea una `VentaEntrega`
+tipo COURIER con `numeroConstancia = orden`, se incrementa `cantidadEntregada` y el envío pasa a
+`EN_TRANSITO`. El registro es uno por venta (una guía por envío).
+
 ## Configuracion por empresa
 
 `PUT /company/shalom-config` (requiere módulo `empresa`):

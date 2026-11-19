@@ -65,12 +65,15 @@ export class ShalomIntegrationController {
 
   @Put('company/shalom-config')
   @RequireModule('empresa')
-  updateConfig(@CurrentUser() user: JwtPayload, @Body() dto: UpdateShalomConfigDto) {
+  updateConfig(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateShalomConfigDto,
+  ) {
     return this.integration.updateConfig(this.empresaId(user), dto);
   }
 
   @Post('sales/:publicId/shalom-register')
-  @RequireModule('entregas-pendientes')
+  @RequireModule('shalom-pro')
   register(
     @CurrentUser() user: JwtPayload,
     @Param('publicId') publicId: string,
@@ -80,15 +83,19 @@ export class ShalomIntegrationController {
   }
 
   @Get('sales/:publicId/shalom')
-  @RequireModule('entregas-pendientes')
+  @RequireModule('shalom-pro')
   status(@CurrentUser() user: JwtPayload, @Param('publicId') publicId: string) {
     return this.registration.status(this.empresaId(user), publicId);
   }
 
   @Post('sales/:publicId/shalom-sync')
-  @RequireModule('entregas-pendientes')
+  @RequireModule('shalom-pro')
   sync(@CurrentUser() user: JwtPayload, @Param('publicId') publicId: string) {
-    return this.registration.sync(this.empresaId(user), publicId);
+    return this.registration.sync(
+      this.empresaId(user),
+      publicId,
+      BigInt(user.sub),
+    );
   }
 
   private empresaId(user: JwtPayload) {
@@ -100,7 +107,9 @@ export class ShalomIntegrationController {
 
   private assertManager(user: JwtPayload) {
     if (!user.roles?.includes('OWNER') && !user.roles?.includes('ADMIN')) {
-      throw new ForbiddenException('Solo el propietario o un administrador puede conectar Shalom');
+      throw new ForbiddenException(
+        'Solo el propietario o un administrador puede conectar Shalom',
+      );
     }
   }
 }
