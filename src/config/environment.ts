@@ -68,7 +68,7 @@ export function validateEnvironment(config: Record<string, unknown>) {
     errors.push('FRONTEND_URL debe usar HTTPS');
   }
 
-  for (const key of ['BILLING_API_URL', 'BILLING_WEBHOOK_PUBLIC_URL', 'SHALOM_SERVICE_URL']) {
+  for (const key of ['BILLING_API_URL', 'BILLING_WEBHOOK_PUBLIC_URL', 'SHALOM_SERVICE_URL', 'SHALOM_WEBHOOK_PUBLIC_URL']) {
     const value = text(config[key]);
     if (value && !isHttpsUrl(value)) {
       errors.push(`${key} debe usar HTTPS`);

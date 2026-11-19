@@ -5,11 +5,38 @@ actualizado por webhooks.
 
 ## Variables de entorno
 
-| Variable | Uso |
-| --- | --- |
-| `SHALOM_SERVICE_URL` | URL base del microservicio (ej. `http://127.0.0.1:4100`). En producción debe ser HTTPS |
-| `SHALOM_SERVICE_TIMEOUT_MS` | timeout de las llamadas (default 60000) |
-| `SUNAT_SECRETS_ENCRYPTION_KEY` | cifra la API key y el secreto de webhook por empresa |
+| Variable | Obligatoria | Uso |
+| --- | --- | --- |
+| `SHALOM_SERVICE_URL` | sí | URL base del microservicio (ej. `https://shalom-api.nuvex.pe`) |
+| `SHALOM_SERVICE_ADMIN_KEY` | sí (para conectar empresas) | `ADMIN_TOKEN` del microservicio; crea empresa/app/API key/webhook |
+| `SHALOM_WEBHOOK_PUBLIC_URL` | recomendada | URL pública del backend Nuvex (ej. `https://api.nuvex.pe`). Sin ella no se registra el webhook |
+| `SHALOM_SERVICE_TIMEOUT_MS` | opcional | timeout de las llamadas (default 60000) |
+| `SUNAT_SECRETS_ENCRYPTION_KEY` | sí | cifra la API key y el secreto de webhook por empresa |
+
+Bloque listo para pegar en el `.env`:
+
+```ini
+SHALOM_SERVICE_URL=https://shalom-api.nuvex.pe
+SHALOM_SERVICE_ADMIN_KEY=<ADMIN_TOKEN del microservicio>
+SHALOM_WEBHOOK_PUBLIC_URL=https://api.nuvex.pe
+SHALOM_SERVICE_TIMEOUT_MS=90000
+```
+
+> `SHALOM_SERVICE_ADMIN_KEY` debe ser el token **rotado**; cualquier token compartido en un chat
+> se considera comprometido. Cambiarlo no afecta a las empresas ya conectadas (solo se usa al
+> provisionar o revalidar).
+
+## Conexion por empresa (modulo `shalom-pro`)
+
+| Método | Ruta | Quién |
+| --- | --- | --- |
+| `GET` | `/company/shalom-pro` | OWNER / ADMIN con módulo `shalom-pro` |
+| `POST` | `/company/shalom-pro/provision` | OWNER / ADMIN |
+| `POST` | `/company/shalom-pro/validate` | OWNER / ADMIN |
+
+`provision` recibe `{ username, password, packageType? }`, crea el tenant en el microservicio
+(código `<slug>-<ruc>`), registra el webhook `order.registered` y guarda cifrados la API key y el
+secreto. **La contraseña de Shalom no se guarda en Nuvex.**
 
 ## Configuracion por empresa
 
