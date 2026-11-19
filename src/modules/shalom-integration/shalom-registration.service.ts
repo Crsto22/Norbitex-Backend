@@ -4,7 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { VentaEnvioEstadoLogistico } from '@prisma/client';
+import { Prisma, VentaEnvioEstadoLogistico } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { SalesService } from '../sales/sales.service';
@@ -46,7 +46,12 @@ export class ShalomRegistrationService {
   ) {}
 
   /** Encola el registro de la guia en shalom-service. */
-  async register(empresaId: bigint, publicId: string, dto: RegisterShalomDto) {
+  async register(
+    empresaId: bigint,
+    publicId: string,
+    dto: RegisterShalomDto,
+    usuarioId?: bigint | null,
+  ) {
     const venta = await this.integration.requireEnvio(empresaId, publicId);
     const envio = venta.envio!;
 
@@ -162,6 +167,17 @@ export class ShalomRegistrationService {
           shalomSyncAt: new Date(),
         },
       });
+
+      await this.updateRecipientData(
+        envio,
+        {
+          documento: recipientDocument,
+          tipoDocumento: documentType,
+          nombre: composeFullName(dto),
+          celular: recipientPhone ?? null,
+        },
+        usuarioId ?? null,
+      );
 
       return { alreadyRegistered: false, jobId: job.jobId, status: job.status };
     } catch (error) {
@@ -363,6 +379,82 @@ export class ShalomRegistrationService {
   }
 
   /**
+   * Guarda en el envio los datos corregidos en el modal de Shalom.
+   * Solo destinatario (documento, tipo, nombres, celular) y deja historial.
+   */
+  private async updateRecipientData(
+    envio: {
+      id: bigint;
+      codigoPublico: string;
+      dni: string | null;
+      tipoDocumento: string;
+      nombreCompleto: string | null;
+      celular: string | null;
+      estadoLogistico: VentaEnvioEstadoLogistico;
+    },
+    data: {
+      documento: string;
+      tipoDocumento: string;
+      nombre: string | null;
+      celular: string | null;
+    },
+    usuarioId: bigint | null,
+  ) {
+    const updates: Prisma.VentaEnvioUpdateInput = {};
+    const changed: string[] = [];
+
+    if (data.documento && data.documento !== envio.dni) {
+      updates.dni = data.documento;
+      changed.push('documento');
+    }
+    if (data.tipoDocumento && data.tipoDocumento !== envio.tipoDocumento) {
+      updates.tipoDocumento = data.tipoDocumento;
+      changed.push('tipo de documento');
+    }
+    if (data.nombre && data.nombre !== envio.nombreCompleto) {
+      updates.nombreCompleto = data.nombre.slice(0, 150);
+      changed.push('nombres');
+    }
+    if (data.celular && data.celular !== envio.celular) {
+      updates.celular = data.celular;
+      changed.push('celular');
+    }
+
+    if (changed.length === 0) return;
+
+    try {
+      await this.prisma.ventaEnvio.update({
+        where: { id: envio.id },
+        data: updates,
+      });
+
+      await this.prisma.ventaEnvioHistorial.create({
+        data: {
+          ventaEnvioId: envio.id,
+          estadoAnterior: envio.estadoLogistico,
+          estadoNuevo: envio.estadoLogistico,
+          detalle:
+            `Datos del destinatario corregidos desde el registro Shalom: ${changed.join(', ')}`.slice(
+              0,
+              500,
+            ),
+          usuarioId,
+        },
+      });
+
+      this.logger.log(
+        `Datos del envio ${envio.codigoPublico} actualizados desde el registro Shalom (${changed.join(', ')})`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `No se pudieron actualizar los datos del envio ${envio.codigoPublico}: ${
+          error instanceof Error ? error.message : 'error desconocido'
+        }`,
+      );
+    }
+  }
+
+  /**
    * Agencia de origen: la elegida para este envio o, si no se envia,
    * la configurada en Configuracion -> Shalom PRO (no se sobrescribe).
    */
@@ -384,6 +476,22 @@ export class ShalomRegistrationService {
 
 function digits(value?: string | null) {
   return (value ?? '').replace(/\D/g, '');
+}
+
+/** Une nombres y apellidos del modal en el nombre completo del envio. */
+function composeFullName(dto: RegisterShalomDto) {
+  const value = [
+    dto.recipientName,
+    dto.recipientPaternalLastName,
+    dto.recipientMaternalLastName,
+  ]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return value || null;
 }
 
 /** Shalom solo acepta celulares peruanos de 9 digitos (sin +51). */

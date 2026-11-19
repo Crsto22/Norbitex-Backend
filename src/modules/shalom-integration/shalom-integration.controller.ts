@@ -83,7 +83,12 @@ export class ShalomIntegrationController {
     @Param('publicId') publicId: string,
     @Body() dto: RegisterShalomDto,
   ) {
-    return this.registration.register(this.empresaId(user), publicId, dto);
+    return this.registration.register(
+      this.empresaId(user),
+      publicId,
+      dto,
+      BigInt(user.sub),
+    );
   }
 
   /** Busqueda de DNI desde el modal de registro (consume 1 consulta del plan). */
