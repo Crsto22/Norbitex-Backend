@@ -90,7 +90,8 @@ export class ShalomRegistrationService {
     // El job termino pero la orden no se guardo (webhook perdido): evitar duplicar.
     if (
       envio.shalomJobId &&
-      (envio.shalomEstado === 'COMPLETED' || envio.shalomEstado === 'REGISTRADO')
+      (envio.shalomEstado === 'COMPLETED' ||
+        envio.shalomEstado === 'REGISTRADO')
     ) {
       throw new BadRequestException(
         'El registro ya se completo en Shalom. Actualiza la lista para ver la orden.',
@@ -112,7 +113,7 @@ export class ShalomRegistrationService {
       dto.originAgency,
     );
     const documentType = dto.documentType ?? envio.tipoDocumento ?? 'DNI';
-    const recipientPhone = digits(dto.recipientPhone ?? envio.celular);
+    const recipientPhone = normalizePhone(dto.recipientPhone ?? envio.celular);
 
     const payload = {
       externalRef: envio.codigoPublico,
@@ -124,7 +125,7 @@ export class ShalomRegistrationService {
         dto.recipientPaternalLastName?.trim() || undefined,
       recipientMaternalLastName:
         dto.recipientMaternalLastName?.trim() || undefined,
-      recipientPhone: recipientPhone.length >= 6 ? recipientPhone : undefined,
+      recipientPhone,
       originAgency,
       destinationAgency,
       packageType: dto.packageType ?? credentials.defaultPackageType,
@@ -383,4 +384,14 @@ export class ShalomRegistrationService {
 
 function digits(value?: string | null) {
   return (value ?? '').replace(/\D/g, '');
+}
+
+/** Shalom solo acepta celulares peruanos de 9 digitos (sin +51). */
+function normalizePhone(value?: string | null) {
+  const digitsValue = digits(value);
+  const local =
+    digitsValue.length > 9 && digitsValue.startsWith('51')
+      ? digitsValue.slice(2)
+      : digitsValue;
+  return /^9\d{8}$/.test(local) ? local : undefined;
 }
