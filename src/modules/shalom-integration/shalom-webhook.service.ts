@@ -22,6 +22,8 @@ type WebhookBody = {
     status?: string;
     label?: string;
     progress?: number;
+    message?: string | null;
+    steps?: Array<{ nombre: string; activo: boolean }>;
   };
 };
 
@@ -88,6 +90,7 @@ export class ShalomWebhookService {
         envio.id,
         remote,
         toEstadoLogistico(remote.status),
+        body.data.steps,
       );
       await this.integration.markSynced(empresaId);
       return { ok: true, applied: 'order.status_changed' };

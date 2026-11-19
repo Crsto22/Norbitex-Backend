@@ -115,6 +115,14 @@ export class ShalomIntegrationController {
     );
   }
 
+  /** Rastreo manual: consulta el estado actual en Shalom. */
+  @Post('sales/:publicId/shalom-track')
+  @RequireModule('shalom-pro')
+  @Throttle(rateLimits.reports)
+  track(@CurrentUser() user: JwtPayload, @Param('publicId') publicId: string) {
+    return this.registration.track(this.empresaId(user), publicId);
+  }
+
   private empresaId(user: JwtPayload) {
     if (!user.empresaId) {
       throw new UnauthorizedException('El usuario no tiene empresa activa');

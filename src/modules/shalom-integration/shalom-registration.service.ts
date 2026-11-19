@@ -11,6 +11,7 @@ import { SalesService } from '../sales/sales.service';
 import { resolveShalomAgencyName } from './shalom-agency';
 import { ShalomApiClientService } from './shalom-api-client.service';
 import { ShalomIntegrationService } from './shalom-integration.service';
+import { toEstadoLogistico, type ShalomRemoteStatus } from './shalom-status';
 import type { RegisterShalomDto } from './dto/shalom-config.dto';
 
 type JobResponse = {
@@ -24,6 +25,17 @@ type JobResponse = {
     monto?: number | null;
   } | null;
 };
+
+type TrackingResponse = {
+  status: ShalomRemoteStatus;
+  label?: string | null;
+  estado?: string | null;
+  progreso?: number;
+  pasos?: Array<{ nombre: string; activo: boolean }>;
+};
+
+/** Evita scrapear Shalom en cada clic del boton de actualizar. */
+const TRACKING_COOLDOWN_MS = 60_000;
 
 /** Estados terminales de un job; cualquier otro significa "en proceso". */
 const TERMINAL_JOB_STATES = new Set([
@@ -202,11 +214,60 @@ export class ShalomRegistrationService {
       codigo: envio.shalomCodigo,
       monto: envio.shalomMonto,
       estado: envio.shalomEstado,
+      estadoLabel: envio.shalomEstadoLabel,
+      progreso: envio.shalomProgreso,
+      timeline: envio.shalomTimeline,
       error: envio.shalomError,
       registradoAt: envio.shalomRegistradoAt,
       syncAt: envio.shalomSyncAt,
       estadoLogistico: envio.estadoLogistico,
     };
+  }
+
+  /**
+   * Consulta el estado en vivo en Shalom (rastreo) y lo aplica al envio.
+   * Tiene un cooldown para no scrapear la pagina en cada clic.
+   */
+  async track(empresaId: bigint, publicId: string) {
+    const venta = await this.integration.requireEnvio(empresaId, publicId);
+    const envio = venta.envio!;
+
+    if (!envio.shalomOrden) {
+      throw new BadRequestException('El envio aun no tiene orden de Shalom');
+    }
+
+    const lastSync = envio.shalomSyncAt?.getTime() ?? 0;
+    if (Date.now() - lastSync < TRACKING_COOLDOWN_MS) {
+      return this.status(empresaId, publicId);
+    }
+
+    const credentials = await this.integration.requireCredentials(empresaId);
+    const tracking = await this.client.track<TrackingResponse>(
+      envio.shalomOrden,
+      envio.shalomCodigo ?? undefined,
+      credentials.apiKey,
+    );
+
+    if (!tracking?.status) {
+      throw new BadRequestException(
+        'Shalom no devolvio un estado para esta guia',
+      );
+    }
+
+    await this.applyTrackingStatus(
+      envio.id,
+      {
+        status: tracking.status,
+        label: tracking.label ?? tracking.estado ?? tracking.status,
+        progress: tracking.progreso ?? 0,
+      },
+      toEstadoLogistico(tracking.status),
+      tracking.pasos,
+    );
+
+    await this.integration.markSynced(empresaId);
+
+    return this.status(empresaId, publicId);
   }
 
   /** Sincroniza el resultado del job cuando el webhook no llego. */
@@ -302,6 +363,7 @@ export class ShalomRegistrationService {
     ventaEnvioId: bigint,
     remote: { status: string; label: string; progress: number },
     estadoLogistico: VentaEnvioEstadoLogistico | null,
+    timeline?: Array<{ nombre: string; activo: boolean }> | null,
   ) {
     const envio = await this.prisma.ventaEnvio.findUnique({
       where: { id: ventaEnvioId },
@@ -310,8 +372,14 @@ export class ShalomRegistrationService {
 
     const data: Record<string, unknown> = {
       shalomEstado: remote.status,
+      shalomEstadoLabel: remote.label?.slice(0, 80) ?? null,
+      shalomProgreso: remote.progress ?? null,
       shalomSyncAt: new Date(),
     };
+
+    if (timeline && timeline.length > 0) {
+      data.shalomTimeline = timeline;
+    }
 
     if (estadoLogistico && estadoLogistico !== envio.estadoLogistico) {
       data.estadoLogistico = estadoLogistico;

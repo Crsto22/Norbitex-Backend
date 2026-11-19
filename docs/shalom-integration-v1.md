@@ -48,6 +48,7 @@ Con la cuenta conectada, cada envío por Shalom muestra el botón **Registrar en
 | `POST` | `/sales/:publicId/shalom-register` | encola el registro (job asíncrono) |
 | `GET` | `/sales/:publicId/shalom` | estado del registro |
 | `POST` | `/sales/:publicId/shalom-sync` | sincroniza el resultado del job (fallback del webhook) |
+| `POST` | `/sales/:publicId/shalom-track` | rastreo manual: consulta el estado actual en Shalom (cooldown 60 s) |
 | `GET` | `/sales/dni/:dni` | búsqueda RENIEC desde el modal (consume 1 consulta del plan) |
 
 Requisitos: cuenta `ACTIVE`, envío `recibido`, agencia destino válida y agencia de origen
@@ -57,6 +58,22 @@ permite cambiar el origen para un envío puntual sin sobrescribir la configuraci
 Al confirmarse la orden, el envío se **despacha automáticamente**: se crea una `VentaEntrega`
 tipo COURIER con `numeroConstancia = orden`, se incrementa `cantidadEntregada` y el envío pasa a
 `EN_TRANSITO`. El registro es uno por venta (una guía por envío).
+
+## Rastreo del estado
+
+El microservicio rastrea las órdenes activas y emite `order.status_changed`
+(`status`, `label`, `progress`, `message`, `steps`). Nuvex guarda `shalom_estado_label`,
+`shalom_progreso` y `shalom_timeline` para dibujar el avance en la fila.
+
+Para que avance solo, en el microservicio:
+
+```ini
+SHALOM_TRACKING_ENABLED=true
+SHALOM_TRACKING_INTERVAL_MINUTES=45
+```
+
+El botón de actualizar del envío llama a `POST /sales/:publicId/shalom-track`, que consulta
+Shalom en vivo (10-20 s) con un cooldown de 60 s por envío.
 
 ## Configuracion por empresa
 

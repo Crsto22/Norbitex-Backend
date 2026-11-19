@@ -2643,6 +2643,9 @@ model VentaEnvio {
   shalomCodigo      String?   @map("shalom_codigo") @db.VarChar(10)
   shalomMonto       Decimal?  @map("shalom_monto") @db.Decimal(10, 2)
   shalomEstado      String?   @map("shalom_estado") @db.VarChar(20)
+  shalomEstadoLabel String?   @map("shalom_estado_label") @db.VarChar(80)
+  shalomProgreso    Int?      @map("shalom_progreso") @db.SmallInt
+  shalomTimeline    Json?     @map("shalom_timeline")
   shalomError       String?   @map("shalom_error") @db.VarChar(500)
   shalomRegistradoAt DateTime? @map("shalom_registrado_at") @db.Timestamptz(6)
   shalomSyncAt      DateTime? @map("shalom_sync_at") @db.Timestamptz(6)
