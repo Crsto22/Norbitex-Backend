@@ -55,6 +55,39 @@ export class ShalomApiClientService {
     return this.request<T>(`/v1/tracking${query}`, apiKey);
   }
 
+  // --- Administracion (SHALOM_SERVICE_ADMIN_KEY) ---
+
+  createTenant<T>(adminKey: string, payload: unknown) {
+    return this.request<T>('/v1/admin/tenants', adminKey, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  updateCredentials<T>(adminKey: string, tenantId: string, payload: unknown) {
+    return this.request<T>(`/v1/admin/tenants/${tenantId}/credentials?validate=true`, adminKey, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  validateCredentials<T>(adminKey: string, tenantId: string) {
+    return this.request<T>(`/v1/admin/tenants/${tenantId}/validate-credentials`, adminKey, {
+      method: 'POST',
+    });
+  }
+
+  createWebhook<T>(adminKey: string, applicationId: string, payload: unknown) {
+    return this.request<T>(`/v1/admin/applications/${applicationId}/webhooks`, adminKey, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  listSessions<T>(adminKey: string) {
+    return this.request<T>('/v1/admin/sessions', adminKey);
+  }
+
   private async request<T>(path: string, token: string, init?: RequestInit) {
     const headers = new Headers(init?.headers);
     headers.set('authorization', `Bearer ${token}`);

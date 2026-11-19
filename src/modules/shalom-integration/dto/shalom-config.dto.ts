@@ -1,4 +1,13 @@
-import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, Matches, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsEmail,
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MinLength,
+} from 'class-validator';
 
 export const SHALOM_PACKAGE_TYPES = [
   'SOBRE',
@@ -47,4 +56,18 @@ export class RegisterShalomDto {
   @IsOptional()
   @IsBoolean()
   cashOnDelivery?: boolean;
+}
+
+/** Conecta la cuenta de Shalom PRO de la empresa. */
+export class ProvisionShalomProDto {
+  @IsEmail()
+  username!: string;
+
+  @IsString()
+  @MinLength(6)
+  password!: string;
+
+  @IsOptional()
+  @IsIn(SHALOM_PACKAGE_TYPES)
+  packageType?: (typeof SHALOM_PACKAGE_TYPES)[number];
 }

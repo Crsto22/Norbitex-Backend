@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Post,
@@ -13,8 +14,13 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequireModule } from '../../common/decorators/require-module.decorator';
 import { ModuleAccessGuard } from '../../common/guards/module-access.guard';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
-import { RegisterShalomDto, UpdateShalomConfigDto } from './dto/shalom-config.dto';
+import {
+  ProvisionShalomProDto,
+  RegisterShalomDto,
+  UpdateShalomConfigDto,
+} from './dto/shalom-config.dto';
 import { ShalomIntegrationService } from './shalom-integration.service';
+import { ShalomProvisioningService } from './shalom-provisioning.service';
 import { ShalomRegistrationService } from './shalom-registration.service';
 
 @UseGuards(ModuleAccessGuard)
@@ -22,8 +28,34 @@ import { ShalomRegistrationService } from './shalom-registration.service';
 export class ShalomIntegrationController {
   constructor(
     private readonly integration: ShalomIntegrationService,
+    private readonly provisioning: ShalomProvisioningService,
     private readonly registration: ShalomRegistrationService,
   ) {}
+
+  // --- Conexion de la cuenta (modulo shalom-pro) ---
+
+  @Get('company/shalom-pro')
+  @RequireModule('shalom-pro')
+  shalomProStatus(@CurrentUser() user: JwtPayload) {
+    return this.provisioning.status(this.empresaId(user));
+  }
+
+  @Post('company/shalom-pro/provision')
+  @RequireModule('shalom-pro')
+  shalomProProvision(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ProvisionShalomProDto,
+  ) {
+    this.assertManager(user);
+    return this.provisioning.provision(this.empresaId(user), dto);
+  }
+
+  @Post('company/shalom-pro/validate')
+  @RequireModule('shalom-pro')
+  shalomProValidate(@CurrentUser() user: JwtPayload) {
+    this.assertManager(user);
+    return this.provisioning.validate(this.empresaId(user));
+  }
 
   @Get('company/shalom-config')
   @RequireModule('empresa')
@@ -64,5 +96,11 @@ export class ShalomIntegrationController {
       throw new UnauthorizedException('El usuario no tiene empresa activa');
     }
     return BigInt(user.empresaId);
+  }
+
+  private assertManager(user: JwtPayload) {
+    if (!user.roles?.includes('OWNER') && !user.roles?.includes('ADMIN')) {
+      throw new ForbiddenException('Solo el propietario o un administrador puede conectar Shalom');
+    }
   }
 }

@@ -5,6 +5,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { ShalomApiClientService } from './shalom-api-client.service';
 import { ShalomIntegrationController } from './shalom-integration.controller';
 import { ShalomIntegrationService } from './shalom-integration.service';
+import { ShalomProvisioningService } from './shalom-provisioning.service';
 import { ShalomRegistrationService } from './shalom-registration.service';
 import { ShalomWebhookController } from './shalom-webhook.controller';
 import { ShalomWebhookService } from './shalom-webhook.service';
@@ -16,12 +17,14 @@ import { ShalomWebhookService } from './shalom-webhook.service';
     SecretsCryptoService,
     ShalomApiClientService,
     ShalomIntegrationService,
+    ShalomProvisioningService,
     ShalomRegistrationService,
     ShalomWebhookService,
   ],
   exports: [
     ShalomApiClientService,
     ShalomIntegrationService,
+    ShalomProvisioningService,
     ShalomRegistrationService,
   ],
 })
