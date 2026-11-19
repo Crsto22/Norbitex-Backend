@@ -3130,6 +3130,7 @@ export class SalesService {
             shalomProgreso: venta.envio.shalomProgreso,
             shalomTimeline: venta.envio.shalomTimeline,
             shalomOrden: venta.envio.shalomOrden,
+            shalomOrigen: venta.envio.shalomOrigen,
             shalomCodigo: venta.envio.shalomCodigo,
             shalomMonto: venta.envio.shalomMonto?.toString() ?? null,
             shalomError: venta.envio.shalomError,

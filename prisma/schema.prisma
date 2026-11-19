@@ -2640,6 +2640,7 @@ model VentaEnvio {
   // Integracion con el microservicio shalom-service (registro individual)
   shalomJobId       String?   @map("shalom_job_id") @db.Uuid
   shalomOrden       String?   @map("shalom_orden") @db.VarChar(20)
+  shalomOrigen      String?   @map("shalom_origen") @db.VarChar(120)
   shalomCodigo      String?   @map("shalom_codigo") @db.VarChar(10)
   shalomMonto       Decimal?  @map("shalom_monto") @db.Decimal(10, 2)
   shalomEstado      String?   @map("shalom_estado") @db.VarChar(20)

@@ -175,6 +175,7 @@ export class ShalomRegistrationService {
         data: {
           shalomJobId: job.jobId,
           shalomEstado: job.status,
+          shalomOrigen: originAgency,
           shalomError: null,
           shalomSyncAt: new Date(),
         },
@@ -211,6 +212,8 @@ export class ShalomRegistrationService {
     return {
       jobId: envio.shalomJobId,
       orden: envio.shalomOrden,
+      origen: envio.shalomOrigen,
+      destino: envio.agenciaNombre,
       codigo: envio.shalomCodigo,
       monto: envio.shalomMonto,
       estado: envio.shalomEstado,
