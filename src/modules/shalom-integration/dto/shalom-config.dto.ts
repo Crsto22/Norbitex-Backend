@@ -62,6 +62,11 @@ export class RegisterShalomDto {
   @IsIn(['DNI', 'CE'])
   documentType?: 'DNI' | 'CE';
 
+  /** Documento editado en el modal (si el cliente lo escribio mal en la venta). */
+  @IsOptional()
+  @Matches(/^\d{6,12}$/, { message: 'recipientDocument invalido' })
+  recipientDocument?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(80)

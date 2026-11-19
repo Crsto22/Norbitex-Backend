@@ -64,9 +64,17 @@ export class ShalomRegistrationService {
         'El cliente debe completar los datos de envio antes de registrar en Shalom',
       );
     }
-    if (!envio.dni) {
+    if (!envio.dni && !dto.recipientDocument) {
       throw new BadRequestException(
         'El envio no tiene documento del destinatario',
+      );
+    }
+    const recipientDocument = normalizeDocument(
+      dto.recipientDocument ?? envio.dni,
+    );
+    if (!recipientDocument) {
+      throw new BadRequestException(
+        'El documento del destinatario no es valido',
       );
     }
     if (envio.estadoLogistico === VentaEnvioEstadoLogistico.ENTREGADO) {
@@ -117,7 +125,7 @@ export class ShalomRegistrationService {
 
     const payload = {
       externalRef: envio.codigoPublico,
-      recipientDocument: envio.dni,
+      recipientDocument,
       documentType,
       recipientName:
         dto.recipientName?.trim() || envio.nombreCompleto?.trim() || undefined,
@@ -394,4 +402,9 @@ function normalizePhone(value?: string | null) {
       ? digitsValue.slice(2)
       : digitsValue;
   return /^9\d{8}$/.test(local) ? local : undefined;
+}
+
+function normalizeDocument(value?: string | null) {
+  const digitsValue = digits(value);
+  return /^\d{6,12}$/.test(digitsValue) ? digitsValue : null;
 }
