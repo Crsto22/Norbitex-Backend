@@ -8,6 +8,10 @@ import {
 import { Prisma, VentaEnvioEstadoLogistico } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  composePersonFullName,
+  resolvePersonNameParts,
+} from '../../common/person-name';
 import { SalesService } from '../sales/sales.service';
 import { resolveShalomAgencyName } from './shalom-agency';
 import {
@@ -150,16 +154,24 @@ export class ShalomRegistrationService {
     const documentType = dto.documentType ?? envio.tipoDocumento ?? 'DNI';
     const recipientPhone = normalizePhone(dto.recipientPhone ?? envio.celular);
 
+    // Shalom pide nombres y apellidos por separado. Se prioriza lo que venga
+    // del modal y, si falta, se usan las columnas del envio o se dividen del
+    // nombre completo guardado por el enlace publico.
+    const recipientNameParts = resolvePersonNameParts(envio, {
+      nombres: dto.recipientName,
+      apellidoPaterno: dto.recipientPaternalLastName,
+      apellidoMaterno: dto.recipientMaternalLastName,
+    });
+
     const payload = {
       externalRef: envio.codigoPublico,
       recipientDocument,
       documentType,
-      recipientName:
-        dto.recipientName?.trim() || envio.nombreCompleto?.trim() || undefined,
+      recipientName: recipientNameParts.nombres ?? undefined,
       recipientPaternalLastName:
-        dto.recipientPaternalLastName?.trim() || undefined,
+        recipientNameParts.apellidoPaterno ?? undefined,
       recipientMaternalLastName:
-        dto.recipientMaternalLastName?.trim() || undefined,
+        recipientNameParts.apellidoMaterno ?? undefined,
       recipientPhone,
       originAgency,
       destinationAgency,
@@ -196,7 +208,10 @@ export class ShalomRegistrationService {
         {
           documento: recipientDocument,
           tipoDocumento: documentType,
-          nombre: composeFullName(dto),
+          nombre: composePersonFullName(recipientNameParts),
+          nombres: recipientNameParts.nombres,
+          apellidoPaterno: recipientNameParts.apellidoPaterno,
+          apellidoMaterno: recipientNameParts.apellidoMaterno,
           celular: recipientPhone ?? null,
         },
         usuarioId ?? null,
@@ -672,6 +687,9 @@ export class ShalomRegistrationService {
       dni: string | null;
       tipoDocumento: string;
       nombreCompleto: string | null;
+      nombres: string | null;
+      apellidoPaterno: string | null;
+      apellidoMaterno: string | null;
       celular: string | null;
       estadoLogistico: VentaEnvioEstadoLogistico;
     },
@@ -679,6 +697,9 @@ export class ShalomRegistrationService {
       documento: string;
       tipoDocumento: string;
       nombre: string | null;
+      nombres: string | null;
+      apellidoPaterno: string | null;
+      apellidoMaterno: string | null;
       celular: string | null;
     },
     usuarioId: bigint | null,
@@ -698,12 +719,22 @@ export class ShalomRegistrationService {
       updates.nombreCompleto = data.nombre.slice(0, 150);
       changed.push('nombres');
     }
+    if (data.nombres && data.nombres !== envio.nombres) {
+      updates.nombres = data.nombres.slice(0, 100);
+    }
+    if (data.apellidoPaterno && data.apellidoPaterno !== envio.apellidoPaterno) {
+      updates.apellidoPaterno = data.apellidoPaterno.slice(0, 100);
+    }
+    if (data.apellidoMaterno && data.apellidoMaterno !== envio.apellidoMaterno) {
+      updates.apellidoMaterno = data.apellidoMaterno.slice(0, 100);
+    }
     if (data.celular && data.celular !== envio.celular) {
       updates.celular = data.celular;
       changed.push('celular');
     }
 
-    if (changed.length === 0) return;
+    if (Object.keys(updates).length === 0) return;
+    if (changed.length === 0) changed.push('nombres');
 
     try {
       await this.prisma.ventaEnvio.update({
@@ -759,22 +790,6 @@ export class ShalomRegistrationService {
 
 function digits(value?: string | null) {
   return (value ?? '').replace(/\D/g, '');
-}
-
-/** Une nombres y apellidos del modal en el nombre completo del envio. */
-function composeFullName(dto: RegisterShalomDto) {
-  const value = [
-    dto.recipientName,
-    dto.recipientPaternalLastName,
-    dto.recipientMaternalLastName,
-  ]
-    .map((part) => part?.trim())
-    .filter(Boolean)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return value || null;
 }
 
 /** Shalom solo acepta celulares peruanos de 9 digitos (sin +51). */

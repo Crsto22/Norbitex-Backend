@@ -19,6 +19,10 @@ import {
   scopedCreatorId,
   type CommercialScope,
 } from '../../common/commercial-access';
+import {
+  resolvePersonNameParts,
+  type PersonNameParts,
+} from '../../common/person-name';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CourierAgenciesService } from '../courier-agencies/courier-agencies.service';
 import { DocumentoConsultaService } from '../documento-consulta/documento-consulta.service';
@@ -32,6 +36,19 @@ import { calcularFechasDespacho } from './shipping-dates.util';
 const publicCodeAlphabet =
   '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const publicCodeLength = 12;
+
+/** Datos del destinatario que se guardan al recibir el enlace publico. */
+type RecipientNameData = PersonNameParts;
+
+type ShippingDetailsData = {
+  nombreCompleto: string;
+  dni: string;
+  tipoDocumento: string;
+  celular: string;
+  metodoEnvio: string;
+  fechaEnvio: Date;
+  recibidoAt: Date;
+} & RecipientNameData;
 const publicShippingLinkInclude = {
   venta: {
     select: {
@@ -152,6 +169,9 @@ export class ShippingLinksService {
             estado: VentaEnvioEstado.pendiente,
             estadoLogistico: VentaEnvioEstadoLogistico.POR_PREPARAR,
             nombreCompleto: null,
+            nombres: null,
+            apellidoPaterno: null,
+            apellidoMaterno: null,
             dni: null,
             celular: null,
             agencia: null,
@@ -271,8 +291,21 @@ export class ShippingLinksService {
       fechaEnvio = new Date(`${dto.fechaEnvio}T00:00:00.000Z`);
     }
 
+    const nombreCompleto = dto.nombreCompleto.trim().replace(/\s+/g, ' ');
+    const nameParts = resolvePersonNameParts(
+      { nombreCompleto },
+      {
+        nombres: dto.nombres,
+        apellidoPaterno: dto.apellidoPaterno,
+        apellidoMaterno: dto.apellidoMaterno,
+      },
+    );
+
     const datos = {
-      nombreCompleto: dto.nombreCompleto.trim().replace(/\s+/g, ' '),
+      nombreCompleto,
+      nombres: nameParts.nombres,
+      apellidoPaterno: nameParts.apellidoPaterno,
+      apellidoMaterno: nameParts.apellidoMaterno,
       dni: numeroDocumento,
       tipoDocumento,
       celular: dto.celular,
@@ -348,14 +381,7 @@ export class ShippingLinksService {
 
   private async submitDelivery(
     envio: PublicShippingLink,
-    datos: {
-      nombreCompleto: string;
-      dni: string;
-      celular: string;
-      metodoEnvio: string;
-      fechaEnvio: Date;
-      recibidoAt: Date;
-    },
+    datos: ShippingDetailsData,
     dto: SubmitShippingDetailsDto,
   ) {
     const direccionEntrega = dto.direccionEntrega?.trim();
@@ -405,15 +431,7 @@ export class ShippingLinksService {
 
   private async submitPickup(
     envio: PublicShippingLink,
-    datos: {
-      nombreCompleto: string;
-      dni: string;
-      celular: string;
-      metodoEnvio: string;
-      fechaEnvio: Date;
-      recibidoAt: Date;
-      direccion: string | null;
-    },
+    datos: ShippingDetailsData & { direccion: string | null },
   ) {
     const { direccion, ...envioData } = datos;
     const result = await this.prisma.$transaction(async (tx) => {

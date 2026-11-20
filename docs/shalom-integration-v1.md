@@ -133,6 +133,22 @@ Reglas:
 - Idempotency-Key enviada al microservicio: `envio:<codigo_publico>`.
 - Si el job falla, el mensaje queda en `venta_envio.shalom_error`.
 
+### Nombres y apellidos del destinatario
+
+Shalom pide `nombres`, `apellido paterno` y `apellido materno` por separado. El enlace
+público guarda el nombre completo y, además, las columnas separadas
+(`venta_envio.nombres`, `apellido_paterno`, `apellido_materno`) cuando RENIEC las
+devuelve. Al registrar se resuelve en este orden:
+
+1. Datos enviados en el modal (`recipientName`, `recipientPaternalLastName`, `recipientMaternalLastName`).
+2. Columnas separadas del envío.
+3. División automática de `nombre_completo` (`src/common/person-name.ts`), con soporte
+   para apellidos compuestos (`DE LA CRUZ`, `DEL AGUILA`, ...).
+
+Si tras eso falta un campo obligatorio, el job falla como `PERMANENT` indicando el dato
+exacto que debe completarse en Nuvex.
+
+
 Respuesta: `{ jobId, status }`. Si la guía ya estaba registrada devuelve `alreadyRegistered: true`.
 
 ## Estado

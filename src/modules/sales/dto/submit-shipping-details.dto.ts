@@ -19,6 +19,21 @@ export class SubmitShippingDetailsDto {
   @Length(3, 150)
   nombreCompleto: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  nombres?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  apellidoPaterno?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  apellidoMaterno?: string;
+
   @IsString()
   @Matches(/^\d{8,12}$/, {
     message: 'El documento debe tener entre 8 y 12 digitos',
