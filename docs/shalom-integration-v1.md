@@ -141,6 +141,9 @@ Reglas:
 - `externalRef` = `venta_envio.codigo_publico` (idempotencia: reintentar no duplica la guía).
 - Idempotency-Key enviada al microservicio: `envio:<codigo_publico>`.
 - Si el job falla, el mensaje queda en `venta_envio.shalom_error`.
+- La orden guarda **dos codigos**: `shalom_orden` (numero) y `shalom_codigo` (corto, para escanear).
+  Si el registro no logra leer el corto, el worker reintenta la lista de pendientes y el backend
+  lo recupera al pulsar actualizar (`GET /v1/orders/by-order/:orden/code` del microservicio).
 
 ### Nombres y apellidos del destinatario
 

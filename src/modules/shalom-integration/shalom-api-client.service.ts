@@ -46,6 +46,14 @@ export class ShalomApiClientService {
     return this.request<T>(`/v1/orders/${orderId}`, apiKey);
   }
 
+  /** Relee el codigo corto de una orden ya registrada. */
+  getOrderCodeByOrder<T>(orden: string, apiKey: string) {
+    return this.request<T>(
+      `/v1/orders/by-order/${encodeURIComponent(orden)}/code`,
+      apiKey,
+    );
+  }
+
   login<T>(tenantId: string, apiKey: string) {
     return this.request<T>(`/v1/sessions/${tenantId}/login`, apiKey, {
       method: 'POST',

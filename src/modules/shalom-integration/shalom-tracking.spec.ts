@@ -140,3 +140,66 @@ describe('ShalomRegistrationService.applyTrackingStatus', () => {
     expect(data.estadoLogistico).toBe(VentaEnvioEstadoLogistico.EN_TRANSITO);
   });
 });
+
+describe('ShalomRegistrationService.applyRegistration', () => {
+  function build(envio: Record<string, unknown>) {
+    const prisma = {
+      ventaEnvio: {
+        findUnique: jest.fn().mockResolvedValue({
+          venta: { empresaId: 1n, publicId: 'venta-1' },
+          ...envio,
+        }),
+        update: jest.fn().mockResolvedValue(envio),
+      },
+      ventaEnvioHistorial: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const sales = {
+      dispatchShalomEnvio: jest.fn().mockResolvedValue(null),
+    };
+
+    const service = new ShalomRegistrationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      sales as never,
+    );
+
+    return { prisma, service };
+  }
+
+  it('conserva el codigo ya recuperado cuando el webhook llega sin codigo', async () => {
+    const { prisma, service } = build({
+      id: 1n,
+      estadoLogistico: VentaEnvioEstadoLogistico.EN_TRANSITO,
+      shalomCodigo: 'KMPN',
+    });
+
+    await service.applyRegistration(1n, {
+      orden: '104730513',
+      codigo: null,
+      monto: 12,
+      estado: 'REGISTRADO',
+    });
+
+    const data = prisma.ventaEnvio.update.mock.calls[0][0].data;
+    expect(data.shalomCodigo).toBe('KMPN');
+  });
+
+  it('guarda el codigo cuando el registro si lo trae', async () => {
+    const { prisma, service } = build({
+      id: 1n,
+      estadoLogistico: VentaEnvioEstadoLogistico.POR_DESPACHAR,
+      shalomCodigo: null,
+    });
+
+    await service.applyRegistration(1n, {
+      orden: '104730513',
+      codigo: 'KMPN',
+      monto: 12,
+      estado: 'REGISTRADO',
+    });
+
+    const data = prisma.ventaEnvio.update.mock.calls[0][0].data;
+    expect(data.shalomCodigo).toBe('KMPN');
+  });
+});

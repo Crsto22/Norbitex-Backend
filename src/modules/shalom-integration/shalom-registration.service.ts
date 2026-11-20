@@ -384,6 +384,10 @@ export class ShalomRegistrationService {
       throw new BadRequestException('El envio aun no tiene orden de Shalom');
     }
 
+    // Si el registro no pudo leer el codigo corto, se intenta recuperar antes
+    // de rastrear (tambien cubre el cooldown del boton actualizar).
+    await this.healMissingCode(empresaId, envio);
+
     const lastSync = envio.shalomSyncAt?.getTime() ?? 0;
     if (Date.now() - lastSync < TRACKING_COOLDOWN_MS) {
       return this.status(empresaId, publicId);
@@ -455,6 +459,8 @@ export class ShalomRegistrationService {
       throw new BadRequestException('El envio no tiene un job de Shalom');
     }
 
+    await this.healMissingCode(empresaId, envio);
+
     const credentials = await this.integration.requireCredentials(empresaId);
     const job = await this.client.getJob<JobResponse>(
       envio.shalomJobId,
@@ -504,11 +510,19 @@ export class ShalomRegistrationService {
       estado: string;
     },
   ) {
+    const current = await this.prisma.ventaEnvio.findUnique({
+      where: { id: ventaEnvioId },
+      select: { shalomCodigo: true },
+    });
+
+    // El webhook puede llegar sin codigo: no se borra el que ya se recupero.
+    const codigo = data.codigo ?? current?.shalomCodigo ?? null;
+
     const updated = await this.prisma.ventaEnvio.update({
       where: { id: ventaEnvioId },
       data: {
         shalomOrden: data.orden,
-        shalomCodigo: data.codigo,
+        shalomCodigo: codigo,
         shalomMonto: data.monto,
         shalomEstado: data.estado,
         shalomError: null,
@@ -522,7 +536,7 @@ export class ShalomRegistrationService {
         ventaEnvioId,
         estadoAnterior: updated.estadoLogistico,
         estadoNuevo: updated.estadoLogistico,
-        detalle: `Registrado en Shalom: ${data.orden}${data.codigo ? ` / ${data.codigo}` : ''}`,
+        detalle: `Registrado en Shalom: ${data.orden}${codigo ? ` / ${codigo}` : ''}`,
       },
     });
 
@@ -830,6 +844,56 @@ export class ShalomRegistrationService {
     } catch (error) {
       this.logger.warn(
         `No se pudieron actualizar los datos del envio ${envio.codigoPublico}: ${
+          error instanceof Error ? error.message : 'error desconocido'
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Recupera el codigo corto cuando el registro no pudo leerlo del panel.
+   * Nunca rompe el flujo: la orden ya existe en Shalom.
+   */
+  private async healMissingCode(
+    empresaId: bigint,
+    envio: {
+      id: bigint;
+      shalomOrden: string | null;
+      shalomCodigo: string | null;
+      estadoLogistico: VentaEnvioEstadoLogistico;
+    },
+  ) {
+    if (!envio.shalomOrden || envio.shalomCodigo) return;
+
+    try {
+      const credentials = await this.integration.requireCredentials(empresaId);
+      const result = await this.client.getOrderCodeByOrder<{
+        orden: string;
+        codigo: string | null;
+      }>(envio.shalomOrden, credentials.apiKey);
+
+      if (!result?.codigo) return;
+
+      await this.prisma.ventaEnvio.update({
+        where: { id: envio.id },
+        data: { shalomCodigo: result.codigo },
+      });
+
+      await this.prisma.ventaEnvioHistorial.create({
+        data: {
+          ventaEnvioId: envio.id,
+          estadoAnterior: envio.estadoLogistico,
+          estadoNuevo: envio.estadoLogistico,
+          detalle: `Codigo de orden recuperado: ${result.codigo}`.slice(0, 500),
+        },
+      });
+
+      this.logger.log(
+        `Codigo ${result.codigo} recuperado para la orden ${envio.shalomOrden}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo recuperar el codigo de la orden ${envio.shalomOrden}: ${
           error instanceof Error ? error.message : 'error desconocido'
         }`,
       );
