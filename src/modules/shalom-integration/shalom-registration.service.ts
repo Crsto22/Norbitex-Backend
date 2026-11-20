@@ -465,8 +465,9 @@ export class ShalomRegistrationService {
 
   /**
    * Aplica el resultado del registro (usado por sync y por webhook).
-   * El despacho automatico ocurre cuando Shalom recepciona el paquete
-   * (EN_ORIGEN), no al crear la guia.
+   * La guia confirmada se despacha de inmediato: el envio pasa a EN_TRANSITO
+   * y deja la bandeja de pendientes. Si la guia se anula antes de que Shalom
+   * la recepcione, el despacho se revierte.
    */
   async applyRegistration(
     ventaEnvioId: bigint,
@@ -499,9 +500,17 @@ export class ShalomRegistrationService {
       },
     });
 
+    const alreadyDispatched =
+      updated.estadoLogistico === VentaEnvioEstadoLogistico.EN_TRANSITO ||
+      updated.estadoLogistico === VentaEnvioEstadoLogistico.ENTREGADO ||
+      updated.estadoLogistico === VentaEnvioEstadoLogistico.INCIDENCIA;
+
+    if (!alreadyDispatched) {
+      await this.autoDispatch(ventaEnvioId, data.orden, null);
+    }
+
     return updated;
   }
-
   /** Aplica un cambio de estado del rastreo. */
   async applyTrackingStatus(
     ventaEnvioId: bigint,
@@ -529,7 +538,20 @@ export class ShalomRegistrationService {
       envio.estadoLogistico === VentaEnvioEstadoLogistico.POR_PREPARAR ||
       envio.estadoLogistico === VentaEnvioEstadoLogistico.POR_DESPACHAR;
 
-    if (estadoLogistico && estadoLogistico !== envio.estadoLogistico) {
+    // Shalom ya movio el paquete: se recuerda para no revertir el despacho
+    // si la guia se anula despues.
+    if (
+      !envio.shalomRecibidoEn &&
+      ['EN_ORIGEN', 'EN_TRANSITO', 'ENTREGADO'].includes(remote.status)
+    ) {
+      data.shalomRecibidoEn = new Date();
+    }
+
+    const applies =
+      Boolean(estadoLogistico) &&
+      canAdvanceLogistics(envio.estadoLogistico, estadoLogistico!);
+
+    if (applies) {
       data.estadoLogistico = estadoLogistico;
       if (estadoLogistico === VentaEnvioEstadoLogistico.ENTREGADO) {
         data.entregadoAt = new Date();
@@ -541,12 +563,12 @@ export class ShalomRegistrationService {
       data,
     });
 
-    if (estadoLogistico && estadoLogistico !== envio.estadoLogistico) {
+    if (applies) {
       await this.prisma.ventaEnvioHistorial.create({
         data: {
           ventaEnvioId,
           estadoAnterior: envio.estadoLogistico,
-          estadoNuevo: estadoLogistico,
+          estadoNuevo: estadoLogistico!,
           detalle: `Shalom: ${remote.label}`.slice(0, 500),
         },
       });
@@ -569,6 +591,7 @@ export class ShalomRegistrationService {
   async markGuideCanceled(ventaEnvioId: bigint, label: string) {
     const envio = await this.prisma.ventaEnvio.findUnique({
       where: { id: ventaEnvioId },
+      include: { venta: { select: { empresaId: true, publicId: true } } },
     });
     if (!envio) return;
 
@@ -577,7 +600,8 @@ export class ShalomRegistrationService {
       envio.estadoLogistico === VentaEnvioEstadoLogistico.ENTREGADO ||
       envio.estadoLogistico === VentaEnvioEstadoLogistico.INCIDENCIA;
 
-    if (dispatched) {
+    // Shalom ya recepciono el paquete: la anulacion es una incidencia real.
+    if (dispatched && envio.shalomRecibidoEn) {
       if (envio.estadoLogistico !== VentaEnvioEstadoLogistico.INCIDENCIA) {
         await this.prisma.ventaEnvio.update({
           where: { id: ventaEnvioId },
@@ -602,6 +626,23 @@ export class ShalomRegistrationService {
       return;
     }
 
+    // La guia nunca llego a la agencia: se deshace el despacho automatico.
+    if (dispatched) {
+      try {
+        await this.sales.revertShalomDispatch(
+          envio.venta.empresaId,
+          envio.venta.publicId,
+          { orden: envio.shalomOrden },
+        );
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo revertir el despacho del envio ${envio.venta.publicId}: ${
+            error instanceof Error ? error.message : 'error desconocido'
+          }`,
+        );
+      }
+    }
+
     const reference = [envio.shalomOrden, envio.shalomCodigo]
       .filter(Boolean)
       .join(' / ');
@@ -618,6 +659,7 @@ export class ShalomRegistrationService {
         shalomProgreso: null,
         shalomTimeline: Prisma.DbNull,
         shalomRegistradoAt: null,
+        shalomRecibidoEn: null,
         shalomSyncAt: new Date(),
         shalomError: `Guía vencida${
           reference ? ` (${reference})` : ''
@@ -790,6 +832,25 @@ export class ShalomRegistrationService {
 
 function digits(value?: string | null) {
   return (value ?? '').replace(/\D/g, '');
+}
+
+/** Orden del flujo logistico: el rastreo nunca debe retroceder un estado. */
+const LOGISTICS_ORDER: Record<VentaEnvioEstadoLogistico, number> = {
+  POR_PREPARAR: 1,
+  POR_DESPACHAR: 2,
+  EN_TRANSITO: 3,
+  ENTREGADO: 4,
+  INCIDENCIA: 5,
+};
+
+export function canAdvanceLogistics(
+  current: VentaEnvioEstadoLogistico,
+  next: VentaEnvioEstadoLogistico,
+) {
+  if (current === next) return false;
+  if (next === VentaEnvioEstadoLogistico.INCIDENCIA) return true;
+  if (current === VentaEnvioEstadoLogistico.INCIDENCIA) return false;
+  return LOGISTICS_ORDER[next] > LOGISTICS_ORDER[current];
 }
 
 /** Shalom solo acepta celulares peruanos de 9 digitos (sin +51). */

@@ -1894,6 +1894,18 @@ export class SalesService {
 
     if (yaDespachado) return null;
 
+    // Si la guia ya genero una entrega (registro aplicado dos veces), se reutiliza.
+    const entregaExistente = await this.prisma.ventaEntrega.findFirst({
+      where: {
+        ventaId: venta.id,
+        tipo: VentaEntregaTipo.COURIER,
+        numeroConstancia: options.orden,
+      },
+    });
+    if (entregaExistente) {
+      return { entregaPublicId: entregaExistente.publicId };
+    }
+
     const detalles = venta.detalles
       .map((detail) => ({
         ventaDetalleId: detail.id.toString(),
@@ -1912,6 +1924,93 @@ export class SalesService {
     });
 
     return { entregaPublicId: entrega.publicId };
+  }
+
+  /**
+   * Deshace el despacho automatico de una guia Shalom anulada o vencida antes
+   * de ser recepcionada en la agencia. Devuelve los productos a pendiente y
+   * elimina la entrega creada al registrar la guia.
+   */
+  async revertShalomDispatch(
+    empresaId: bigint,
+    publicId: string,
+    options: { orden?: string | null } = {},
+  ) {
+    const venta = await this.prisma.venta.findFirst({
+      where: { empresaId, publicId },
+      include: { envio: true, detalles: true },
+    });
+    if (!venta?.envio) return null;
+    if (venta.envio.estadoLogistico !== VentaEnvioEstadoLogistico.EN_TRANSITO) {
+      return null;
+    }
+
+    const entrega = await this.prisma.ventaEntrega.findFirst({
+      where: {
+        ventaId: venta.id,
+        tipo: VentaEntregaTipo.COURIER,
+        ...(options.orden ? { numeroConstancia: options.orden } : {}),
+      },
+      include: { detalles: true },
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      if (entrega) {
+        for (const detalle of entrega.detalles) {
+          await tx.ventaDetalle.update({
+            where: { id: detalle.ventaDetalleId },
+            data: { cantidadEntregada: { decrement: detalle.cantidad } },
+          });
+        }
+        await tx.ventaEntrega.delete({ where: { id: entrega.id } });
+      }
+
+      const detalles = await tx.ventaDetalle.findMany({
+        where: { ventaId: venta.id },
+        select: { cantidad: true, cantidadEntregada: true },
+      });
+      const totalPendiente = detalles.reduce(
+        (sum, detail) =>
+          sum + Math.max(0, detail.cantidad - detail.cantidadEntregada),
+        0,
+      );
+      const totalEntregado = detalles.reduce(
+        (sum, detail) => sum + detail.cantidadEntregada,
+        0,
+      );
+
+      await tx.venta.update({
+        where: { id: venta.id },
+        data: {
+          estadoEntrega:
+            totalPendiente === 0
+              ? VentaEntregaEstado.entregada
+              : totalEntregado > 0
+                ? VentaEntregaEstado.parcial
+                : VentaEntregaEstado.pendiente,
+        },
+      });
+
+      await tx.ventaEnvio.update({
+        where: { id: venta.envio!.id },
+        data: {
+          estadoLogistico: VentaEnvioEstadoLogistico.POR_DESPACHAR,
+          despachadoAt: null,
+        },
+      });
+
+      await tx.ventaEnvioHistorial.create({
+        data: {
+          ventaEnvioId: venta.envio!.id,
+          estadoAnterior: VentaEnvioEstadoLogistico.EN_TRANSITO,
+          estadoNuevo: VentaEnvioEstadoLogistico.POR_DESPACHAR,
+          detalle:
+            'Despacho revertido: la guia Shalom se anulo antes de llevarla a la agencia',
+        },
+      });
+    });
+
+    return { reverted: true };
   }
 
   /**

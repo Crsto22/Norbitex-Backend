@@ -57,8 +57,9 @@ Requisitos: cuenta `ACTIVE`, envío `recibido`, agencia destino válida y agenci
 configurada en **Configuración → Shalom PRO** (`empresa_shalom_export_config.origen`). El modal
 permite cambiar el origen para un envío puntual sin sobrescribir la configuración.
 
-El registro es uno por venta (una guía por envío). El **despacho automático** se dispara cuando
-Shalom reporta `EN_ORIGEN` (recepción en agencia), no al crear la guía.
+El registro es uno por venta (una guía por envío). **Al confirmarse la guía, el envío se despacha
+automáticamente**: se crea la entrega COURIER, se descuentan las cantidades y el envío pasa a
+`EN_TRANSITO` (sale de la bandeja de Pendientes y aparece en Enviados).
 
 ### Registro masivo
 
@@ -92,12 +93,14 @@ Si el paquete no se recepciona en la agencia dentro de `SHALOM_ORDER_EXPIRY_HOUR
 (24 h por defecto), el microservicio marca la orden como `ANULADO` y emite
 `order.status_changed` con `label = "Guía vencida"`.
 
-- **Aún no despachado**: el envío vuelve a Pendiente, se limpian orden/código y se habilita
-  generar una nueva guía (el botón dice “Generar nueva guía”).
-- **Ya despachado**: no se retrocede; se marca Incidencia con la nota correspondiente.
+- **Sin recepción en agencia** (`shalom_recibido_en` vacío): se revierte el despacho automático
+  (se elimina la entrega, se devuelven las cantidades), el envío vuelve a Pendiente, se limpian
+  orden/código y se habilita generar una nueva guía (el botón dice “Generar nueva guía”).
+- **Ya recepcionada** (`shalom_recibido_en` con fecha, es decir llegó `EN_ORIGEN`): no se retrocede;
+  se marca Incidencia con la nota correspondiente.
 
-El despacho automático ocurre cuando Shalom reporta `EN_ORIGEN` (recepción en agencia), no al crear
-la guía.
+El rastreo nunca retrocede un estado (`POR_PREPARAR < POR_DESPACHAR < EN_TRANSITO < ENTREGADO`);
+`EN_ORIGEN` sobre un envío ya despachado solo registra la recepción.
 
 ## Configuracion por empresa
 

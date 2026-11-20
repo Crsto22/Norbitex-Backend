@@ -2652,6 +2652,7 @@ model VentaEnvio {
   shalomTimeline    Json?     @map("shalom_timeline")
   shalomError       String?   @map("shalom_error") @db.VarChar(500)
   shalomRegistradoAt DateTime? @map("shalom_registrado_at") @db.Timestamptz(6)
+  shalomRecibidoEn DateTime? @map("shalom_recibido_en") @db.Timestamptz(6)
   shalomSyncAt      DateTime? @map("shalom_sync_at") @db.Timestamptz(6)
 
   @@index([estado])
