@@ -9,7 +9,7 @@ import { Prisma, VentaEnvioEstadoLogistico } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SalesService } from '../sales/sales.service';
 import { resolveShalomAgencyName } from './shalom-agency';
-import { ShalomApiClientService } from './shalom-api-client.service';
+import { ShalomApiClientService, ShalomApiError } from './shalom-api-client.service';
 import { ShalomIntegrationService } from './shalom-integration.service';
 import { toEstadoLogistico, type ShalomRemoteStatus } from './shalom-status';
 import type { RegisterShalomDto } from './dto/shalom-config.dto';
@@ -245,16 +245,23 @@ export class ShalomRegistrationService {
     }
 
     const credentials = await this.integration.requireCredentials(empresaId);
-    const tracking = await this.client.track<TrackingResponse>(
-      envio.shalomOrden,
-      envio.shalomCodigo ?? undefined,
-      credentials.apiKey,
-    );
+
+    let tracking: TrackingResponse;
+    try {
+      tracking = await this.client.track<TrackingResponse>(
+        envio.shalomOrden,
+        envio.shalomCodigo ?? undefined,
+        credentials.apiKey,
+      );
+    } catch (error) {
+      if (error instanceof ShalomApiError && isGuideGone(error)) {
+        return this.markExpiredFromTracking(empresaId, publicId, envio.id);
+      }
+      throw error;
+    }
 
     if (!tracking?.status) {
-      throw new BadRequestException(
-        'Shalom no devolvio un estado para esta guia',
-      );
+      return this.markExpiredFromTracking(empresaId, publicId, envio.id);
     }
 
     await this.applyTrackingStatus(
@@ -271,6 +278,27 @@ export class ShalomRegistrationService {
     await this.integration.markSynced(empresaId);
 
     return this.status(empresaId, publicId);
+  }
+
+  /** La guia ya no existe en Shalom: se trata como vencida/anulada. */
+  private async markExpiredFromTracking(
+    empresaId: bigint,
+    publicId: string,
+    ventaEnvioId: bigint,
+  ) {
+    await this.applyTrackingStatus(
+      ventaEnvioId,
+      { status: 'ANULADO', label: 'Guía vencida', progress: 0 },
+      null,
+    );
+    await this.markGuideCanceled(ventaEnvioId, 'Guía vencida');
+    await this.integration.markSynced(empresaId);
+
+    return {
+      ...(await this.status(empresaId, publicId)),
+      message:
+        'La guía ya no existe en Shalom (vencida o anulada). Genera una nueva.',
+    };
   }
 
   /** Sincroniza el resultado del job cuando el webhook no llego. */
@@ -662,4 +690,14 @@ function normalizePhone(value?: string | null) {
 function normalizeDocument(value?: string | null) {
   const digitsValue = digits(value);
   return /^\d{6,12}$/.test(digitsValue) ? digitsValue : null;
+}
+
+/** Shalom respondio que la guia no existe o esta fuera de la ventana de 24 h. */
+function isGuideGone(error: ShalomApiError) {
+  if (error.status === 404 || error.status === 410 || error.status === 422) {
+    return true;
+  }
+  return /expirad|no devolvio resultados|no existe|anulad|vencid/i.test(
+    error.message,
+  );
 }
