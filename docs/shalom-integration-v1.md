@@ -132,6 +132,8 @@ Reglas:
 - El envio debe ser de agencia `SHALOM` y tener DNI del destinatario.
 - La agencia de **origen** se toma de los ajustes de exportación (`empresa_shalom_export_config.origen`).
 - La agencia de **destino** se toma de `venta_envio.agencia_nombre`.
+- Si el nombre trae el sufijo `(POR DEFINIR)` (agencias incompletas del directorio de Shalom),
+  se limpia antes de buscar en el combo: `HUARAZ PALMIRA (POR DEFINIR)` → `HUARAZ PALMIRA`.
 - `externalRef` = `venta_envio.codigo_publico` (idempotencia: reintentar no duplica la guía).
 - Idempotency-Key enviada al microservicio: `envio:<codigo_publico>`.
 - Si el job falla, el mensaje queda en `venta_envio.shalom_error`.

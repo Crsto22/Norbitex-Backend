@@ -9,8 +9,20 @@ const AGENCIA_POR_CODIGO = new Map<string, string>(
 );
 
 const AGENCIA_NOMBRES = new Set<string>(
-  shalomAgencias.map(([, nombre]) => nombre),
+  shalomAgencias.map(([, nombre]) => cleanAgencyName(nombre)),
 );
+
+/**
+ * El directorio publico de Shalom marca algunas agencias con el sufijo
+ * "(POR DEFINIR)". El formulario de registro las muestra con el nombre limpio,
+ * asi que se descarta el sufijo antes de buscar en el combo.
+ */
+export function cleanAgencyName(value?: string | null): string {
+  return (value ?? '')
+    .replace(/\s*\(\s*por definir\s*\)\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 /**
  * Nombre corto de la agencia tal como lo muestra el combo de Shalom.
@@ -26,12 +38,18 @@ export function resolveShalomAgencyName(
   const code = externalId?.trim();
   if (code) {
     const fromCatalog = AGENCIA_POR_CODIGO.get(code);
-    if (fromCatalog) return fromCatalog;
+    if (fromCatalog) return cleanAgencyName(fromCatalog);
   }
 
-  return (agenciaNombre ?? '').split(' / ').pop()?.trim() ?? '';
+  const shortName = (agenciaNombre ?? '').split(' / ').pop()?.trim() ?? '';
+  return cleanAgencyName(shortName);
 }
 
 export function isKnownShalomAgency(nombre: string): boolean {
-  return AGENCIA_NOMBRES.has(nombre.trim());
+  return AGENCIA_NOMBRES.has(cleanAgencyName(nombre));
+}
+
+/** La agencia viene del directorio con el nombre sin definir en Shalom. */
+export function isPlaceholderAgency(nombre?: string | null): boolean {
+  return /\(\s*por definir\s*\)/i.test(nombre ?? '');
 }
