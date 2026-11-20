@@ -61,6 +61,13 @@ export class ShalomIntegrationController {
     return this.provisioning.validate(this.empresaId(user));
   }
 
+  @Post('company/shalom-pro/webhook')
+  @RequireModule('shalom-pro')
+  shalomProRepairWebhook(@CurrentUser() user: JwtPayload) {
+    this.assertManager(user);
+    return this.provisioning.repairWebhook(this.empresaId(user));
+  }
+
   @Get('company/shalom-config')
   @RequireModule('empresa')
   getConfig(@CurrentUser() user: JwtPayload) {

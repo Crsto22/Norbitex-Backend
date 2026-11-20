@@ -33,6 +33,7 @@ SHALOM_SERVICE_TIMEOUT_MS=90000
 | `GET` | `/company/shalom-pro` | OWNER / ADMIN con módulo `shalom-pro` |
 | `POST` | `/company/shalom-pro/provision` | OWNER / ADMIN |
 | `POST` | `/company/shalom-pro/validate` | OWNER / ADMIN |
+| `POST` | `/company/shalom-pro/webhook` | OWNER / ADMIN — registra el webhook si quedó pendiente |
 
 `provision` recibe `{ username, password, packageType? }`, crea el tenant en el microservicio
 (código `<slug>-<ruc>`), registra el webhook `order.registered` y guarda cifrados la API key y el

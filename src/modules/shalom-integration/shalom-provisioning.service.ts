@@ -164,7 +164,7 @@ export class ShalomProvisioningService {
           secret: string;
         }>(adminKey, created.applicationId, {
           url: webhookUrl,
-          events: ['order.registered'],
+          events: ['order.registered', 'order.status_changed'],
         });
         webhookSecretEncrypted = this.crypto.encrypt(webhook.secret);
       } catch (error) {
@@ -216,6 +216,59 @@ export class ShalomProvisioningService {
       this.logger.error(
         `Fallo al validar Shalom PRO (empresa ${empresaId}): ${(error as Error).message}`,
       );
+      this.rethrow(error);
+    }
+  }
+
+  /**
+   * Registra el webhook de la empresa si quedo pendiente (por ejemplo,
+   * empresas provisionadas antes del arreglo de X-Admin-Token).
+   */
+  async repairWebhook(empresaId: bigint) {
+    const adminKey = this.adminKey();
+    const integration = await this.prisma.shalomIntegration.findUnique({
+      where: { empresaId },
+    });
+
+    if (!integration) {
+      throw new BadRequestException('Shalom no esta configurado para esta empresa');
+    }
+    if (!integration.applicationId) {
+      throw new BadRequestException(
+        'La integracion no tiene una aplicacion registrada',
+      );
+    }
+    if (integration.webhookSecretEncrypted) {
+      return { registered: true, message: 'El webhook ya estaba registrado' };
+    }
+
+    const webhookUrl = this.webhookUrl();
+    if (!webhookUrl) {
+      throw new ServiceUnavailableException(
+        'SHALOM_WEBHOOK_PUBLIC_URL no esta configurada en el backend',
+      );
+    }
+
+    try {
+      const webhook = await this.client.createWebhook<{
+        id: string;
+        secret: string;
+      }>(adminKey, integration.applicationId, {
+        url: webhookUrl,
+        events: ['order.registered', 'order.status_changed'],
+      });
+
+      await this.prisma.shalomIntegration.update({
+        where: { empresaId },
+        data: {
+          webhookSecretEncrypted: this.crypto.encrypt(webhook.secret),
+          lastError: null,
+        },
+      });
+
+      this.logger.log(`Webhook de Shalom registrado para empresa ${empresaId}`);
+      return { registered: true, message: 'Webhook registrado' };
+    } catch (error) {
       this.rethrow(error);
     }
   }
