@@ -18,6 +18,7 @@ import { rateLimits } from '../../common/rate-limits';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { DocumentoConsultaService } from '../documento-consulta/documento-consulta.service';
 import {
+  BulkRegisterShalomDto,
   ProvisionShalomProDto,
   RegisterShalomDto,
   UpdateShalomConfigDto,
@@ -93,6 +94,20 @@ export class ShalomIntegrationController {
     return this.registration.register(
       this.empresaId(user),
       publicId,
+      dto,
+      BigInt(user.sub),
+    );
+  }
+
+  @Post('sales/shalom-register-bulk')
+  @RequireModule('shalom-pro')
+  @Throttle(rateLimits.reports)
+  bulkRegister(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: BulkRegisterShalomDto,
+  ) {
+    return this.registration.registerBulk(
+      this.empresaId(user),
       dto,
       BigInt(user.sub),
     );

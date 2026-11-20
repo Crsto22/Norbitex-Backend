@@ -1,4 +1,7 @@
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsEmail,
   IsIn,
@@ -105,4 +108,28 @@ export class ProvisionShalomProDto {
   @IsOptional()
   @IsIn(SHALOM_PACKAGE_TYPES)
   packageType?: (typeof SHALOM_PACKAGE_TYPES)[number];
+}
+
+/** Registro masivo: una clave global para todo el lote. */
+export class BulkRegisterShalomDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  publicIds!: string[];
+
+  @Matches(/^\d{4}$/, { message: 'securityKey debe tener 4 digitos' })
+  securityKey!: string;
+
+  @IsOptional()
+  @IsIn(SHALOM_PACKAGE_TYPES)
+  packageType?: (typeof SHALOM_PACKAGE_TYPES)[number];
+
+  @IsOptional()
+  @IsBoolean()
+  extraSecurity?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  cashOnDelivery?: boolean;
 }

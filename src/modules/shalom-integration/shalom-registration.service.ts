@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -9,11 +10,16 @@ import { Prisma, VentaEnvioEstadoLogistico } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SalesService } from '../sales/sales.service';
 import { resolveShalomAgencyName } from './shalom-agency';
-import { ShalomApiClientService, ShalomApiError } from './shalom-api-client.service';
+import {
+  ShalomApiClientService,
+  ShalomApiError,
+} from './shalom-api-client.service';
 import { ShalomIntegrationService } from './shalom-integration.service';
 import { toEstadoLogistico, type ShalomRemoteStatus } from './shalom-status';
-import type { RegisterShalomDto } from './dto/shalom-config.dto';
-
+import type {
+  BulkRegisterShalomDto,
+  RegisterShalomDto,
+} from './dto/shalom-config.dto';
 type JobResponse = {
   id: string;
   status: string;
@@ -36,6 +42,10 @@ type TrackingResponse = {
 
 /** Evita scrapear Shalom en cada clic del boton de actualizar. */
 const TRACKING_COOLDOWN_MS = 60_000;
+
+/** Limites del registro masivo (mismos que el formato de Shalom). */
+const MAX_BULK_ORDERS = 50;
+const MAX_BULK_PER_RECIPIENT = 10;
 
 /** Estados terminales de un job; cualquier otro significa "en proceso". */
 const TERMINAL_JOB_STATES = new Set([
@@ -203,6 +213,100 @@ export class ShalomRegistrationService {
       await this.integration.markError(empresaId, message);
       throw new BadRequestException(`Shalom: ${message}`);
     }
+  }
+
+  /**
+   * Registro masivo (max. 50) con una clave global para todo el lote.
+   * Valida 10 envios por destinatario y devuelve el resultado por envio.
+   */
+  async registerBulk(
+    empresaId: bigint,
+    dto: BulkRegisterShalomDto,
+    usuarioId?: bigint | null,
+  ) {
+    if (dto.publicIds.length > MAX_BULK_ORDERS) {
+      throw new BadRequestException(
+        `El lote admite hasta ${MAX_BULK_ORDERS} envios`,
+      );
+    }
+
+    const ventas = await this.prisma.venta.findMany({
+      where: { empresaId, publicId: { in: dto.publicIds } },
+      select: { publicId: true, envio: { select: { dni: true } } },
+    });
+
+    const porDocumento = new Map<string, number>();
+    for (const venta of ventas) {
+      const documento = venta.envio?.dni?.trim();
+      if (!documento) continue;
+      porDocumento.set(documento, (porDocumento.get(documento) ?? 0) + 1);
+    }
+
+    const excedidos = [...porDocumento.entries()].filter(
+      ([, total]) => total > MAX_BULK_PER_RECIPIENT,
+    );
+    if (excedidos.length > 0) {
+      throw new BadRequestException(
+        `Maximo ${MAX_BULK_PER_RECIPIENT} envios por destinatario en un lote: ${excedidos
+          .map(([documento, total]) => `${documento} (${total})`)
+          .join(', ')}`,
+      );
+    }
+
+    const results: Array<{
+      publicId: string;
+      ok: boolean;
+      jobId?: string | null;
+      status?: string | null;
+      orden?: string | null;
+      codigo?: string | null;
+      alreadyRegistered?: boolean;
+      error?: string;
+    }> = [];
+
+    for (const publicId of dto.publicIds) {
+      try {
+        const result = await this.register(
+          empresaId,
+          publicId,
+          {
+            securityKey: dto.securityKey,
+            packageType: dto.packageType,
+            extraSecurity: dto.extraSecurity,
+            cashOnDelivery: dto.cashOnDelivery,
+          },
+          usuarioId,
+        );
+
+        results.push({
+          publicId,
+          ok: true,
+          jobId: result.jobId ?? null,
+          status: 'status' in result ? result.status : undefined,
+          orden: 'orden' in result ? (result.orden ?? null) : null,
+          codigo: 'codigo' in result ? (result.codigo ?? null) : null,
+          alreadyRegistered: result.alreadyRegistered,
+        });
+      } catch (error) {
+        results.push({
+          publicId,
+          ok: false,
+          error:
+            error instanceof HttpException
+              ? error.message
+              : error instanceof Error
+                ? error.message
+                : 'Error desconocido',
+        });
+      }
+    }
+
+    const ok = results.filter((item) => item.ok).length;
+
+    return {
+      results,
+      totals: { ok, failed: results.length - ok, total: results.length },
+    };
   }
 
   async status(empresaId: bigint, publicId: string) {
@@ -434,11 +538,7 @@ export class ShalomRegistrationService {
     }
 
     // La agencia recepciono el paquete: recien aqui se marca como despachado.
-    if (
-      remote.status === 'EN_ORIGEN' &&
-      wasPending &&
-      envio.shalomOrden
-    ) {
+    if (remote.status === 'EN_ORIGEN' && wasPending && envio.shalomOrden) {
       await this.autoDispatch(ventaEnvioId, envio.shalomOrden, null);
     }
 
