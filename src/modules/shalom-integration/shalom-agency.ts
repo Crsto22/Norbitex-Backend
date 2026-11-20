@@ -49,6 +49,12 @@ export function isKnownShalomAgency(nombre: string): boolean {
   return AGENCIA_NOMBRES.has(cleanAgencyName(nombre));
 }
 
+/** El codigo de agencia existe en el catalogo oficial de registro. */
+export function isCatalogShalomAgency(externalId?: string | null): boolean {
+  const code = externalId?.trim();
+  return Boolean(code && AGENCIA_POR_CODIGO.has(code));
+}
+
 /** La agencia viene del directorio con el nombre sin definir en Shalom. */
 export function isPlaceholderAgency(nombre?: string | null): boolean {
   return /\(\s*por definir\s*\)/i.test(nombre ?? '');

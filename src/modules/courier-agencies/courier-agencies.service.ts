@@ -11,6 +11,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { isCatalogShalomAgency } from '../shalom-integration/shalom-agency';
 import { FindCourierAgenciesDto } from './dto/courier-agencies.dto';
 
 type JsonRecord = Record<string, unknown>;
@@ -37,6 +38,7 @@ type NormalizedAgency = {
   longitud: number | null;
   horario: Prisma.InputJsonValue | Prisma.NullTypes.JsonNull;
   servicios: Prisma.InputJsonValue | Prisma.NullTypes.JsonNull;
+  registrableDestino: boolean;
   fuenteActualizadaAt: Date | null;
   rawData: Prisma.InputJsonValue;
 };
@@ -237,6 +239,9 @@ export class CourierAgenciesService {
       where: {
         courier,
         activo: true,
+        ...(courier === AgenciaCourierProveedor.SHALOM
+          ? { registrableDestino: true }
+          : {}),
         direccion: { not: null },
         latitud: { gte: -20, lte: 1 },
         longitud: { gte: -82, lte: -68 },
@@ -290,6 +295,9 @@ export class CourierAgenciesService {
       where: {
         courier,
         activo: true,
+        ...(courier === AgenciaCourierProveedor.SHALOM
+          ? { registrableDestino: true }
+          : {}),
         direccion: { not: null },
         latitud: { gte: -20, lte: 1 },
         longitud: { gte: -82, lte: -68 },
@@ -397,6 +405,12 @@ export class CourierAgenciesService {
       longitud: numeric(source.longitud),
       horario,
       servicios: compactJson({ aereo: boolean(source.ter_aereo) }),
+      // Solo se puede registrar una guia hacia agencias que existen en el
+      // catalogo PRO o que Shalom marca como destino. El resto son puntos
+      // internos (aeropuertos, almacenes) o registros incompletos.
+      registrableDestino:
+        isCatalogShalomAgency(string(source.ter_id)) ||
+        Number(source.destino) === 1,
       fuenteActualizadaAt: date(source.updated_at ?? source.synced_at),
       rawData: source as Prisma.InputJsonValue,
     };
@@ -420,6 +434,7 @@ export class CourierAgenciesService {
       longitud: numeric(geo.lng),
       horario: json(source.hours),
       servicios: json(source.services),
+      registrableDestino: true,
       fuenteActualizadaAt: date(source.synced_at),
       rawData: source as Prisma.InputJsonValue,
     };

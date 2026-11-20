@@ -2735,6 +2735,8 @@ model AgenciaCourier {
   horario         Json?
   servicios       Json?
   activo          Boolean                  @default(true)
+  /** Puede usarse como agencia de destino al registrar envios (Shalom). */
+  registrableDestino Boolean               @default(true) @map("registrable_destino")
   fuenteActualizadaAt DateTime?            @map("fuente_actualizada_at") @db.Timestamptz(6)
   sincronizadoAt  DateTime                 @default(now()) @map("sincronizado_at") @db.Timestamptz(6)
   rawData         Json                     @map("raw_data")

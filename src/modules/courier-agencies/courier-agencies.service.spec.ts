@@ -195,10 +195,49 @@ describe('CourierAgenciesService', () => {
     );
   });
 
+  it('marca como no registrable un punto sin definir y mantiene el resto', async () => {
+    mockFetch({
+      success: true,
+      data: [
+        {
+          ter_id: 747,
+          nombre:
+            'ANCASH / HUARAZ / INDEPENDENCIA / HUARAZ PALMIRA (POR DEFINIR)',
+          destino: 0,
+          origen: 0,
+          ubi_id: 20105,
+          latitud: '-9.50',
+          longitud: '-77.53',
+        },
+        {
+          ter_id: 727,
+          nombre: 'LIMA / LIMA / ATE / AV LOS VIRREYES - ATE',
+          destino: 1,
+          origen: 1,
+          ubi_id: 150103,
+          latitud: '-12.03',
+          longitud: '-76.92',
+        },
+      ],
+    });
+
+    await service.sync(AgenciaCourierProveedor.SHALOM);
+
+    const calls = prisma.agenciaCourier.upsert.mock.calls.map(
+      (call) => call[0] as { create: { externalId: string; registrableDestino: boolean } },
+    );
+    const porDefinir = calls.find((call) => call.create.externalId === '747');
+    const destinoHabilitado = calls.find(
+      (call) => call.create.externalId === '727',
+    );
+
+    expect(porDefinir?.create.registrableDestino).toBe(false);
+    expect(destinoHabilitado?.create.registrableDestino).toBe(true);
+  });
+
   function mockFetch(payload: unknown): jest.SpiedFunction<typeof fetch> {
     return jest.spyOn(global, 'fetch').mockResolvedValue(response(payload));
-  }
-  function response(payload: unknown) {
+  }  function response(payload: unknown) {
     return new Response(JSON.stringify(payload), { status: 200 });
   }
   function olvaAgency(id: string) {

@@ -5,7 +5,11 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, VentaEnvioEstadoLogistico } from '@prisma/client';
+import {
+  AgenciaCourierProveedor,
+  Prisma,
+  VentaEnvioEstadoLogistico,
+} from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -13,7 +17,7 @@ import {
   resolvePersonNameParts,
 } from '../../common/person-name';
 import { SalesService } from '../sales/sales.service';
-import { resolveShalomAgencyName } from './shalom-agency';
+import { resolveShalomAgencyName, isPlaceholderAgency } from './shalom-agency';
 import {
   ShalomApiClientService,
   ShalomApiError,
@@ -144,6 +148,28 @@ export class ShalomRegistrationService {
     if (!destinationAgency) {
       throw new BadRequestException(
         'El envio no tiene una agencia de destino de Shalom valida',
+      );
+    }
+
+    // Solo se puede registrar hacia agencias que existen en el formulario de
+    // Shalom: las "(POR DEFINIR)" o los puntos internos (aeropuertos,
+    // almacenes, pruebas) nunca aparecen en el combo.
+    const destinationRecord = envio.agenciaExternalId
+      ? await this.prisma.agenciaCourier.findFirst({
+          where: {
+            courier: AgenciaCourierProveedor.SHALOM,
+            externalId: envio.agenciaExternalId,
+          },
+          select: { registrableDestino: true },
+        })
+      : null;
+
+    if (
+      isPlaceholderAgency(envio.agenciaNombre) ||
+      destinationRecord?.registrableDestino === false
+    ) {
+      throw new BadRequestException(
+        `La agencia "${destinationAgency}" no esta habilitada para registrar guias en Shalom. Elige otra agencia de destino.`,
       );
     }
 

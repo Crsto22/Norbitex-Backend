@@ -134,6 +134,10 @@ Reglas:
 - La agencia de **destino** se toma de `venta_envio.agencia_nombre`.
 - Si el nombre trae el sufijo `(POR DEFINIR)` (agencias incompletas del directorio de Shalom),
   se limpia antes de buscar en el combo: `HUARAZ PALMIRA (POR DEFINIR)` → `HUARAZ PALMIRA`.
+- Solo se puede registrar hacia agencias **registrables**: las que existen en el catálogo PRO o
+  que Shalom marca como destino (`destino = 1`). El selector de agencias oculta el resto
+  (54 de 570: puntos internos, aeropuertos, almacenes y registros `(POR DEFINIR)`).
+  Si el envío apunta a una de ellas, el registro responde de inmediato con un error claro.
 - `externalRef` = `venta_envio.codigo_publico` (idempotencia: reintentar no duplica la guía).
 - Idempotency-Key enviada al microservicio: `envio:<codigo_publico>`.
 - Si el job falla, el mensaje queda en `venta_envio.shalom_error`.
