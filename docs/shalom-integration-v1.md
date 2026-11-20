@@ -47,6 +47,7 @@ Con la cuenta conectada, cada envío por Shalom muestra el botón **Registrar en
 | Método | Ruta | Uso |
 | --- | --- | --- |
 | `POST` | `/sales/:publicId/shalom-register` | encola el registro (job asíncrono) |
+| `POST` | `/sales/shalom-register-bulk` | registro masivo (máx. 50, máx. 10 por destinatario) |
 | `GET` | `/sales/:publicId/shalom` | estado del registro |
 | `POST` | `/sales/:publicId/shalom-sync` | sincroniza el resultado del job (fallback del webhook) |
 | `POST` | `/sales/:publicId/shalom-track` | rastreo manual: consulta el estado actual en Shalom (cooldown 60 s) |
@@ -56,9 +57,18 @@ Requisitos: cuenta `ACTIVE`, envío `recibido`, agencia destino válida y agenci
 configurada en **Configuración → Shalom PRO** (`empresa_shalom_export_config.origen`). El modal
 permite cambiar el origen para un envío puntual sin sobrescribir la configuración.
 
-Al confirmarse la orden, el envío se **despacha automáticamente**: se crea una `VentaEntrega`
-tipo COURIER con `numeroConstancia = orden`, se incrementa `cantidadEntregada` y el envío pasa a
-`EN_TRANSITO`. El registro es uno por venta (una guía por envío).
+El registro es uno por venta (una guía por envío). El **despacho automático** se dispara cuando
+Shalom reporta `EN_ORIGEN` (recepción en agencia), no al crear la guía.
+
+### Registro masivo
+
+`POST /sales/shalom-register-bulk` con `{ publicIds[], securityKey, packageType? }`.
+
+- Máximo **50 envíos** por lote y máximo **10 por destinatario** (mismo documento).
+- **Una sola clave de retiro** para todo el lote (4 dígitos, sin consecutivos ni repetidos).
+- Responde `results[]` por envío (`ok`, `jobId`, `error`, `alreadyRegistered`) y `totals`.
+- Cada envío se encola como el registro individual; la cola procesa **uno por uno por empresa**
+  (~1-2 min cada uno), por lo que un lote de 50 puede tardar 50-90 min.
 
 ## Rastreo del estado
 

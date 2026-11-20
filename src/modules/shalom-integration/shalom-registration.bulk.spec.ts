@@ -48,6 +48,25 @@ describe('ShalomRegistrationService.registerBulk', () => {
     );
   });
 
+  it('permite exactamente 10 envios del mismo destinatario', async () => {
+    const envios = Array.from({ length: 10 }, (_, index) => ({
+      publicId: `p${index}`,
+      dni: '12345678',
+    }));
+    const { service } = build(envios);
+    jest
+      .spyOn(service, 'register')
+      .mockResolvedValue({ alreadyRegistered: false, jobId: 'job', status: 'QUEUED' } as never);
+
+    const result = await service.registerBulk(1n, {
+      publicIds: envios.map((envio) => envio.publicId),
+      securityKey: '1962',
+    });
+
+    expect(result.totals).toEqual({ ok: 10, failed: 0, total: 10 });
+    expect(service.register).toHaveBeenCalledTimes(10);
+  });
+
   it('devuelve el resultado por envio sin abortar el lote', async () => {
     const { service } = build([
       { publicId: 'a', dni: '11111111' },
